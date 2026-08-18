@@ -1,0 +1,36 @@
+name: Architecture decision
+description: A choice that will constrain future work
+labels: ["adr"]
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: The forces at play. What makes this a real decision rather than an obvious one?
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: Options under consideration
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: criteria
+    attributes:
+      label: Decision criteria
+      description: What are the options being judged on? Decide this before comparing them.
+    validations:
+      required: true
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Constraints this must respect
+      options:
+        - label: Survives a full cluster teardown and rebuild (ADR-0002)
+        - label: Requires no manual configuration step
+        - label: Costs nothing while the cluster is idle
