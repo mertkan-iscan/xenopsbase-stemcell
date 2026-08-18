@@ -19,6 +19,8 @@ Planning board: [XenOpsBase Stemcell (project #5)](https://github.com/users/mert
 | Documents | Hetzner Object Storage (S3-compatible), S3 API only |
 | Observability | Self-hosted Grafana LGTM (Loki, Grafana, Tempo, Prometheus) + OpenTelemetry |
 | Identity | Keycloak, realm defined declaratively in git |
+| GitOps | Argo CD, app-of-apps, bootstrapped by Terraform |
+| Secrets | SOPS with age, encrypted in git, one bootstrap key per environment |
 | Budget | Near zero when idle — the cluster is torn down and rebuilt on demand |
 
 ## The constraint that drives the design
@@ -68,6 +70,8 @@ reproduces from nothing.
 - [Architecture decision records](docs/adr/README.md) — what was decided and why
   - [ADR-0001](docs/adr/0001-service-topology.md) — gateway plus one core service
   - [ADR-0002](docs/adr/0002-ephemeral-cluster-and-durable-state.md) — the durable-state boundary
+  - [ADR-0003](docs/adr/0003-secrets-management.md) — SOPS and age, one bootstrap secret
+  - [ADR-0004](docs/adr/0004-gitops-engine.md) — Argo CD, app-of-apps
 - [CONTRIBUTING.md](CONTRIBUTING.md) — branching, commits, and the no-manual-configuration rule
 
 ## Prior art
