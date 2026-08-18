@@ -8,68 +8,28 @@ Losing state does not lose the infrastructure. It loses the *record* of it — l
 servers, volumes and load balancers running with nothing tracking them, and no `terraform destroy`
 able to clean them up.
 
-## The chicken-and-egg problem
+**State lives in Cloudflare R2. Everything else lives in Hetzner.** See
+[ADR-0005](../adr/0005-terraform-state-backend.md) for why, and what it cost.
 
-Terraform cannot create the bucket that holds its own state. Two bad answers and the one used here:
+## Two S3 services, two credential sets
 
-| Approach | Why not |
-|---|---|
-| A second Terraform config with local state | The local state file becomes durable state on one laptop — precisely what ADR-0002 forbids. Lose the laptop, lose the ability to manage the bucket. |
-| Create the bucket by hand in the console | Violates the no-manual-configuration rule, and nothing records how it was configured. Versioning gets forgotten, and nobody notices until a bad write. |
-| **An idempotent script, version-controlled** | The script *is* the record. Re-runnable, reviewable, and it verifies versioning rather than assuming it. |
+This is the part that catches people. The storage module talks to both at once:
 
-`infra/scripts/bootstrap-state-bucket.sh` is that script. It is the only step in the whole system
-that runs before Terraform, and it is deliberately tiny.
+| | Endpoint | Credentials | Holds |
+|---|---|---|---|
+| **R2** | `https://<account_id>.r2.cloudflarestorage.com` | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Terraform state |
+| **Hetzner** | `https://fsn1.your-objectstorage.com` | `TF_VAR_hetzner_s3_access_key` / `..._secret_key` | documents, backups, Loki chunks |
 
-## Prerequisites
+The Terraform S3 backend can only read the standard `AWS_*` names — it has no way to read a
+`TF_VAR_` — so those belong to R2, and Hetzner takes the explicit ones. Swapping them produces an
+`InvalidAccessKeyId` that looks like a wrong key rather than a wrong *service*.
 
-| Tool | Needed for | Notes |
-|---|---|---|
-| Terraform ≥ 1.10 | Everything | `use_lockfile` landed in 1.10. Verified against 1.14.8 |
-| aws CLI | Bucket bootstrap | Speaks S3 to any compatible endpoint; no AWS account involved |
-| GNU make | The `make` targets | On Windows: `scoop install main/make`, and run the targets from Git Bash |
-| bash | Both scripts | Git Bash on Windows |
+## Why state is not in Hetzner
 
-The scripts are plain bash and can be run directly if you would rather not install make:
+Terraform's S3-native locking writes a `.tflock` object with a conditional `PutObject` carrying
+`If-None-Match`. A second writer should receive HTTP 412.
 
-```bash
-bash infra/scripts/bootstrap-state-bucket.sh xenopsbase-tfstate fsn1
-bash infra/scripts/verify-state-locking.sh infra/terraform/storage/backend.hcl
-```
-
-## First-time setup
-
-```bash
-export AWS_ACCESS_KEY_ID=...       # Hetzner Console -> Object Storage -> Credentials
-export AWS_SECRET_ACCESS_KEY=...
-```
-
-```bash
-make bootstrap-state BUCKET=xenopsbase-tfstate REGION=fsn1
-```
-
-```bash
-cp infra/terraform/storage/backend.hcl.example infra/terraform/storage/backend.hcl
-```
-
-Edit `backend.hcl`, then:
-
-```bash
-make init
-```
-
-```bash
-make verify-locking
-```
-
-**Do not skip the last step.** Reasoning below.
-
-## ⚠️ Locking does not work on Hetzner
-
-**Verified 2026-08-19. State locking currently provides no protection.**
-
-Hetzner Object Storage silently ignores the `If-None-Match` header, so the conditional `PutObject`
-that implements `use_lockfile` degrades to an ordinary overwrite. Confirmed at two levels:
+**Hetzner does not implement conditional writes.** Verified 2026-08-19:
 
 ```
 verify-state-locking.sh
@@ -83,48 +43,72 @@ aws s3api put-object --if-none-match "*" --key <same key>   # twice
   PUT #2 -> 200 OK, overwrote  (real S3 returns 412 PreconditionFailed)
 ```
 
-The second test isolates the primitive: this is not a Terraform bug or a misconfiguration, it is
-Hetzner not implementing conditional writes.
+The second test isolates the primitive — not a Terraform bug, not a misconfiguration.
 
-**Until this is resolved, run applies from exactly one place at a time.** Two concurrent applies
-will both believe they hold the lock, both write state, and neither will report anything wrong.
-The corruption is discovered later, by something else failing.
+Locking there **failed open**: two concurrent applies would both believe they held the lock, both
+write, and neither report anything. That is a live risk in this design, because T-7.3's nightly
+rebuild drill is an automated second writer.
 
-Note the nightly rebuild drill (T-7.3) is an automated second writer, so this is a live risk in the
-intended design rather than a theoretical one.
+### What the move cost
 
-Tracked in the decision issue for choosing a fix. Options are a state backend that honours
-conditional writes, or serializing every apply through a single CI job.
+R2 does not support bucket versioning. The trade is explicit:
 
-## Why locking had to be proven, not assumed
+| | Hetzner | R2 |
+|---|---|---|
+| State locking | ✗ | ✓ |
+| Bucket versioning | ✓ | ✗ |
 
-Terraform's S3-native locking writes a `.tflock` object using a conditional `PutObject` carrying
-`If-None-Match`. A second writer should receive HTTP 412 and refuse to proceed.
+Locking **prevents** the most likely corruption; versioning **recovers** from any bad write.
+Prevention won because the prevented failure is the one this design provokes. The gap is real, and
+the compensating control — a scheduled copy of state into the versioned Hetzner bucket — is tracked
+separately. **Until it exists, a bad state write is not recoverable.**
 
-Hetzner's [supported-actions documentation](https://docs.hetzner.com/storage/object-storage/supported-actions/)
-does not state whether conditional requests are honoured. Versioning and object lock are
-documented; conditional writes are not mentioned in either direction.
+## Prerequisites
 
-If they are not honoured, the conditional PUT silently degrades to an ordinary PUT. Both applies
-"acquire" the lock. Both write state. Neither reports an error.
+| Tool | Needed for | Notes |
+|---|---|---|
+| Terraform ≥ 1.10 | Everything | `use_lockfile` landed in 1.10. Verified against 1.14.8 |
+| aws CLI | Bucket bootstrap | Speaks S3 to any compatible endpoint |
+| GNU make | The `make` targets | On Windows: `scoop install main/make`, run from Git Bash |
+| bash | Both scripts | Git Bash on Windows |
 
-**Locking fails open.** There is no error message to notice and no partial failure to investigate —
-just two runs that each believe they hold exclusive access. That is why it is verified explicitly
-rather than trusted, and re-verified after any Terraform upgrade or endpoint change.
+## Cloudflare setup, once
 
-`make verify-locking` holds a real lock with a slow apply and asserts a concurrent operation is
-refused, against a throwaway state key that never touches real state.
+1. A Cloudflare account, then **R2** in the dashboard. Enabling R2 may require a payment method
+   even on the free tier; usage at this volume stays inside it.
+2. Note your **account ID**, shown in the R2 section. It forms the endpoint hostname.
+3. **R2** → **API** → **Manage API tokens** → create a token with **Object Read & Write**. It
+   yields an access key ID and a secret access key. The secret is shown once.
 
-### If verification fails
+## First-time setup
 
-Do not run applies from more than one place. Then pick one:
+```bash
+export AWS_ACCESS_KEY_ID=<r2 access key>  AWS_SECRET_ACCESS_KEY=<r2 secret>
+```
 
-- **Serialize applies through a single CI job** with concurrency limited to one. Removes the race
-  without changing storage, at the cost of no longer being able to apply from a laptop.
-- **Move state to a provider with proven conditional-write support.** Costs a little money and some
-  of the single-provider simplicity.
+```bash
+bash infra/scripts/bootstrap-state-bucket.sh xenopsbase-tfstate https://<account_id>.r2.cloudflarestorage.com auto
+```
 
-Either way it needs an ADR, because it changes the durable-state story.
+It will report that versioning is unavailable. That is expected on R2 and is not fatal — see above.
+
+```bash
+cp infra/terraform/storage/backend.hcl.example infra/terraform/storage/backend.hcl
+```
+
+Set the endpoint in it, then:
+
+```bash
+cd infra/terraform/storage && terraform init -backend-config=backend.hcl
+```
+
+```bash
+bash infra/scripts/verify-state-locking.sh infra/terraform/storage/backend.hcl
+```
+
+**Do not skip that last step**, and do not trust Cloudflare's documentation in place of it. Hetzner
+documented nothing and turned out not to work; R2 documents support, which is evidence but not
+proof. The script is the proof.
 
 ## Backend flags, and why each is present
 
@@ -133,32 +117,24 @@ Either way it needs an ADR, because it changes the durable-state story.
 | `skip_credentials_validation` | STS does not exist outside AWS |
 | `skip_requesting_account_id` | No AWS account to resolve |
 | `skip_metadata_api_check` | No EC2 instance metadata endpoint |
-| `skip_region_validation` | `fsn1` is not an AWS region name |
-| `skip_s3_checksum` | Hetzner does not implement the extra checksum headers Terraform sends by default. Applies to the lock object as well as the state object |
-| `use_path_style` | Path-style addressing, which avoids bucket-name-in-hostname problems |
-| `use_lockfile` | S3-native locking, no DynamoDB. Unproven until verified — see above |
+| `skip_region_validation` | R2 uses the literal `auto`, not an AWS region |
+| `skip_s3_checksum` | Extra checksum headers Terraform sends by default are not implemented |
+| `use_path_style` | Path-style addressing, avoiding bucket-name-in-hostname problems |
+| `use_lockfile` | S3-native locking. Works on R2; did nothing on Hetzner |
 
 ## Recovery
 
 ### State is corrupted or truncated
 
-Versioning is enabled on the bucket, which is what makes this recoverable at all.
+**There is currently no rollback.** R2 has no version history, and the scheduled copy into the
+versioned Hetzner bucket does not exist yet.
 
-```bash
-aws --endpoint-url https://fsn1.your-objectstorage.com --region fsn1 \
-  s3api list-object-versions --bucket xenopsbase-tfstate --prefix dev/terraform.tfstate
-```
+If it happens before that lands: reconstruct with `terraform import` for each resource, or destroy
+through the provider consoles and rebuild. Check for orphaned volumes and load balancers
+afterwards, since those bill independently.
 
-Identify the last good `VersionId` by `LastModified`, then:
-
-```bash
-aws --endpoint-url https://fsn1.your-objectstorage.com --region fsn1 \
-  s3api get-object --bucket xenopsbase-tfstate \
-  --key dev/terraform.tfstate --version-id <VersionId> recovered.tfstate
-```
-
-Inspect `recovered.tfstate` before pushing it. Then `terraform state push recovered.tfstate`,
-and immediately `terraform plan` — an empty diff means the recovery was clean.
+Once the scheduled copy exists, restore from the Hetzner `tfstate` bucket's version history, verify
+with `terraform plan`, and push with `terraform state push`.
 
 ### A lock is stuck after a crashed run
 
@@ -169,23 +145,25 @@ terraform force-unlock <LOCK_ID>
 ```
 
 Confirm no apply is genuinely still running first. Force-unlocking a live apply produces exactly
-the concurrent-write corruption the lock exists to prevent.
+the concurrent-write corruption the lock exists to prevent — and now that locking actually works,
+this is the main way to defeat it.
 
 ### State is lost entirely
 
-Infrastructure keeps running; Terraform simply no longer knows about it. Either `terraform import`
-each resource, or destroy everything through the Hetzner console and rebuild. In the ephemeral
-model the second option is usually faster and is already exercised — but check for orphaned volumes
-and load balancers afterwards, since those bill independently of the servers.
+Infrastructure keeps running; Terraform no longer knows about it. Either `terraform import` each
+resource, or destroy everything through the console and rebuild. In the ephemeral model the second
+is usually faster and already exercised — but check for orphaned volumes and load balancers, which
+bill independently of servers.
 
 ## Conventions
 
-- **One state key per environment.** `dev/terraform.tfstate`, `staging/…`, `prod/…`. The lock is
-  per state object, so a shared key means a dev apply blocks a prod apply.
-- **Storage and cluster are separate root modules with separate state.** `storage/terraform.tfstate`
-  is not per-environment: there is one set of durable buckets, outliving every cluster. The split
-  exists so that `make down` — which destroys the cluster routinely — cannot reach the buckets. See
-  [object storage](object-storage.md).
-- **Credentials only from the environment.** Never in `backend.hcl`, which is gitignored anyway,
-  and never in a `.tf` file. This repository is public.
-- **`.terraform.lock.hcl` is committed.** Provider versions must be identical across a rebuild.
+- **One state key per environment.** `dev/cluster.tfstate`, `staging/…`, `prod/…`. The lock is per
+  state object, so a shared key means a dev apply blocks a prod apply.
+- **Storage and cluster are separate root modules with separate state.**
+  `storage/terraform.tfstate` is not per-environment: there is one set of durable buckets,
+  outliving every cluster. The split exists so that `make down` — which destroys the cluster
+  routinely — cannot reach the buckets. See [object storage](object-storage.md).
+- **Credentials only from the environment.** Never in `backend.hcl` or a `.tf` file. This
+  repository is public.
+- **`.terraform.lock.hcl` is committed**, generated for linux, darwin and windows. A
+  single-platform lock fails CI on Linux.

@@ -9,8 +9,11 @@ STORAGE_DIR := infra/terraform/storage
 CLUSTER_DIR := infra/terraform/cluster
 SCRIPTS     := infra/scripts
 
-BUCKET ?= xenopsbase-tfstate
-REGION ?= fsn1
+# State lives in Cloudflare R2, not Hetzner (ADR-0005). Set R2_ENDPOINT to
+# https://<account_id>.r2.cloudflarestorage.com
+BUCKET      ?= xenopsbase-tfstate
+R2_ENDPOINT ?=
+R2_REGION   ?= auto
 
 .PHONY: help
 help: ## Show this help
@@ -19,7 +22,7 @@ help: ## Show this help
 	@echo
 	@echo "  First time through, in order:"
 	@echo "    1. export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=..."
-	@echo "    2. make bootstrap-state"
+	@echo "    2. make bootstrap-state R2_ENDPOINT=https://<account_id>.r2.cloudflarestorage.com"
 	@echo "    3. cp $(STORAGE_DIR)/backend.hcl.example $(STORAGE_DIR)/backend.hcl   # edit"
 	@echo "    4. cp $(STORAGE_DIR)/terraform.tfvars.example $(STORAGE_DIR)/terraform.tfvars   # edit"
 	@echo "    5. make storage-init && make storage-adopt-state && make storage-apply"
@@ -31,8 +34,9 @@ help: ## Show this help
 # ------------------------------------------------------------------------------
 
 .PHONY: bootstrap-state
-bootstrap-state: ## Create the Terraform state bucket (idempotent, runs before Terraform exists)
-	@bash $(SCRIPTS)/bootstrap-state-bucket.sh $(BUCKET) $(REGION)
+bootstrap-state: ## Create the Terraform state bucket in R2 (idempotent, runs before Terraform exists)
+	@test -n "$(R2_ENDPOINT)" || { echo "error: set R2_ENDPOINT=https://<account_id>.r2.cloudflarestorage.com"; exit 1; }
+	@bash $(SCRIPTS)/bootstrap-state-bucket.sh $(BUCKET) $(R2_ENDPOINT) $(R2_REGION)
 
 .PHONY: verify-locking
 verify-locking: ## Prove state locking actually refuses a concurrent operation

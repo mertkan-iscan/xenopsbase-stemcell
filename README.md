@@ -72,6 +72,7 @@ reproduces from nothing.
   - [ADR-0002](docs/adr/0002-ephemeral-cluster-and-durable-state.md) — the durable-state boundary
   - [ADR-0003](docs/adr/0003-secrets-management.md) — SOPS and age, one bootstrap secret
   - [ADR-0004](docs/adr/0004-gitops-engine.md) — Argo CD, app-of-apps
+  - [ADR-0005](docs/adr/0005-terraform-state-backend.md) — Terraform state in Cloudflare R2
 - [CONTRIBUTING.md](CONTRIBUTING.md) — branching, commits, and the no-manual-configuration rule
 - Runbooks
   - [Terraform state](docs/runbooks/terraform-state.md) — bootstrap, locking, recovery

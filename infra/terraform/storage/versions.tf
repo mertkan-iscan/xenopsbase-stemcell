@@ -36,32 +36,30 @@ terraform {
     skip_s3_checksum            = true
     use_path_style              = true
 
-    # ⚠️ THIS PROVIDES NO PROTECTION ON HETZNER. Verified 2026-08-19.
+    # State locking via conditional PutObject (If-None-Match).
     #
-    # use_lockfile locks by writing a .tflock object with a conditional
-    # PutObject (If-None-Match). Hetzner Object Storage silently IGNORES that
-    # header: a second conditional PUT to an existing key returns 200 and
-    # overwrites, where real S3 returns 412 PreconditionFailed.
+    # This is the reason state lives in R2 rather than Hetzner (ADR-0005).
+    # Hetzner silently ignores the header, so the lock degraded to an ordinary
+    # overwrite and protected nothing. R2 implements it.
     #
-    # Reproduced at both levels:
-    #   - verify-state-locking.sh: a concurrent plan acquired the lock and
-    #     exited 0 while an apply was holding it
-    #   - aws s3api put-object --if-none-match "*" twice to the same key:
-    #     both succeeded, the second overwrote the first
-    #
-    # Left true because it is harmless and becomes correct the moment state
-    # moves to a backend that honours the header. Today it is decoration.
-    # Concurrent applies WILL corrupt state, with no error at the time.
-    # See docs/runbooks/terraform-state.md.
+    # Verify with verify-state-locking.sh after any backend change. Documented
+    # support is not evidence — that assumption is what ADR-0005 exists to
+    # correct.
     use_lockfile = true
   }
 }
 
+# This provider talks to HETZNER, not to R2 and not to AWS.
+#
+# The backend above writes state to R2 while this provider manages buckets on
+# Hetzner, so two different S3 services are in play at once. Both would default
+# to AWS_ACCESS_KEY_ID, so they are separated explicitly: the standard AWS names
+# belong to R2 (the backend cannot read a TF_VAR), and Hetzner takes these.
 provider "aws" {
-  region = var.region
+  region     = var.region
+  access_key = var.hetzner_s3_access_key
+  secret_key = var.hetzner_s3_secret_key
 
-  # Credentials come from AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY in the
-  # environment. Never from a file: this repository is public.
   skip_credentials_validation = true
   skip_region_validation      = true
   skip_requesting_account_id  = true

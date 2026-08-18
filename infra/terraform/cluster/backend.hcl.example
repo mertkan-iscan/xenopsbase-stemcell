@@ -3,10 +3,11 @@
 #   cp backend.hcl.example backend.hcl
 #   terraform init -backend-config=backend.hcl
 #
-# Nothing secret belongs in this file. Credentials come from the environment:
+# ⚠️ This points at CLOUDFLARE R2, not Hetzner. See ADR-0005.
 #
-#   export AWS_ACCESS_KEY_ID=<hetzner object storage access key>
-#   export AWS_SECRET_ACCESS_KEY=<hetzner object storage secret key>
+# Credentials for this backend are the R2 ones:
+#   export AWS_ACCESS_KEY_ID=<r2 access key id>
+#   export AWS_SECRET_ACCESS_KEY=<r2 secret access key>
 
 bucket = "xenopsbase-tfstate"
 
@@ -18,10 +19,9 @@ bucket = "xenopsbase-tfstate"
 # destroy that `make down` runs against this one.
 key = "dev/cluster.tfstate"
 
-# Hetzner uses the datacenter location as the region name.
-# One of: fsn1 (Falkenstein), nbg1 (Nuremberg), hel1 (Helsinki).
-region = "fsn1"
+# R2 has no regions. "auto" is the required literal.
+region = "auto"
 
 endpoints = {
-  s3 = "https://fsn1.your-objectstorage.com"
+  s3 = "https://<account_id>.r2.cloudflarestorage.com"
 }
