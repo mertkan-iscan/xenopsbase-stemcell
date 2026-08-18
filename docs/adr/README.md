@@ -54,3 +54,5 @@ than a clean file that hides the fact a mistake was ever made.
 |---|---|---|
 | [0001](0001-service-topology.md) | Gateway plus one core service | Accepted |
 | [0002](0002-ephemeral-cluster-and-durable-state.md) | Ephemeral cluster and the durable-state boundary | Accepted |
+| [0003](0003-secrets-management.md) | Secrets encrypted in git with SOPS and age | Accepted |
+| [0004](0004-gitops-engine.md) | Argo CD reconciles the cluster from git | Accepted |
