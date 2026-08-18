@@ -70,9 +70,9 @@ echo "    versioning Enabled"
 
 echo
 echo "Bucket ready. Next:"
-echo "  cd infra/terraform"
-echo "  cp backend.hcl.example backend.hcl   # set bucket=$BUCKET region=$REGION"
-echo "  terraform init -backend-config=backend.hcl"
+echo "  cp infra/terraform/storage/backend.hcl.example infra/terraform/storage/backend.hcl"
+echo "    then set bucket=$BUCKET and region=$REGION in it"
+echo "  cd infra/terraform/storage && terraform init -backend-config=backend.hcl"
 echo
 echo "Then prove locking actually works before trusting it:"
-echo "  make verify-locking"
+echo "  bash infra/scripts/verify-state-locking.sh infra/terraform/storage/backend.hcl"

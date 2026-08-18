@@ -41,10 +41,12 @@ terraform {
 
     use_path_style = true
 
-    # Locking via conditional PutObject (If-None-Match). Hetzner does not
-    # document conditional-request support, so this is UNPROVEN until
-    # `make verify-locking` passes. It fails open: if the header is ignored,
-    # concurrent applies both succeed and corrupt state silently.
+    # ⚠️ THIS PROVIDES NO PROTECTION ON HETZNER. Verified 2026-08-19.
+    # Hetzner Object Storage silently ignores If-None-Match, so the conditional
+    # PutObject that implements this lock degrades to an ordinary overwrite.
+    # Concurrent applies WILL corrupt state, with no error at the time.
+    # Full evidence in infra/terraform/storage/versions.tf and
+    # docs/runbooks/terraform-state.md.
     use_lockfile = true
   }
 }

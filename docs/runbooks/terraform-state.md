@@ -64,7 +64,39 @@ make verify-locking
 
 **Do not skip the last step.** Reasoning below.
 
-## Why locking has to be proven, not assumed
+## ⚠️ Locking does not work on Hetzner
+
+**Verified 2026-08-19. State locking currently provides no protection.**
+
+Hetzner Object Storage silently ignores the `If-None-Match` header, so the conditional `PutObject`
+that implements `use_lockfile` degrades to an ordinary overwrite. Confirmed at two levels:
+
+```
+verify-state-locking.sh
+  holder:    apply holding the lock for 45s
+  contender: plan against the same state -> exit code 0   (expected: refused)
+```
+
+```
+aws s3api put-object --if-none-match "*" --key <same key>   # twice
+  PUT #1 -> 200 OK
+  PUT #2 -> 200 OK, overwrote  (real S3 returns 412 PreconditionFailed)
+```
+
+The second test isolates the primitive: this is not a Terraform bug or a misconfiguration, it is
+Hetzner not implementing conditional writes.
+
+**Until this is resolved, run applies from exactly one place at a time.** Two concurrent applies
+will both believe they hold the lock, both write state, and neither will report anything wrong.
+The corruption is discovered later, by something else failing.
+
+Note the nightly rebuild drill (T-7.3) is an automated second writer, so this is a live risk in the
+intended design rather than a theoretical one.
+
+Tracked in the decision issue for choosing a fix. Options are a state backend that honours
+conditional writes, or serializing every apply through a single CI job.
+
+## Why locking had to be proven, not assumed
 
 Terraform's S3-native locking writes a `.tflock` object using a conditional `PutObject` carrying
 `If-None-Match`. A second writer should receive HTTP 412 and refuse to proceed.
