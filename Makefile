@@ -65,6 +65,36 @@ storage-apply: ## Apply changes to the durable buckets
 # editing Terraform by hand and meaning it.
 
 # ------------------------------------------------------------------------------
+# Cluster (ephemeral)
+# ------------------------------------------------------------------------------
+
+.PHONY: snapshot
+snapshot: ## Build the OS snapshot kube-hetzner provisions nodes from (once per project)
+	@bash $(SCRIPTS)/build-snapshot.sh
+
+.PHONY: cluster-init
+cluster-init: ## terraform init for the cluster module
+	@cd $(CLUSTER_DIR) && terraform init -input=false -backend-config=backend.hcl
+
+.PHONY: cluster-plan
+cluster-plan: ## Plan cluster changes
+	@cd $(CLUSTER_DIR) && terraform plan -input=false
+
+.PHONY: cluster-apply
+cluster-apply: ## Build or update the cluster
+	@cd $(CLUSTER_DIR) && terraform apply -input=false
+
+.PHONY: cluster-destroy
+cluster-destroy: ## Destroy the cluster. Does NOT touch the durable buckets or the OS snapshot
+	@cd $(CLUSTER_DIR) && terraform destroy -input=false
+
+.PHONY: kubeconfig
+kubeconfig: ## Write the kubeconfig out of Terraform state (gitignored)
+	@cd $(CLUSTER_DIR) && terraform output -raw kubeconfig > kubeconfig
+	@echo "wrote $(CLUSTER_DIR)/kubeconfig"
+	@echo "  export KUBECONFIG=\$$PWD/$(CLUSTER_DIR)/kubeconfig"
+
+# ------------------------------------------------------------------------------
 # Quality
 # ------------------------------------------------------------------------------
 

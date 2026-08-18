@@ -1,6 +1,24 @@
+# ==============================================================================
+# EPHEMERAL ROOT MODULE
+#
+# The K3s cluster. This is the cattle side of ADR-0002: built by `make up`,
+# destroyed by `make down`, and rebuilt from nothing as a routine operation.
+#
+# Nothing here is durable. Anything that must survive a destroy belongs in
+# infra/terraform/storage/, which has its own state and is deliberately out of
+# reach of this module's destroy.
+# ==============================================================================
+
 terraform {
   # use_lockfile (S3-native state locking, no DynamoDB) landed in 1.10.
   required_version = ">= 1.10.0"
+
+  required_providers {
+    hcloud = {
+      source  = "hetznercloud/hcloud"
+      version = ">= 1.51.0"
+    }
+  }
 
   # The backend is deliberately partial. Bucket, region and endpoint come from
   # backend.hcl so that the same code initializes against any environment:
@@ -29,4 +47,8 @@ terraform {
     # concurrent applies both succeed and corrupt state silently.
     use_lockfile = true
   }
+}
+
+provider "hcloud" {
+  token = var.hcloud_token
 }
