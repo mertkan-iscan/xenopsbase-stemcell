@@ -1,0 +1,10 @@
+# Every change needs a review from the repository owner.
+* @mertkan-iscan
+
+# Architecture decisions and the durable-state boundary are the load-bearing
+# documents of this project. Changes to them are never routine.
+/docs/adr/ @mertkan-iscan
+
+# Infrastructure changes can cost money or destroy data.
+/infra/ @mertkan-iscan
+/.github/workflows/ @mertkan-iscan

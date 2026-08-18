@@ -63,6 +63,13 @@ reproduces from nothing.
 | `E7-dr-ops` | Disaster recovery & operations |
 | `E8-security` | Security, cost & release |
 
+## Documentation
+
+- [Architecture decision records](docs/adr/README.md) — what was decided and why
+  - [ADR-0001](docs/adr/0001-service-topology.md) — gateway plus one core service
+  - [ADR-0002](docs/adr/0002-ephemeral-cluster-and-durable-state.md) — the durable-state boundary
+- [CONTRIBUTING.md](CONTRIBUTING.md) — branching, commits, and the no-manual-configuration rule
+
 ## Prior art
 
 Generalized from `mertkan-iscan/hedportal-terraform`, which runs the same shape in production.
