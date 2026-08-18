@@ -1,0 +1,23 @@
+# Copy to backend.hcl and fill in. backend.hcl is gitignored.
+#
+#   cp backend.hcl.example backend.hcl
+#   terraform init -backend-config=backend.hcl
+#
+# Nothing secret belongs in this file. Credentials come from the environment:
+#
+#   export AWS_ACCESS_KEY_ID=<hetzner object storage access key>
+#   export AWS_SECRET_ACCESS_KEY=<hetzner object storage secret key>
+
+bucket = "xenopsbase-tfstate"
+
+# One key per environment. Never share a key between environments: the lock is
+# per state object, so a shared key means dev applies block prod applies.
+key = "dev/terraform.tfstate"
+
+# Hetzner uses the datacenter location as the region name.
+# One of: fsn1 (Falkenstein), nbg1 (Nuremberg), hel1 (Helsinki).
+region = "fsn1"
+
+endpoints = {
+  s3 = "https://fsn1.your-objectstorage.com"
+}

@@ -1,0 +1,29 @@
+# Normalize line endings so a Windows checkout cannot commit CRLF into files
+# that run on Linux. A shell script with CRLF fails at the shebang with an
+# obscure "bad interpreter" error, on the runner rather than on the laptop.
+* text=auto eol=lf
+
+# Must be LF regardless of platform: these execute on Linux.
+*.sh      text eol=lf
+*.bash    text eol=lf
+Makefile  text eol=lf
+*.tf      text eol=lf
+*.hcl     text eol=lf
+*.yaml    text eol=lf
+*.yml     text eol=lf
+Dockerfile text eol=lf
+*.env     text eol=lf
+
+# Windows-only files keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary; never touch.
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.jar binary
+*.gz  binary
+*.zip binary
