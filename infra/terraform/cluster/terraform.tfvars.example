@@ -1,0 +1,70 @@
+# Copy to terraform.tfvars and adjust. terraform.tfvars is gitignored.
+#
+# The Hetzner API token is NOT set here. It is a credential, and this repository
+# is public. Supply it through the environment:
+#
+#   export TF_VAR_hcloud_token=<hetzner cloud api token>
+
+cluster_name = "xenopsbase"
+environment  = "dev"
+
+network_region = "eu-central"
+
+ssh_public_key_path  = "~/.ssh/id_ed25519.pub"
+ssh_private_key_path = "~/.ssh/id_ed25519"
+
+# ------------------------------------------------------------------------------
+# dev: cheapest cluster that works. One control plane node, no HA.
+#
+# That is the correct trade here, not a compromise: the cluster is destroyed
+# between working sessions, so an hour of downtime costs nothing because nobody
+# is using it. Paying for HA on something torn down nightly is paying for
+# availability that has no consumer.
+# ------------------------------------------------------------------------------
+control_plane_nodepools = [
+  {
+    name        = "control-plane"
+    server_type = "cx23"
+    location    = "fsn1"
+    count       = 1
+  }
+]
+
+agent_nodepools = [
+  {
+    name        = "worker"
+    server_type = "cx23"
+    location    = "fsn1"
+    count       = 2
+  }
+]
+
+# Empty until T-2.8, which sizes these against the load profile from T-5.6
+# rather than against a guess.
+autoscaler_nodepools = []
+
+# ------------------------------------------------------------------------------
+# prod would instead use:
+#
+# control_plane_nodepools = [
+#   {
+#     name        = "control-plane"
+#     server_type = "cx33"
+#     location    = "fsn1"
+#     count       = 3     # 3 is the smallest genuinely HA number. 2 is worse than 1.
+#   }
+# ]
+#
+# agent_nodepools = [
+#   { name = "worker", server_type = "cx43", location = "fsn1", count = 3 }
+# ]
+# ------------------------------------------------------------------------------
+
+cni_plugin = "flannel"
+
+# Both stay as-is. Argo CD owns everything above the cluster (ADR-0004);
+# T-2.2 installs ingress and cert-manager through GitOps.
+ingress_controller  = "none"
+enable_cert_manager = false
+
+load_balancer_type = "lb11"

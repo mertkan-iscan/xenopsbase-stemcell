@@ -12,7 +12,11 @@ bucket = "xenopsbase-tfstate"
 
 # One key per environment. Never share a key between environments: the lock is
 # per state object, so a shared key means dev applies block prod applies.
-key = "dev/terraform.tfstate"
+#
+# Note this is the CLUSTER state. The durable buckets live in a separate root
+# module under storage/terraform.tfstate, deliberately out of reach of the
+# destroy that `make down` runs against this one.
+key = "dev/cluster.tfstate"
 
 # Hetzner uses the datacenter location as the region name.
 # One of: fsn1 (Falkenstein), nbg1 (Nuremberg), hel1 (Helsinki).

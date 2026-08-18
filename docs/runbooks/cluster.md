@@ -1,0 +1,182 @@
+# Runbook: the K3s cluster
+
+The cluster is the cattle side of [ADR-0002](../adr/0002-ephemeral-cluster-and-durable-state.md).
+It is built by Terraform, destroyed routinely, and holds nothing worth keeping.
+
+Provisioned by [kube-hetzner](https://github.com/kube-hetzner/terraform-hcloud-kube-hetzner),
+pinned to **v3.1.0**.
+
+## What is durable here, and what is not
+
+Almost nothing in this module survives a destroy — that is the design. Two things do, and both are
+easy to forget:
+
+| Survives destroy | Why |
+|---|---|
+| **The OS snapshot** | Built by Packer, lives in the Hetzner project, never touched by Terraform |
+| **The SSH key pair** | Yours, on your machine. Lose it and you cannot reach nodes |
+
+The snapshot is the one addition this task makes to ADR-0002's durable list. It is the same
+category as a container image: built once, reused by every rebuild, and rebuilding it is the
+slowest single step in a genuinely cold start.
+
+## Prerequisites
+
+| Tool | For |
+|---|---|
+| Terraform ≥ 1.10 | Everything |
+| Packer | Building the OS snapshot, once per project |
+| hcloud CLI | Verifying the snapshot exists |
+| kubectl | Talking to the cluster afterwards |
+| An SSH key pair | Node access. `ssh-keygen -t ed25519` if you have none |
+
+```bash
+export HCLOUD_TOKEN=<hetzner cloud api token>     # for packer and the hcloud CLI
+export TF_VAR_hcloud_token="$HCLOUD_TOKEN"        # for terraform
+```
+
+## First time in a new Hetzner project
+
+```bash
+bash infra/scripts/build-snapshot.sh
+```
+
+Several minutes. It creates a temporary billable server and removes it when finished. Confirm:
+
+```bash
+hcloud image list --selector microos-snapshot=yes
+```
+
+**No snapshot means `terraform apply` fails before creating anything.** kube-hetzner does not
+install an operating system; it provisions every node from this image.
+
+## Building the cluster
+
+```bash
+cp infra/terraform/cluster/backend.hcl.example infra/terraform/cluster/backend.hcl
+cp infra/terraform/cluster/terraform.tfvars.example infra/terraform/cluster/terraform.tfvars
+```
+
+Edit both, then:
+
+```bash
+cd infra/terraform/cluster && terraform init -backend-config=backend.hcl && terraform apply
+```
+
+Then retrieve the kubeconfig — it is not written automatically, because a cluster-admin credential
+sitting next to the Terraform code is a credential that eventually gets committed:
+
+```bash
+terraform output -raw kubeconfig > kubeconfig    # gitignored
+export KUBECONFIG=$PWD/kubeconfig
+kubectl get nodes
+```
+
+## Verifying CCM and CSI
+
+The module installs both. CCM wires Hetzner load balancers to Kubernetes Services; CSI makes a PVC
+provision a real Hetzner volume. Neither is much use unverified:
+
+```bash
+kubectl -n kube-system get pods | grep -E 'hcloud|csi'
+```
+
+```bash
+kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: csi-smoke-test
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: hcloud-volumes
+  resources:
+    requests:
+      storage: 10Gi
+EOF
+```
+
+```bash
+kubectl get pvc csi-smoke-test -w
+```
+
+It must reach `Bound`, and a matching volume must appear in `hcloud volume list`. Stuck in
+`Pending` means CSI is not working, and Postgres (T-2.4) will fail the same way later but less
+obviously. Clean up:
+
+```bash
+kubectl delete pvc csi-smoke-test
+```
+
+Confirm the volume disappears from `hcloud volume list`. A volume that outlives its PVC bills
+indefinitely, and orphaned volumes are the most common way this design leaks money.
+
+## What this module deliberately does not install
+
+kube-hetzner can install an ingress controller, cert-manager, and etcd backups to S3. All three
+are off.
+
+**Ingress and cert-manager**: ADR-0004 makes Argo CD the single owner of everything above the
+cluster. Two systems installing ingress means drift with no clear owner, and Argo reverting a
+change kube-hetzner just made. T-2.2 installs both through GitOps.
+
+**etcd backup to S3**: the cluster holds nothing worth restoring. Postgres archives itself to
+object storage (T-2.4) and every manifest is in git. An etcd backup would restore a cluster we
+would rather rebuild, and would quietly become durable state ADR-0002 does not account for.
+
+## High availability
+
+The dev default is **one** control plane node. That is not an oversight: the cluster is destroyed
+between working sessions, so an hour of downtime costs nothing because nobody is using it. Paying
+for HA on something torn down nightly buys availability with no consumer.
+
+For anything real, set `count = 3`. **Never 2.** etcd needs a quorum of more than half, so a
+two-node cluster tolerates zero failures while costing twice as much — strictly worse than one
+node. The variable validation rejects even totals for this reason.
+
+```bash
+terraform output is_highly_available
+```
+
+## Upgrading the pinned module version
+
+The version is pinned exactly, because a floating version means a rebuild can differ from the last
+for reasons nobody chose — which breaks the central promise of ADR-0002.
+
+1. Read the [release notes](https://github.com/kube-hetzner/terraform-hcloud-kube-hetzner/releases)
+   between the current version and the target. Breaking changes are called out there.
+2. Bump `version` in `infra/terraform/cluster/main.tf`.
+3. Rebuild the snapshot with the matching version, since template and module are expected to match:
+   `bash infra/scripts/build-snapshot.sh <new-version>`
+4. `terraform plan` and read it properly. A node pool being **replaced** rather than updated means
+   every node is recreated.
+5. Apply in dev. Destroy and rebuild from nothing to confirm the cold path still works — that is
+   the path that matters, and the one an upgrade is most likely to break.
+6. Only then promote.
+
+Do this as its own change. An upgrade bundled with a feature makes a bisect impossible when a
+rebuild starts failing a week later.
+
+## Troubleshooting
+
+**`terraform apply` fails immediately with no snapshot found**
+The snapshot is missing or mislabelled. `hcloud image list --selector microos-snapshot=yes` must
+return a row. Rebuild it.
+
+**Nodes never become Ready**
+Almost always SSH. The module provisions over SSH, so `ssh_private_key_path` must match the public
+key, and the key must not have a passphrase Terraform cannot answer.
+
+**Apply hangs on node provisioning**
+Hetzner occasionally fails to allocate a server type in a location. Try another `server_type` or
+`location`. The module retries, so give it a few minutes before concluding it is stuck.
+
+**Destroy leaves resources behind**
+Check for orphaned volumes, load balancers and placement groups:
+
+```bash
+hcloud volume list && hcloud load-balancer list && hcloud placement-group list
+```
+
+These bill independently of servers. T-8.4 automates this check; until then it is worth running
+after any failed destroy.
