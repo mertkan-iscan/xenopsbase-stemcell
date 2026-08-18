@@ -1,0 +1,52 @@
+# This repository is public. Everything below either contains credentials or is
+# machine-local state that must never be committed.
+
+# --- secrets -----------------------------------------------------------------
+# age private keys. The one bootstrap secret from ADR-0003. Never in git.
+*.agekey
+key.txt
+keys.txt
+.env
+.env.*
+!.env.example
+
+# --- terraform ---------------------------------------------------------------
+.terraform/
+.terraform.tfstate.lock.info
+
+# State never lives in git; it lives in the versioned bucket (ADR-0002).
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Real backend and variable files. Only the .example versions are tracked.
+backend.hcl
+*.tfvars
+!*.tfvars.example
+!terraform.tfvars.example
+
+crash.log
+crash.*.log
+
+# .terraform.lock.hcl IS committed on purpose: provider versions must be
+# reproducible across a rebuild.
+
+# --- kubernetes --------------------------------------------------------------
+kubeconfig
+kubeconfig.yaml
+*.kubeconfig
+
+# --- build and tooling -------------------------------------------------------
+target/
+build/
+node_modules/
+*.class
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db

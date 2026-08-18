@@ -73,6 +73,8 @@ reproduces from nothing.
   - [ADR-0003](docs/adr/0003-secrets-management.md) — SOPS and age, one bootstrap secret
   - [ADR-0004](docs/adr/0004-gitops-engine.md) — Argo CD, app-of-apps
 - [CONTRIBUTING.md](CONTRIBUTING.md) — branching, commits, and the no-manual-configuration rule
+- Runbooks
+  - [Terraform state](docs/runbooks/terraform-state.md) — bootstrap, locking, recovery
 
 ## Prior art
 
