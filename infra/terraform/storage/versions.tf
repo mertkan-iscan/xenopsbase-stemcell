@@ -35,7 +35,25 @@ terraform {
     skip_region_validation      = true
     skip_s3_checksum            = true
     use_path_style              = true
-    use_lockfile                = true
+
+    # ⚠️ THIS PROVIDES NO PROTECTION ON HETZNER. Verified 2026-08-19.
+    #
+    # use_lockfile locks by writing a .tflock object with a conditional
+    # PutObject (If-None-Match). Hetzner Object Storage silently IGNORES that
+    # header: a second conditional PUT to an existing key returns 200 and
+    # overwrites, where real S3 returns 412 PreconditionFailed.
+    #
+    # Reproduced at both levels:
+    #   - verify-state-locking.sh: a concurrent plan acquired the lock and
+    #     exited 0 while an apply was holding it
+    #   - aws s3api put-object --if-none-match "*" twice to the same key:
+    #     both succeeded, the second overwrote the first
+    #
+    # Left true because it is harmless and becomes correct the moment state
+    # moves to a backend that honours the header. Today it is decoration.
+    # Concurrent applies WILL corrupt state, with no error at the time.
+    # See docs/runbooks/terraform-state.md.
+    use_lockfile = true
   }
 }
 
