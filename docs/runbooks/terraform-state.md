@@ -34,7 +34,7 @@ The scripts are plain bash and can be run directly if you would rather not insta
 
 ```bash
 bash infra/scripts/bootstrap-state-bucket.sh xenopsbase-tfstate fsn1
-bash infra/scripts/verify-state-locking.sh infra/terraform/backend.hcl
+bash infra/scripts/verify-state-locking.sh infra/terraform/storage/backend.hcl
 ```
 
 ## First-time setup
@@ -49,7 +49,7 @@ make bootstrap-state BUCKET=xenopsbase-tfstate REGION=fsn1
 ```
 
 ```bash
-cp infra/terraform/backend.hcl.example infra/terraform/backend.hcl
+cp infra/terraform/storage/backend.hcl.example infra/terraform/storage/backend.hcl
 ```
 
 Edit `backend.hcl`, then:
@@ -150,6 +150,10 @@ and load balancers afterwards, since those bill independently of the servers.
 
 - **One state key per environment.** `dev/terraform.tfstate`, `staging/…`, `prod/…`. The lock is
   per state object, so a shared key means a dev apply blocks a prod apply.
+- **Storage and cluster are separate root modules with separate state.** `storage/terraform.tfstate`
+  is not per-environment: there is one set of durable buckets, outliving every cluster. The split
+  exists so that `make down` — which destroys the cluster routinely — cannot reach the buckets. See
+  [object storage](object-storage.md).
 - **Credentials only from the environment.** Never in `backend.hcl`, which is gitignored anyway,
   and never in a `.tf` file. This repository is public.
 - **`.terraform.lock.hcl` is committed.** Provider versions must be identical across a rebuild.
