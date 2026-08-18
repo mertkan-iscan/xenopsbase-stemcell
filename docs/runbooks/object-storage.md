@@ -9,7 +9,7 @@ not. Everything that would hurt to lose is in here.
 | `<prefix>-documents` | Uploaded documents | Yes | Old versions expire after 90d. Current versions never expire |
 | `<prefix>-pg-backups` | CloudNativePG base backups and WAL | No | Objects expire after 35d — this is the PITR ceiling |
 | `<prefix>-loki-chunks` | Loki log chunks | No | Objects expire after 30d |
-| `<prefix>-tfstate` | Terraform state | Yes | Old versions expire after 365d |
+| `<prefix>-tfstate` | Reserved for state backups (ADR-0005) | Yes | Old versions expire after 365d |
 
 ## Why storage is a separate root module
 
@@ -82,12 +82,15 @@ So the first apply creates buckets with no policy. Confirm the key IDs are exact
 
 ## First-time setup
 
+Two credential sets are in play — see [terraform state](terraform-state.md#two-s3-services-two-credential-sets).
+The `AWS_*` names belong to **R2** (Terraform state); Hetzner takes the explicit ones:
+
 ```bash
-export AWS_ACCESS_KEY_ID=<infra key>  AWS_SECRET_ACCESS_KEY=<infra secret>
+export TF_VAR_hetzner_s3_access_key=<hetzner infra key>  TF_VAR_hetzner_s3_secret_key=<hetzner infra secret>
 ```
 
 ```bash
-make bootstrap-state
+export AWS_ACCESS_KEY_ID=<r2 key>  AWS_SECRET_ACCESS_KEY=<r2 secret>
 ```
 
 ```bash
@@ -101,8 +104,9 @@ Edit both, then:
 make storage-init && make storage-adopt-state
 ```
 
-`storage-adopt-state` imports the state bucket that `bootstrap-state` created, so that versioning
-and lifecycle are enforced in one place rather than living half in a script and half in HCL.
+`storage-adopt-state` is only relevant if a Hetzner `tfstate` bucket already exists from before
+ADR-0005 moved state to R2. On a fresh project it will find nothing to import, which is correct —
+the Hetzner `tfstate` bucket is now reserved for scheduled state backups rather than live state.
 
 ```bash
 make storage-plan

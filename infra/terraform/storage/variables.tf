@@ -1,3 +1,20 @@
+# Hetzner Object Storage credentials for the aws provider.
+#
+# These are NOT the credentials the backend uses. The backend writes state to
+# R2 and reads AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY; Hetzner takes these
+# explicit ones so the two cannot collide. See ADR-0005.
+variable "hetzner_s3_access_key" {
+  description = "Hetzner Object Storage access key. Supply via TF_VAR_hetzner_s3_access_key; never in a file."
+  type        = string
+  sensitive   = true
+}
+
+variable "hetzner_s3_secret_key" {
+  description = "Hetzner Object Storage secret key. Supply via TF_VAR_hetzner_s3_secret_key; never in a file."
+  type        = string
+  sensitive   = true
+}
+
 variable "region" {
   description = "Hetzner Object Storage location. One of fsn1, nbg1, hel1."
   type        = string

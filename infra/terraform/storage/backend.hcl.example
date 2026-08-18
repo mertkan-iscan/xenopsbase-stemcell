@@ -3,9 +3,17 @@
 #   cp backend.hcl.example backend.hcl
 #   terraform init -backend-config=backend.hcl
 #
-# Credentials come from the environment:
-#   export AWS_ACCESS_KEY_ID=<infra access key>
-#   export AWS_SECRET_ACCESS_KEY=<infra secret key>
+# ⚠️ This points at CLOUDFLARE R2, not Hetzner. See ADR-0005: Hetzner does not
+# implement conditional writes, so Terraform state locking silently did nothing
+# there. Only state moved. Documents, backups and Loki chunks stay on Hetzner.
+#
+# Credentials for THIS backend are the R2 ones:
+#   export AWS_ACCESS_KEY_ID=<r2 access key id>
+#   export AWS_SECRET_ACCESS_KEY=<r2 secret access key>
+#
+# Hetzner's credentials go in TF_VAR_hetzner_s3_access_key / _secret_key
+# instead, because the backend has no way to read a TF_VAR and the two would
+# otherwise collide on the same variable names.
 
 bucket = "xenopsbase-tfstate"
 
@@ -13,8 +21,10 @@ bucket = "xenopsbase-tfstate"
 # and they outlive every cluster in every environment.
 key = "storage/terraform.tfstate"
 
-region = "fsn1"
+# R2 has no regions. "auto" is the required literal.
+region = "auto"
 
 endpoints = {
-  s3 = "https://fsn1.your-objectstorage.com"
+  # Your account ID is in the Cloudflare dashboard under R2.
+  s3 = "https://<account_id>.r2.cloudflarestorage.com"
 }
