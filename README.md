@@ -75,6 +75,7 @@ reproduces from nothing.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — branching, commits, and the no-manual-configuration rule
 - Runbooks
   - [Terraform state](docs/runbooks/terraform-state.md) — bootstrap, locking, recovery
+  - [Object storage](docs/runbooks/object-storage.md) — the four durable buckets, retention, least privilege
 
 ## Prior art
 

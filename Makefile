@@ -1,47 +1,82 @@
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
-TF_DIR     := infra/terraform
-SCRIPTS    := infra/scripts
-BACKEND    := $(TF_DIR)/backend.hcl
-BUCKET     ?= xenopsbase-tfstate
-REGION     ?= fsn1
+# Two root modules, deliberately separated by durability (ADR-0002).
+#   storage/ - buckets holding everything durable. Applied rarely, destroyed never.
+#   cluster/ - the K3s cluster. Built and destroyed as a routine operation.
+# `make down` must never be able to reach storage/.
+STORAGE_DIR := infra/terraform/storage
+CLUSTER_DIR := infra/terraform/cluster
+SCRIPTS     := infra/scripts
+
+BUCKET ?= xenopsbase-tfstate
+REGION ?= fsn1
 
 .PHONY: help
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
-		| awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+		| awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
 	@echo
 	@echo "  First time through, in order:"
 	@echo "    1. export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=..."
-	@echo "    2. make bootstrap-state BUCKET=$(BUCKET) REGION=$(REGION)"
-	@echo "    3. cp $(TF_DIR)/backend.hcl.example $(BACKEND) and edit it"
-	@echo "    4. make init"
-	@echo "    5. make verify-locking      <- do not skip this one"
+	@echo "    2. make bootstrap-state"
+	@echo "    3. cp $(STORAGE_DIR)/backend.hcl.example $(STORAGE_DIR)/backend.hcl   # edit"
+	@echo "    4. cp $(STORAGE_DIR)/terraform.tfvars.example $(STORAGE_DIR)/terraform.tfvars   # edit"
+	@echo "    5. make storage-init && make storage-adopt-state && make storage-apply"
+	@echo "    6. make verify-locking      <- do not skip"
+	@echo "    7. verify key IDs, set enable_bucket_policies = true, make storage-apply"
+
+# ------------------------------------------------------------------------------
+# Bootstrap
+# ------------------------------------------------------------------------------
 
 .PHONY: bootstrap-state
-bootstrap-state: ## Create the Terraform state bucket (idempotent)
+bootstrap-state: ## Create the Terraform state bucket (idempotent, runs before Terraform exists)
 	@bash $(SCRIPTS)/bootstrap-state-bucket.sh $(BUCKET) $(REGION)
 
-.PHONY: init
-init: $(BACKEND) ## terraform init against the remote backend
-	@cd $(TF_DIR) && terraform init -input=false -backend-config=backend.hcl
-
 .PHONY: verify-locking
-verify-locking: $(BACKEND) ## Prove state locking actually refuses a concurrent operation
-	@bash $(SCRIPTS)/verify-state-locking.sh $(BACKEND)
+verify-locking: ## Prove state locking actually refuses a concurrent operation
+	@bash $(SCRIPTS)/verify-state-locking.sh $(STORAGE_DIR)/backend.hcl
+
+# ------------------------------------------------------------------------------
+# Durable storage
+# ------------------------------------------------------------------------------
+
+.PHONY: storage-init
+storage-init: ## terraform init for the storage module
+	@cd $(STORAGE_DIR) && terraform init -input=false -backend-config=backend.hcl
+
+.PHONY: storage-adopt-state
+storage-adopt-state: ## Import the bootstrap-created state bucket into Terraform (run once)
+	@cd $(STORAGE_DIR) && terraform import 'aws_s3_bucket.this["tfstate"]' $(BUCKET) || \
+		echo "  already imported, nothing to do"
+
+.PHONY: storage-plan
+storage-plan: ## Plan changes to the durable buckets
+	@cd $(STORAGE_DIR) && terraform plan -input=false
+
+.PHONY: storage-apply
+storage-apply: ## Apply changes to the durable buckets
+	@cd $(STORAGE_DIR) && terraform apply -input=false
+
+# Deliberately absent: storage-destroy.
+# Every bucket carries prevent_destroy, and there is no convenience target for
+# deleting the durable column of ADR-0002. Removing these buckets should require
+# editing Terraform by hand and meaning it.
+
+# ------------------------------------------------------------------------------
+# Quality
+# ------------------------------------------------------------------------------
 
 .PHONY: fmt
 fmt: ## Rewrite Terraform files into canonical format
-	@terraform fmt -recursive $(TF_DIR)
+	@terraform fmt -recursive infra/terraform
 
 .PHONY: validate
-validate: ## Validate the Terraform configuration
-	@cd $(TF_DIR) && terraform validate
+validate: ## Validate every Terraform root module without touching remote state
+	@set -e; for d in $(STORAGE_DIR) $(CLUSTER_DIR); do \
+		echo "==> $$d"; \
+		( cd $$d && terraform init -backend=false -input=false >/dev/null && terraform validate ); \
+	done
 
-$(BACKEND):
-	@echo "error: $(BACKEND) is missing." >&2
-	@echo "  cp $(TF_DIR)/backend.hcl.example $(BACKEND) and fill it in." >&2
-	@exit 1
-
-# make up / make down arrive with T-1.7, once there is a cluster to build.
+# make up / make down arrive with T-1.7, and will drive $(CLUSTER_DIR) only.
