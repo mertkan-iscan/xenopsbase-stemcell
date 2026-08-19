@@ -32,3 +32,9 @@ kind: Namespace
 metadata:
   name: keycloak
   labels: {app.kubernetes.io/managed-by: argocd}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: database
+  labels: {app.kubernetes.io/managed-by: argocd}

@@ -1,0 +1,47 @@
+# Where base backups and the WAL archive go.
+#
+# This is the durable half of the database, in the sense of ADR-0002. The
+# Postgres volumes are a working disk that dies with the cluster; THIS is the
+# copy that has to survive, and it lives in a bucket Terraform never destroys.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: pg-backups
+  namespace: database
+spec:
+  configuration:
+    destinationPath: s3://xenopsbase-dev-pg-backups/
+    endpointURL: https://fsn1.your-objectstorage.com
+
+    s3Credentials:
+      # The `db` key from the storage module, NOT the infra key. Its bucket
+      # policy grants pg-backups and nothing else, so this credential leaking
+      # does not expose uploaded documents or logs. Verified directly: the
+      # observability key returns 403 on this bucket, which is what makes the
+      # least-privilege claim evidence rather than intent.
+      accessKeyId:
+        name: pg-backup-s3
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: pg-backup-s3
+        key: SECRET_ACCESS_KEY
+
+    wal:
+      # WAL is the recovery granularity: base backups set the floor, WAL is what
+      # closes the gap between the last base backup and the moment of failure.
+      compression: gzip
+      # Hetzner object storage is a different datacentre from the nodes even in
+      # the same city, so archiving is network-bound. Parallelism keeps
+      # archive_command from becoming the bottleneck that stalls commits.
+      maxParallel: 2
+
+    data:
+      compression: gzip
+      jobs: 2
+
+  # 30 days in dev. Deliberately finite: this bucket has NO lifecycle expiry
+  # rule (see infra/lifecycle/), because expiring a WAL segment that a base
+  # backup still depends on silently destroys recoverability for everything
+  # after it. Barman understands that dependency; a bucket lifecycle rule does
+  # not. Retention is therefore expressed here and only here.
+  retentionPolicy: 30d
