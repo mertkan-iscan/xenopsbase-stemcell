@@ -370,3 +370,42 @@ variable "firewall_source_cidrs" {
   type        = list(string)
   default     = []
 }
+
+variable "pin_metadata_route_to_public_nic" {
+  description = <<-EOT
+    Install a systemd unit pinning the route to the Hetzner metadata service
+    (169.254.169.254) onto the PUBLIC interface.
+
+    Without it, DHCP on the private interface installs that route over eth1,
+    where it black-holes:
+
+      ip route get 169.254.169.254
+        169.254.169.254 via 10.0.0.1 dev eth1 src 10.255.0.1
+
+      curl --interface eth0 ...  ->  fsn1-dc8
+      curl --interface eth1 ...  ->  no answer
+
+    This is the same root cause as #84, which was worked around for the cloud
+    controller manager by disabling its attached-network check. The CSI driver
+    has the same dependency and NO equivalent escape hatch -- it needs the
+    availability zone to choose where to create a volume, so it exits:
+
+      failed to setup CSI driver: could not determine default volume location:
+      failed to get location from metadata service
+
+    The node driver then crash-loops, every PersistentVolumeClaim stays Pending,
+    and Postgres never starts. Nothing in that chain mentions metadata or
+    routing.
+
+    Worth knowing: this is a RACE, not a constant. The bad route is installed by
+    DHCP, so whether the CSI driver starts before or after it decides whether
+    the cluster works. The same configuration built a working cluster earlier
+    the same day and a broken one on rebuild, which is the worst kind of
+    reproducibility bug for something ADR-0002 asks to be rebuilt routinely.
+
+    Set false only on a cluster whose nodes have no public interface, where
+    pinning to eth0 would be wrong.
+  EOT
+  type        = bool
+  default     = true
+}
