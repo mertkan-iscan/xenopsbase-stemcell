@@ -11,6 +11,7 @@ resources:
   - apps/ingress-nginx.yaml
   - apps/cert-manager.yaml
   - apps/cloudflared.yaml
+  - apps/cloudnative-pg.yaml
   - issuers/letsencrypt.yaml
 
   # Decrypted by ksops at render time inside argocd-repo-server (ADR-0003).
