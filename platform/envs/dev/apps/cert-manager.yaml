@@ -3,6 +3,11 @@ kind: Application
 metadata:
   name: cert-manager
   namespace: argocd
+  annotations:
+    # Wave 0 explicitly. The ClusterIssuers are wave 5 and depend on this
+    # Application being Healthy, so the relationship should be visible from
+    # both ends rather than resting on the default.
+    argocd.argoproj.io/sync-wave: "0"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:

@@ -13,6 +13,25 @@
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
+  # Wave 5: after cert-manager's Application reports Healthy. Argo waits for a
+  # wave to become healthy before starting the next, and an Application's health
+  # aggregates its children -- so this is "after cert-manager is actually
+  # running", not merely "after its Application object exists".
+  #
+  # SkipDryRunOnMissingResource is the other half, and without it the wave does
+  # not help at all. Argo dry-runs the WHOLE manifest set before applying
+  # anything, so on a cold cluster the missing cert-manager.io/v1 API group
+  # fails the entire root sync:
+  #
+  #   failed to discover server resources for group version cert-manager.io/v1:
+  #   the server could not find the requested resource
+  #
+  # Nothing gets applied -- not the namespaces, not the Applications, not even
+  # the cert-manager Application that would create the CRD. The cluster cannot
+  # bootstrap itself.
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
   name: letsencrypt-staging
 spec:
   acme:
@@ -36,6 +55,9 @@ spec:
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
   name: letsencrypt-prod
 spec:
   acme:
