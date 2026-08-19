@@ -19,11 +19,17 @@ keys.txt
 *.tfstate.*
 *.tfstate.backup
 
-# Real backend and variable files. Only the .example versions are tracked.
+# Real backend files. Only the .example versions are tracked.
 backend.hcl
-*.tfvars
-!*.tfvars.example
-!terraform.tfvars.example
+
+# Per-environment tfvars ARE tracked (infra/terraform/*/env/*.tfvars) so that
+# adding an environment is a reviewable change rather than an untracked local
+# edit. Only the secrets half stays out.
+*.secrets.tfvars
+!*.secrets.tfvars.example
+
+# Legacy single-environment files, superseded by env/ per T-1.4.
+/infra/terraform/*/terraform.tfvars
 
 crash.log
 crash.*.log

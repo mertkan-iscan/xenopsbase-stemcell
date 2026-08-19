@@ -15,6 +15,16 @@ variable "hetzner_s3_secret_key" {
   sensitive   = true
 }
 
+variable "environment" {
+  description = "Environment this set of durable buckets belongs to. Forms part of every bucket name."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]{1,15}$", var.environment))
+    error_message = "environment must be lower-case alphanumeric with hyphens, 2-16 chars. It becomes part of a bucket name, which is not freely renameable."
+  }
+}
+
 variable "region" {
   description = "Hetzner Object Storage location. One of fsn1, nbg1, hel1."
   type        = string
@@ -124,21 +134,18 @@ variable "retention_days" {
       documents_noncurrent - old versions of overwritten or deleted documents
       pg_backups           - base backups and WAL. Sets the ceiling on the PITR window
       loki_chunks          - log chunks
-      tfstate_noncurrent   - superseded Terraform state versions
       abort_multipart      - cleanup of failed uploads
   EOT
   type = object({
     documents_noncurrent = number
     pg_backups           = number
     loki_chunks          = number
-    tfstate_noncurrent   = number
     abort_multipart      = number
   })
   default = {
     documents_noncurrent = 90
     pg_backups           = 35
     loki_chunks          = 30
-    tfstate_noncurrent   = 365
     abort_multipart      = 7
   }
 

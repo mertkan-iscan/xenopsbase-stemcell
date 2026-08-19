@@ -33,7 +33,7 @@ a pet**: nothing that matters may live inside it, and no state may be created by
 |---|---|
 | Uploaded documents (object storage) | All pods, PVCs, node disks |
 | Postgres base backups + WAL archive (object storage) | The Postgres cluster itself |
-| Terraform state (object storage, locked) | Ingress, cert-manager, Keycloak pods |
+| Terraform state (Cloudflare R2, locked — ADR-0005) | Ingress, cert-manager, Keycloak pods |
 | Keycloak realm definition (git) | Issued sessions and tokens |
 | All manifests and Helm values (git, GitOps) | Grafana dashboards at runtime |
 | Container images (GHCR) | Loki index — chunks go to object storage |
@@ -75,8 +75,9 @@ reproduces from nothing.
   - [ADR-0005](docs/adr/0005-terraform-state-backend.md) — Terraform state in Cloudflare R2
 - [CONTRIBUTING.md](CONTRIBUTING.md) — branching, commits, and the no-manual-configuration rule
 - Runbooks
+  - [Environments](docs/runbooks/environments.md) — dev/staging/prod layout, ENV targets, guards
   - [Terraform state](docs/runbooks/terraform-state.md) — bootstrap, locking, recovery
-  - [Object storage](docs/runbooks/object-storage.md) — the four durable buckets, retention, least privilege
+  - [Object storage](docs/runbooks/object-storage.md) — per-environment durable buckets, retention, least privilege
 
 ## Prior art
 

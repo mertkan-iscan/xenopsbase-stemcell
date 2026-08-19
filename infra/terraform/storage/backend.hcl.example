@@ -17,9 +17,11 @@
 
 bucket = "xenopsbase-tfstate"
 
-# Storage state is NOT per-environment. There is one set of durable buckets,
-# and they outlive every cluster in every environment.
-key = "storage/terraform.tfstate"
+# The state key is NOT set here. It is derived from ENV by the Makefile and
+# passed as -backend-config="key=..." on every init, together with -reconfigure.
+# That is what makes it impossible to point one environment's variables at
+# another environment's state (T-1.4).
+
 
 # R2 has no regions. "auto" is the required literal.
 region = "auto"

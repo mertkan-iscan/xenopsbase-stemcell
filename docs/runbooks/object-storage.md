@@ -1,15 +1,20 @@
 # Runbook: object storage
 
-Four buckets hold the entire left-hand column of
+Buckets are named **per environment** (`xenopsbase-dev-documents`) because bucket policies are the
+only isolation Hetzner offers and they apply to a whole bucket — see
+[environments](environments.md#why-buckets-are-named-per-environment). The state-backup bucket is
+cross-environment and is owned by T-1.9, not by this module.
+
+Three buckets per environment hold the left-hand column of
 [ADR-0002](../adr/0002-ephemeral-cluster-and-durable-state.md). Clusters are disposable; these are
 not. Everything that would hurt to lose is in here.
 
 | Bucket | Holds | Versioned | Lifecycle backstop |
 |---|---|---|---|
-| `<prefix>-documents` | Uploaded documents | Yes | Old versions expire after 90d. Current versions never expire |
-| `<prefix>-pg-backups` | CloudNativePG base backups and WAL | No | Objects expire after 35d — this is the PITR ceiling |
-| `<prefix>-loki-chunks` | Loki log chunks | No | Objects expire after 30d |
-| `<prefix>-tfstate` | Reserved for state backups (ADR-0005) | Yes | Old versions expire after 365d |
+| `<prefix>-<env>-documents` | Uploaded documents | Yes | Old versions expire after 90d. Current versions never expire |
+| `<prefix>-<env>-pg-backups` | CloudNativePG base backups and WAL | No | Objects expire after 35d — this is the PITR ceiling |
+| `<prefix>-<env>-loki-chunks` | Loki log chunks | No | Objects expire after 30d |
+
 
 ## Why storage is a separate root module
 

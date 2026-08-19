@@ -1,15 +1,25 @@
 locals {
-  # Which consumer key owns which bucket. The infra key is added to every
-  # allowlist in policies.tf so that Terraform can always still manage them.
+  # Buckets are named per environment.
+  #
+  # This is not cosmetic. Bucket policies are the ONLY isolation mechanism
+  # Hetzner offers (project-wide keys otherwise read everything), and a policy
+  # applies to a whole bucket. Sharing one documents bucket across environments
+  # would mean allowlisting the dev app key and the prod app key on the same
+  # bucket -- so a leaked dev credential reads production documents. Separate
+  # buckets are what make the least-privilege claim survive a second
+  # environment.
+  #
+  # The state-backup bucket is deliberately absent. It is cross-environment by
+  # nature, so it does not belong in a per-environment module; T-1.9 owns it.
   buckets = {
     documents = {
-      name      = "${var.prefix}-documents"
+      name      = "${var.prefix}-${var.environment}-documents"
       owner     = var.access_keys.app
       versioned = true
       purpose   = "Uploaded documents. User data: never expired by lifecycle."
     }
     pg_backups = {
-      name  = "${var.prefix}-pg-backups"
+      name  = "${var.prefix}-${var.environment}-pg-backups"
       owner = var.access_keys.db
       # Base backups and WAL segments are written once and never rewritten, so
       # versioning would double the cost and protect nothing.
@@ -17,31 +27,16 @@ locals {
       purpose   = "CloudNativePG base backups and WAL archive. Sets the PITR ceiling."
     }
     loki_chunks = {
-      name      = "${var.prefix}-loki-chunks"
+      name      = "${var.prefix}-${var.environment}-loki-chunks"
       owner     = var.access_keys.observability
       versioned = false
       purpose   = "Loki log chunks. Immutable once written."
-    }
-    tfstate = {
-      name  = "${var.prefix}-tfstate"
-      owner = var.access_keys.infra
-      # Versioning is what makes a corrupted state write recoverable. See
-      # docs/runbooks/terraform-state.md.
-      versioned = true
-      purpose   = "Terraform state. Created by the bootstrap script, adopted here."
     }
   }
 }
 
 # ------------------------------------------------------------------------------
 # Buckets
-#
-# The state bucket already exists: bootstrap-state-bucket.sh created it, because
-# Terraform cannot create the bucket holding its own state. It is imported here
-# rather than left unmanaged, so that versioning and lifecycle are enforced in
-# one place instead of living half in a script and half in HCL:
-#
-#   terraform import aws_s3_bucket.this[\"tfstate\"] xenopsbase-tfstate
 # ------------------------------------------------------------------------------
 resource "aws_s3_bucket" "this" {
   for_each = local.buckets
