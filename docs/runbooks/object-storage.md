@@ -108,6 +108,28 @@ Two guards:
 So the first apply creates buckets with no policy. Confirm the key IDs are exactly right, then set
 `enable_bucket_policies = true` and apply again. One extra apply, versus a support ticket.
 
+### Prove the ARN format on a canary first
+
+Checking the key IDs is not quite enough. The genuinely unrecoverable mistake is a wrong
+`project_id`, because it makes **every** principal ARN wrong at once — including infra's, on all
+four buckets simultaneously. There is no key left that can remove the policy.
+
+Before the first real apply, prove the ARN format against a disposable bucket:
+
+```bash
+aws --endpoint-url https://fsn1.your-objectstorage.com --region fsn1 s3api create-bucket --bucket xenopsbase-policy-canary
+```
+
+Put an object in it, apply the same `Deny` + `NotPrincipal` policy naming only your infra key and
+`project_id`, then confirm **infra can still read the object**. If it can, the ARN format is right
+and the real buckets are safe. If it cannot, you have lost a bucket you did not need.
+
+Then check the deny half with a non-allowlisted key — it must get `403`. Delete the canary
+afterwards.
+
+This takes two minutes and converts the one irreversible step in this runbook into a reversible
+one. Worth it every time the project ID or the infra key changes.
+
 ## First-time setup
 
 Two credential sets are in play — see [terraform state](terraform-state.md#two-s3-services-two-credential-sets).
@@ -165,6 +187,22 @@ AWS_ACCESS_KEY_ID=<observability key> AWS_SECRET_ACCESS_KEY=<observability secre
 
 This must fail with `AccessDenied`. If it succeeds, the policy is not in effect and the
 least-privilege claim is false — a security finding, not a configuration nit.
+
+Check the infra key still reaches **every** bucket in the same pass. A policy that isolates the
+consumers but also locks out Terraform is not a success.
+
+Verified 2026-08-19:
+
+| Bucket | infra key | observability key |
+|---|---|---|
+| documents | OK | denied |
+| pg-backups | OK | denied |
+| loki-chunks | OK | ALLOWED |
+| tfstate | OK | denied |
+
+Before the policies were applied, the observability key could read the documents bucket. That is
+the project-wide default these policies exist to correct, and it is worth reproducing once so the
+risk is understood rather than taken on faith.
 
 ## Rotating a key
 
