@@ -43,8 +43,10 @@ Fifteen of them. Rather than setting each by hand, run the script — it reads e
 same `~/.xenopsbase.env` used for local applies and pipes each straight to `gh secret set`, so no
 value is ever pasted anywhere:
 
+From the repository root:
+
 ```bash
-source ~/.xenopsbase.env && bash infra/scripts/set-ci-secrets.sh
+cd /path/to/xenopsbase-stemcell && source ~/.xenopsbase.env && bash infra/scripts/set-ci-secrets.sh
 ```
 
 For reference, what it sets:
