@@ -29,12 +29,19 @@
 #
 # Usage:
 #   export TF_VAR_hetzner_s3_access_key=... TF_VAR_hetzner_s3_secret_key=...
-#   ./apply-lifecycle-rules.sh [prefix] [region]
+#   ./apply-lifecycle-rules.sh <environment> [prefix] [region]
 #
 set -euo pipefail
 
-PREFIX="${1:-xenopsbase}"
-REGION="${2:-fsn1}"
+ENVIRONMENT="${1:-}"
+PREFIX="${2:-xenopsbase}"
+REGION="${3:-fsn1}"
+
+if [ -z "$ENVIRONMENT" ]; then
+  echo "usage: $0 <environment> [prefix] [region]" >&2
+  echo "  buckets are per environment: <prefix>-<environment>-<name>" >&2
+  exit 2
+fi
 ENDPOINT="https://${REGION}.your-objectstorage.com"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -59,20 +66,24 @@ fi
 s3() { AWS_ACCESS_KEY_ID="$AK" AWS_SECRET_ACCESS_KEY="$SK" \
        aws --endpoint-url "$ENDPOINT" --region "$REGION" "$@"; }
 
-echo "==> endpoint $ENDPOINT"
-echo "==> prefix   $PREFIX"
+echo "==> endpoint    $ENDPOINT"
+echo "==> environment $ENVIRONMENT"
+echo "==> prefix      $PREFIX"
 echo
 
 FAILED=0
+APPLIED=0
+SKIPPED=0
 
 for f in "$RULES_DIR"/*.json; do
   short="$(basename "$f" .json)"
-  bucket="${PREFIX}-${short}"
+  bucket="${PREFIX}-${ENVIRONMENT}-${short}"
 
   printf '%-32s ' "$bucket"
 
   if ! s3 s3api head-bucket --bucket "$bucket" >/dev/null 2>&1; then
     echo "SKIP (bucket does not exist)"
+    SKIPPED=$((SKIPPED + 1))
     continue
   fi
 
@@ -106,6 +117,7 @@ for f in "$RULES_DIR"/*.json; do
     FAILED=1
   else
     echo "ok ($(echo "$got" | grep -c '"ID"') rules verified)"
+    APPLIED=$((APPLIED + 1))
   fi
 done
 
@@ -114,4 +126,19 @@ if [ "$FAILED" -ne 0 ]; then
   echo "One or more buckets did not end up with the rules they should have."
   exit 1
 fi
-echo "All lifecycle rules applied and verified."
+
+# Skipping every bucket is not success. Reporting it as success is worse than
+# failing: it means "no buckets exist for this environment" reads identically to
+# "all rules verified", and the difference only surfaces when retention silently
+# never applies.
+if [ "$APPLIED" -eq 0 ]; then
+  echo "NOTHING APPLIED — all $SKIPPED buckets missing for environment '$ENVIRONMENT'."
+  echo "  Run: make storage-apply ENV=$ENVIRONMENT"
+  exit 1
+fi
+
+if [ "$SKIPPED" -ne 0 ]; then
+  echo "$APPLIED bucket(s) verified, $SKIPPED skipped as missing — that is a partial run."
+  exit 1
+fi
+echo "All lifecycle rules applied and verified ($APPLIED buckets)."

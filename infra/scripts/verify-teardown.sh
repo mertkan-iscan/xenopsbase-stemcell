@@ -23,12 +23,18 @@
 #
 # Usage:
 #   export HCLOUD_TOKEN=... TF_VAR_hetzner_s3_access_key=... TF_VAR_hetzner_s3_secret_key=...
-#   ./verify-teardown.sh [prefix] [region]
+#   ./verify-teardown.sh <environment> [prefix] [region]
 #
 set -uo pipefail
 
-PREFIX="${1:-xenopsbase}"
-REGION="${2:-fsn1}"
+ENVIRONMENT="${1:-}"
+PREFIX="${2:-xenopsbase}"
+REGION="${3:-fsn1}"
+
+if [ -z "$ENVIRONMENT" ]; then
+  echo "usage: $0 <environment> [prefix] [region]" >&2
+  exit 2
+fi
 ENDPOINT="https://${REGION}.your-objectstorage.com"
 FAILED=0
 
@@ -50,8 +56,8 @@ echo "=================================================================="
 echo " MUST SURVIVE  (the durable column of ADR-0002)"
 echo "=================================================================="
 
-for short in documents pg-backups loki-chunks tfstate; do
-  bucket="${PREFIX}-${short}"
+for short in documents pg-backups loki-chunks; do
+  bucket="${PREFIX}-${ENVIRONMENT}-${short}"
   printf '  %-30s ' "$bucket"
   if ! s3 s3api head-bucket --bucket "$bucket" >/dev/null 2>&1; then
     echo "GONE  <-- durable data destroyed"

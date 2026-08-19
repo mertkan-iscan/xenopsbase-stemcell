@@ -11,13 +11,11 @@
 
 bucket = "xenopsbase-tfstate"
 
-# One key per environment. Never share a key between environments: the lock is
-# per state object, so a shared key means dev applies block prod applies.
-#
-# Note this is the CLUSTER state. The durable buckets live in a separate root
-# module under storage/terraform.tfstate, deliberately out of reach of the
-# destroy that `make down` runs against this one.
-key = "dev/cluster.tfstate"
+# The state key is NOT set here. It is derived from ENV by the Makefile and
+# passed as -backend-config="key=..." on every init, together with -reconfigure.
+# That is what makes it impossible to point one environment's variables at
+# another environment's state (T-1.4).
+
 
 # R2 has no regions. "auto" is the required literal.
 region = "auto"
