@@ -225,6 +225,10 @@ kubeconfig: ## Write the kubeconfig out of Terraform state (gitignored)
 fmt: ## Rewrite Terraform files into canonical format
 	@terraform fmt -recursive infra/terraform
 
+.PHONY: check-secrets
+check-secrets: ## Refuse unencrypted secrets anywhere in the repository
+	@bash $(SCRIPTS)/check-secrets.sh
+
 .PHONY: validate
 validate: ## Validate every Terraform root module without touching remote state
 	@set -e; for d in $(STORAGE_DIR) $(EDGE_DIR) $(CLUSTER_DIR); do \

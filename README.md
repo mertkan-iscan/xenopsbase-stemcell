@@ -77,6 +77,7 @@ reproduces from nothing.
   - [ADR-0006](docs/adr/0006-tailscale-node-transport.md) — Tailscale transport, no public API endpoint
 - [CONTRIBUTING.md](CONTRIBUTING.md) — branching, commits, and the no-manual-configuration rule
 - Runbooks
+  - [Secrets](docs/runbooks/secrets.md) — SOPS, age, the one bootstrap key, rotation
   - [Terraform CI](docs/runbooks/terraform-ci.md) — lint, checkov, plan-on-PR, manual apply
   - [Edge](docs/runbooks/edge.md) — Cloudflare tunnel, DNS, and the shared-zone hazard
   - [Network access](docs/runbooks/network-access.md) — exposure model, SSH policy, escape hatch

@@ -33,6 +33,7 @@ jobs:
             core
             infra
             platform
+            secrets
             ci
             adr
             docs
