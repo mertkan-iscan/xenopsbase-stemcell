@@ -145,11 +145,24 @@ spec:
   monitoring:
     # On, now that T-2.6 provides the PodMonitor CRD. This is what exports
     # cnpg_collector_* -- including the archiving and backup-age series the
-    # alerting rules depend on. Without it, the failure that took the longest to
-    # notice tonight stays invisible.
-    #
-    # The operator writes two further defaults into this stanza, so the postgres
-    # Application ignores /spec/monitoring when diffing (see apps/postgres.yaml).
-    # ignoreDifferences suppresses comparison, not application: this value is
-    # still applied.
+    # alerting rules depend on. Without it, the failure that took longest to
+    # notice stays invisible.
     enablePodMonitor: true
+
+    # These two are operator defaults, and they are declared rather than ignored
+    # after ignoreDifferences turned out to be the wrong tool here.
+    #
+    # An ignoreDifferences on /spec/monitoring does NOT merely hide the diff. Argo
+    # syncs when it detects drift, so a field it is told not to compare never
+    # triggers a sync -- and therefore never gets applied. Setting
+    # enablePodMonitor: true under an ignore left the Application reporting
+    # Synced, on the right commit, with the live value still false and no
+    # PodMonitor. Silent, and it looked correct from every direction.
+    #
+    # The cost of declaring them is that a future operator version renaming this
+    # ConfigMap shows up as drift. That is visible and fixable; the alternative
+    # was a change that never applied.
+    customQueriesConfigMap:
+      - key: queries
+        name: cnpg-default-monitoring
+    disableDefaultQueries: false
