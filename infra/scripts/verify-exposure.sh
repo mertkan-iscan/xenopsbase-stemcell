@@ -38,6 +38,25 @@
 set -uo pipefail
 
 EXPECT_WEB="${1:-}"
+
+# The expected answer depends on how the cluster is reached (ADR-0006):
+#
+#   tailscale        nothing answers on a node, ever
+#   hetzner_private  22 and 6443 answer, but ONLY from firewall_source_cidrs
+#
+# Under the escape hatch this script usually runs FROM an allowlisted address,
+# so 22 and 6443 answering is correct rather than a finding. Calling that a
+# failure trains people to ignore the check, which is worse than not having it.
+#
+# Read from the tfvars rather than passed in, so the check cannot disagree with
+# what was actually deployed.
+ENVIRONMENT="${ENVIRONMENT:-dev}"
+TFVARS_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/infra/terraform/cluster/env/${ENVIRONMENT}.tfvars"
+TRANSPORT="tailscale"
+if [ -f "$TFVARS_PATH" ]; then
+  TRANSPORT="$(grep -oE '^node_transport_mode[[:space:]]*=[[:space:]]*"[a-z_]+"' "$TFVARS_PATH" | head -1 | cut -d'"' -f2)"
+  TRANSPORT="${TRANSPORT:-tailscale}"
+fi
 TIMEOUT=4
 FAILED=0
 
@@ -79,12 +98,36 @@ if [ "${#NODES[@]}" -eq 0 ] && [ "${#LBS[@]}" -eq 0 ]; then
 fi
 
 echo "=================================================================="
-echo " NODES — must answer nothing (ADR-0006: no public API, no SSH)"
+if [ "$TRANSPORT" = "hetzner_private" ]; then
+  echo " NODES — escape hatch: 22 and 6443 answer, allowlisted only"
+else
+  echo " NODES — must answer nothing (ADR-0006: no public API, no SSH)"
+fi
+echo " transport: $TRANSPORT"
 echo "=================================================================="
+# Under the escape hatch these two are open by design, restricted to an IP
+# allowlist. Whether the allowlist actually holds cannot be proved from an
+# allowlisted host -- that needs an off-allowlist vantage point, which is why
+# T-7.3 runs this from CI.
+if [ "$TRANSPORT" = "hetzner_private" ]; then
+  WANT_SSH="OPEN"; WANT_API="OPEN"
+else
+  WANT_SSH="closed"; WANT_API="closed"
+fi
+
 for entry in "${NODES[@]}"; do
   name="${entry%% *}"; ip="${entry##* }"
-  check "$name" "$ip" 22 closed    # SSH: tailnet only
-  check "$name" "$ip" 6443 closed  # Kubernetes API: no public endpoint
+
+  # Only control planes serve the Kubernetes API. Expecting 6443 to answer on a
+  # worker is wrong even under the escape hatch, and asserting it would report a
+  # correctly-closed port as a failure.
+  case "$name" in
+    *control-plane*) want_api="$WANT_API" ;;
+    *)               want_api="closed" ;;
+  esac
+
+  check "$name" "$ip" 22 "$WANT_SSH"
+  check "$name" "$ip" 6443 "$want_api"
   check "$name" "$ip" 2379 closed  # etcd: never public, under any transport
   check "$name" "$ip" 10250 closed # kubelet: never public
 done
@@ -116,7 +159,13 @@ if [ "$FAILED" -ne 0 ]; then
 fi
 
 if [ "$EXPECT_WEB" != "expect-web" ]; then
-  echo "Nothing is exposed. Note 80/443 are not required to answer yet:"
+  if [ "$TRANSPORT" = "hetzner_private" ]; then
+  echo "NOTE: running on the escape hatch, so 22 and 6443 are open by design."
+  echo "      This run cannot prove the allowlist holds -- it was made from an"
+  echo "      allowlisted address. Run it from elsewhere, or wait for T-7.3."
+  echo
+fi
+echo "Nothing unexpected is exposed. Note 80/443 are not required to answer yet:"
   echo "ingress_controller is \"none\" until T-2.2 installs it via GitOps."
   echo "Re-run with 'expect-web' once it exists, to require them rather than"
   echo "merely tolerate them."
