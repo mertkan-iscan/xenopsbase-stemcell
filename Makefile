@@ -201,7 +201,16 @@ cluster-apply: ## Build or update the cluster
 .PHONY: cluster-destroy
 cluster-destroy: ## Destroy the cluster. Does NOT touch the durable buckets or the OS snapshot
 	$(call check_env,$(CLUSTER_DIR))
+	@# PVC-backed volumes are created by the CSI driver, not by Terraform, so
+	@# `terraform destroy` neither tracks nor removes them. It reports success and
+	@# leaves them billing forever. The CSI driver runs INSIDE the cluster, so this
+	@# has to happen while the nodes are still alive -- afterwards there is nothing
+	@# left to do it. Set KEEP_VOLUMES=1 to skip.
+	@bash $(SCRIPTS)/release-cluster-volumes.sh $(ENV)
 	@cd $(CLUSTER_DIR) && terraform destroy $(APPROVE) -var-file=$(TFVARS)
+	@# Assert the boundary held rather than trusting it. A leak here is invisible
+	@# and permanent, so it fails the target instead of waiting to be noticed.
+	@bash $(SCRIPTS)/verify-teardown.sh $(ENV)
 
 .PHONY: verify-teardown
 verify-teardown: ## Assert a destroy left durable state intact and nothing orphaned
