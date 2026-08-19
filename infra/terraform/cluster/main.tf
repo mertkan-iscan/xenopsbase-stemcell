@@ -17,6 +17,30 @@
 # ==============================================================================
 
 locals {
+  # Pins the metadata route onto the public NIC at every boot, as a unit rather
+  # than a one-off command: the bad route is reinstalled by DHCP, so a route
+  # added once does not survive a reboot or a lease renewal.
+  metadata_route_unit = <<-EOT
+    cat > /etc/systemd/system/hcloud-metadata-route.service <<'UNIT'
+    [Unit]
+    Description=Pin the Hetzner metadata route to the public interface
+    After=network-online.target
+    Wants=network-online.target
+
+    [Service]
+    Type=oneshot
+    RemainAfterExit=yes
+    # Guarded: on a node with no public interface this is a no-op rather than a
+    # boot failure.
+    ExecStart=/bin/sh -c 'ip link show eth0 >/dev/null 2>&1 && ip route replace 169.254.169.254/32 dev eth0 || true'
+
+    [Install]
+    WantedBy=multi-user.target
+    UNIT
+    systemctl daemon-reload
+    systemctl enable --now hcloud-metadata-route.service
+  EOT
+
   # Kept in a local because HCL does not allow a heredoc inside a conditional
   # expression.
   ccm_disable_attached_check_values = <<-EOT
@@ -70,6 +94,11 @@ module "kube_hetzner" {
   load_balancer_type = var.load_balancer_type
 
   extra_firewall_rules = var.extra_firewall_rules
+
+  # Runs on every node before k3s installs, so the metadata service is reachable
+  # by the time the CCM and CSI driver start. See the variable for why this is
+  # not optional in practice.
+  preinstall_exec = var.pin_metadata_route_to_public_nic ? [local.metadata_route_unit] : []
 
   # MERGE, not replace. The module offers both:
   #
