@@ -1,0 +1,34 @@
+# SOPS rules for this repository (ADR-0003).
+#
+# Age PUBLIC keys only. The private half never appears here, never appears in
+# git, and is the one bootstrap secret whose loss is unrecoverable — see
+# docs/runbooks/secrets.md.
+#
+# encrypted_regex is what keeps a diff readable: only the VALUES under data and
+# stringData are encrypted, so a pull request shows which secret changed, when,
+# and by whom, without revealing what it changed to. Encrypting the whole file
+# would turn every secret change into an opaque blob.
+#
+# The separator in path_regex is written as `.` rather than `/` on purpose. sops
+# on Windows sees backslash-separated paths, and a rule anchored on `/` silently
+# matches nothing there — failing with "no matching creation rules found", which
+# reads like a missing rule rather than a path-separator problem.
+
+creation_rules:
+  # dev
+  - path_regex: .*envs.dev.secrets.*\.ya?ml$
+    encrypted_regex: '^(data|stringData)$'
+    age: age1sgwm6ckyjns0grwu6hsc6zhh2esh3ja7xmwynkw9ukc3ygq8tf8qsgusx5
+
+  # staging and prod get their OWN keys, so a leaked dev key cannot decrypt
+  # production. Add them as those environments are built. Until then a secrets
+  # file under those paths fails to encrypt rather than silently using the dev
+  # key — which is the safe way round.
+  #
+  # - path_regex: .*envs.staging.secrets.*\.ya?ml$
+  #   encrypted_regex: '^(data|stringData)$'
+  #   age: <staging public key>
+  #
+  # - path_regex: .*envs.prod.secrets.*\.ya?ml$
+  #   encrypted_regex: '^(data|stringData)$'
+  #   age: <prod public key>
