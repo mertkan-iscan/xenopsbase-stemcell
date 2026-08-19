@@ -1,8 +1,12 @@
 # ==============================================================================
 # K3s on Hetzner, via kube-hetzner.
 #
-# PREREQUISITE: an OS snapshot must already exist in the Hetzner project,
-# labelled microos-snapshot=yes. Build it with:
+# PREREQUISITE: an OS snapshot must already exist in the Hetzner project.
+#
+# kube-hetzner 3.1.0 defaults new node pools to Leap Micro, so the snapshot must
+# carry leapmicro-snapshot=yes, NOT the microos-snapshot=yes that most tutorials
+# still reference. A MicroOS snapshot is simply never looked for, and the
+# resulting failure does not say which OS was expected. Build it with:
 #
 #   bash infra/scripts/build-snapshot.sh
 #
