@@ -1,0 +1,320 @@
+name: Terraform
+
+on:
+  pull_request:
+    paths:
+      - 'infra/terraform/**'
+      - '.github/workflows/terraform.yml'
+      - '.tflint.hcl'
+      - '.checkov.yaml'
+  push:
+    branches: [main]
+    paths:
+      - 'infra/terraform/**'
+  workflow_dispatch:
+    inputs:
+      module:
+        description: 'Root module to apply'
+        required: true
+        type: choice
+        options: [storage, edge, cluster]
+      environment:
+        description: 'Environment'
+        required: true
+        default: dev
+        type: choice
+        options: [dev, staging, prod]
+
+# Deliberately `pull_request`, never `pull_request_target`. This repository is
+# public: pull_request_target runs workflow code from the base branch WITH
+# secrets available to a fork's pull request, which is the standard way people
+# leak credentials. With `pull_request`, a fork gets no secrets — the plan job
+# below skips itself rather than failing.
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TF_VERSION: '1.14.8'
+  # Git for Windows is not involved here, but keeping the override makes the CI
+  # invocation identical to the local one rather than subtly different.
+  GIT_CONFIG_COUNT: '1'
+  GIT_CONFIG_KEY_0: core.autocrlf
+  GIT_CONFIG_VALUE_0: 'false'
+
+jobs:
+  # ----------------------------------------------------------------------------
+  # Static checks. No credentials, so these run for forks too.
+  # ----------------------------------------------------------------------------
+  lint:
+    name: lint (${{ matrix.module }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [storage, edge, cluster]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive infra/terraform
+
+      - name: terraform init (no backend)
+        working-directory: infra/terraform/${{ matrix.module }}
+        run: terraform init -backend=false -input=false
+
+      - name: terraform validate
+        working-directory: infra/terraform/${{ matrix.module }}
+        run: terraform validate
+
+      # Installed directly rather than via a marketplace action. Pinning an
+      # action to a commit SHA is the right practice, and a SHA that has not
+      # been verified is worse than none -- this is a public repository and the
+      # action would run with the workflow's permissions.
+      - name: Install tflint
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/terraform-linters/tflint/v0.55.1/install_linux.sh | bash
+          tflint --version
+
+      - name: tflint
+        working-directory: infra/terraform/${{ matrix.module }}
+        run: |
+          tflint --init --config="$GITHUB_WORKSPACE/.tflint.hcl"
+          tflint --config="$GITHUB_WORKSPACE/.tflint.hcl" --format=compact
+
+  # ----------------------------------------------------------------------------
+  # Security scan. Also credential-free.
+  # ----------------------------------------------------------------------------
+  checkov:
+    name: checkov
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        with:
+          python-version: '3.12'
+
+      - name: Install checkov
+        run: pip install --quiet checkov==3.2.334
+
+      - name: checkov
+        run: checkov --directory infra/terraform --framework terraform --config-file .checkov.yaml
+
+  # ----------------------------------------------------------------------------
+  # Plan. Needs credentials, so it is skipped for pull requests from forks —
+  # they have no secrets, and a plan that cannot reach state is noise, not a
+  # failure worth reporting.
+  # ----------------------------------------------------------------------------
+  plan:
+    name: plan (${{ matrix.module }})
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    needs: [lint]
+    permissions:
+      contents: read
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [storage, edge, cluster]
+    env:
+      ENVIRONMENT: dev
+      # R2 holds Terraform state (ADR-0005). These are the standard AWS names
+      # because the S3 backend cannot read a TF_VAR_ — see the state runbook.
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      # Provider credentials, per module.
+      TF_VAR_hetzner_s3_access_key: ${{ secrets.HETZNER_S3_ACCESS_KEY }}
+      TF_VAR_hetzner_s3_secret_key: ${{ secrets.HETZNER_S3_SECRET_KEY }}
+      TF_VAR_hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+      TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      TF_VAR_firewall_source_cidrs: ${{ secrets.FIREWALL_SOURCE_CIDRS }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Check credentials are configured
+        run: |
+          if [ -z "${AWS_ACCESS_KEY_ID}" ]; then
+            echo "::warning::R2 credentials are not configured; skipping plan."
+            echo "skip=true" >> "$GITHUB_ENV"
+          fi
+
+      - name: Write backend config
+        if: env.skip != 'true'
+        working-directory: infra/terraform/${{ matrix.module }}
+        run: |
+          cat > backend.hcl <<EOF
+          bucket = "xenopsbase-tfstate"
+          region = "auto"
+          endpoints = { s3 = "${R2_ENDPOINT}" }
+          EOF
+
+      # The state key is derived from the environment exactly as the Makefile
+      # does it, so CI cannot plan one environment's config against another's
+      # state (T-1.4).
+      - name: terraform init
+        if: env.skip != 'true'
+        working-directory: infra/terraform/${{ matrix.module }}
+        run: |
+          case "${{ matrix.module }}" in
+            storage) KEY="storage/${ENVIRONMENT}/terraform.tfstate" ;;
+            edge)    KEY="edge/${ENVIRONMENT}/terraform.tfstate" ;;
+            cluster) KEY="${ENVIRONMENT}/cluster.tfstate" ;;
+          esac
+          terraform init -input=false -reconfigure \
+            -backend-config=backend.hcl -backend-config="key=${KEY}"
+
+      # Secrets tfvars are gitignored, so CI reconstructs the non-sensitive half
+      # it needs. Anything genuinely sensitive arrives as TF_VAR_ above.
+      - name: Write per-environment secrets tfvars
+        if: env.skip != 'true'
+        working-directory: infra/terraform/${{ matrix.module }}
+        run: |
+          case "${{ matrix.module }}" in
+            storage)
+              cat > "env/${ENVIRONMENT}.secrets.tfvars" <<EOF
+          project_id = "${{ secrets.HETZNER_PROJECT_ID }}"
+          access_keys = {
+            infra         = "${{ secrets.HETZNER_KEY_INFRA }}"
+            app           = "${{ secrets.HETZNER_KEY_APP }}"
+            db            = "${{ secrets.HETZNER_KEY_DB }}"
+            observability = "${{ secrets.HETZNER_KEY_OBS }}"
+          }
+          EOF
+              ;;
+            edge)
+              cat > "env/${ENVIRONMENT}.secrets.tfvars" <<EOF
+          account_id = "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}"
+          zone_id    = "${{ secrets.CLOUDFLARE_ZONE_ID }}"
+          EOF
+              ;;
+          esac
+
+      - name: terraform plan
+        if: env.skip != 'true'
+        id: plan
+        working-directory: infra/terraform/${{ matrix.module }}
+        run: |
+          set +e
+          EXTRA=""
+          [ -f "env/${ENVIRONMENT}.secrets.tfvars" ] && EXTRA="-var-file=env/${ENVIRONMENT}.secrets.tfvars"
+          terraform plan -input=false -no-color -lock-timeout=5m \
+            -var-file="env/${ENVIRONMENT}.tfvars" $EXTRA > plan.txt 2>&1
+          echo "exitcode=$?" >> "$GITHUB_OUTPUT"
+          # Keep the comment inside GitHub's 65536-character limit.
+          tail -c 60000 plan.txt > plan.trimmed
+          cat plan.trimmed
+
+      - name: Comment plan on the pull request
+        if: env.skip != 'true' && always()
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          MODULE: ${{ matrix.module }}
+        with:
+          script: |
+            const fs = require('fs');
+            const module_ = process.env.MODULE;
+            let body;
+            try {
+              const plan = fs.readFileSync(
+                `infra/terraform/${module_}/plan.trimmed`, 'utf8');
+              const summary = (plan.match(/^(Plan:|No changes\.).*$/m) || ['(no summary line)'])[0];
+              body = [
+                `### Terraform plan — \`${module_}\` (dev)`,
+                '',
+                `**${summary}**`,
+                '',
+                '<details><summary>Full plan</summary>',
+                '',
+                '```terraform',
+                plan,
+                '```',
+                '',
+                '</details>',
+              ].join('\n');
+            } catch (e) {
+              body = `### Terraform plan — \`${module_}\` (dev)\n\nPlan did not produce output: ${e.message}`;
+            }
+            const marker = `<!-- tf-plan-${module_} -->`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: context.issue.number, per_page: 100,
+            });
+            const existing = comments.find(c => c.body.includes(marker));
+            const payload = `${marker}\n${body}`;
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                comment_id: existing.id, body: payload });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: context.issue.number, body: payload });
+            }
+
+      - name: Fail if plan errored
+        if: env.skip != 'true' && steps.plan.outputs.exitcode != '0'
+        run: exit 1
+
+  # ----------------------------------------------------------------------------
+  # Apply. Manual only.
+  #
+  # Never on push or merge: an apply here creates or destroys real, billable
+  # infrastructure, and ADR-0002 makes destroy an everyday operation rather than
+  # an exceptional one. A human chooses the module and environment deliberately.
+  # ----------------------------------------------------------------------------
+  apply:
+    name: apply (${{ inputs.module }} / ${{ inputs.environment }})
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    env:
+      ENVIRONMENT: ${{ inputs.environment }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      TF_VAR_hetzner_s3_access_key: ${{ secrets.HETZNER_S3_ACCESS_KEY }}
+      TF_VAR_hetzner_s3_secret_key: ${{ secrets.HETZNER_S3_SECRET_KEY }}
+      TF_VAR_hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+      TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      TF_VAR_firewall_source_cidrs: ${{ secrets.FIREWALL_SOURCE_CIDRS }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform init and apply
+        working-directory: infra/terraform/${{ inputs.module }}
+        run: |
+          cat > backend.hcl <<EOF
+          bucket = "xenopsbase-tfstate"
+          region = "auto"
+          endpoints = { s3 = "${R2_ENDPOINT}" }
+          EOF
+          case "${{ inputs.module }}" in
+            storage) KEY="storage/${ENVIRONMENT}/terraform.tfstate" ;;
+            edge)    KEY="edge/${ENVIRONMENT}/terraform.tfstate" ;;
+            cluster) KEY="${ENVIRONMENT}/cluster.tfstate" ;;
+          esac
+          terraform init -input=false -reconfigure \
+            -backend-config=backend.hcl -backend-config="key=${KEY}"
+          terraform apply -auto-approve -input=false -lock-timeout=5m \
+            -var-file="env/${ENVIRONMENT}.tfvars"
