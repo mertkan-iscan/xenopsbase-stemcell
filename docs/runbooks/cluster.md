@@ -200,6 +200,22 @@ Then the PVC must be `Bound` and a matching volume must appear:
 kubectl get pvc csi-smoke-test && hcloud volume list
 ```
 
+Confirm the data actually reached the volume — but note the Git Bash trap:
+
+```bash
+kubectl exec csi-smoke-test -- sh -c 'cat /data/probe'
+```
+
+**Wrap the command in `sh -c`.** Without it, MSYS rewrites `/data/probe` into a Windows path before
+kubectl sees it, and the pod reports:
+
+```
+ls: C:/Program Files/Git/data: No such file or directory
+```
+
+which looks exactly like a broken mount and is not. `MSYS_NO_PATHCONV=1` also works but breaks the
+`KUBECONFIG` path at the same time, so `sh -c` is the one to use.
+
 ### Clean up, and check the volume actually went
 
 ```bash
