@@ -14,6 +14,8 @@ resources:
   - apps/cloudnative-pg.yaml
   - apps/barman-cloud-plugin.yaml
   - apps/postgres.yaml
+  - apps/keycloak-operator.yaml
+  - apps/keycloak.yaml
   - issuers/letsencrypt.yaml
 
   # Decrypted by ksops at render time inside argocd-repo-server (ADR-0003).

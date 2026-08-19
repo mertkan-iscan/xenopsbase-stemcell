@@ -1,0 +1,110 @@
+# The realm, in git.
+#
+# This is the whole point of T-2.5: identity that reproduces exactly on a
+# rebuilt cluster, because nothing here was ever clicked in the admin console.
+# Anything configured by hand is lost on the next rebuild and, worse, is lost
+# silently -- the realm still exists, it just quietly lacks the client someone
+# added last month.
+#
+# The stemcell ships the SHAPE of a realm, not a populated one: no users, no
+# groups, no identity providers. Those are per-project.
+apiVersion: k8s.keycloak.org/v2beta1
+kind: KeycloakRealmImport
+metadata:
+  name: xenopsbase
+  namespace: keycloak
+spec:
+  keycloakCRName: keycloak
+  realm:
+    realm: xenopsbase
+    displayName: xenopsbase
+    enabled: true
+
+    # Registration and password reset are OFF. A stemcell that ships with self
+    # registration enabled is a stemcell that ships an open signup page the
+    # first time it is exposed.
+    registrationAllowed: false
+    resetPasswordAllowed: false
+    verifyEmail: false
+    loginWithEmailAllowed: true
+    duplicateEmailsAllowed: false
+
+    # Short access tokens, longer refresh. The gateway relays the access token
+    # (T-3.5), so its lifespan bounds how long a leaked one is useful.
+    accessTokenLifespan: 300
+    ssoSessionIdleTimeout: 1800
+    ssoSessionMaxLifespan: 36000
+
+    # Brute-force protection on by default rather than as a later hardening
+    # task. It is free, and the alternative is an internet-reachable login form
+    # with unlimited attempts.
+    bruteForceProtected: true
+    failureFactor: 10
+    waitIncrementSeconds: 60
+    maxFailureWaitSeconds: 900
+
+    roles:
+      realm:
+        - name: app-user
+          description: Ordinary authenticated user of the application.
+        - name: app-admin
+          description: Administrative access within the application, NOT within Keycloak.
+
+    scope:
+      # A scope the gateway can request so the core service can distinguish a
+      # user-initiated call from a service-to-service one (T-3.5).
+      - name: api
+        description: Access to the application API.
+        protocol: openid-connect
+        attributes:
+          include.in.token.scope: "true"
+          display.on.consent.screen: "false"
+
+    clients:
+      # The gateway: confidential, authorization-code flow. This is the only
+      # client that holds a secret.
+      - clientId: gateway
+        name: API gateway
+        enabled: true
+        protocol: openid-connect
+        publicClient: false
+        # Read from the environment at import time, so the secret lives in SOPS
+        # (ADR-0003) rather than in this file. The realm JSON in git shows THAT
+        # the client has a secret, never what it is.
+        secret: ${GATEWAY_CLIENT_SECRET}
+        standardFlowEnabled: true
+        directAccessGrantsEnabled: false
+        serviceAccountsEnabled: true
+        # Deliberately narrow. A wildcard redirect URI turns the authorization
+        # code flow into an open redirect and is the single most common way an
+        # OIDC setup is broken.
+        redirectUris:
+          - https://app-dev.xenopsoftware.com/login/oauth2/code/keycloak
+        webOrigins:
+          - https://app-dev.xenopsoftware.com
+        defaultClientScopes:
+          - openid
+          - profile
+          - email
+          - api
+
+      # The single-page app: public, PKCE. A browser client cannot keep a
+      # secret, so it does not get one -- PKCE is what replaces it.
+      - clientId: frontend
+        name: Frontend application
+        enabled: true
+        protocol: openid-connect
+        publicClient: true
+        standardFlowEnabled: true
+        directAccessGrantsEnabled: false
+        attributes:
+          pkce.code.challenge.method: S256
+        redirectUris:
+          - https://app-dev.xenopsoftware.com/*
+        webOrigins:
+          - https://app-dev.xenopsoftware.com
+        defaultClientScopes:
+          - openid
+          - profile
+          - email
+          - api

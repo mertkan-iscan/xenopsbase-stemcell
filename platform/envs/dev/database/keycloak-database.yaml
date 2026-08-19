@@ -1,0 +1,27 @@
+# Keycloak's database, declared rather than created by hand.
+#
+# Its own database inside the existing cluster, not a second Postgres cluster.
+# A dedicated cluster would give stronger isolation and would also double the
+# volumes, the backups and the memory for an identity provider that, in this
+# stemcell, holds one realm. The isolation that actually matters -- Keycloak's
+# tables not being readable or writable by the application role -- comes from
+# separate roles and separate databases, which this provides.
+#
+# It also means Keycloak's data is covered by the SAME WAL archive as everything
+# else, so ADR-0002's durable-state boundary does not grow a second exception.
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: keycloak
+  namespace: database
+spec:
+  cluster:
+    name: postgres
+  name: keycloak
+  owner: keycloak
+
+  # retain, not delete. Deleting this manifest -- or mistyping a path in git --
+  # should not DROP DATABASE. The same reasoning as prune: false on the
+  # postgres Application: everything else here is recreated by reconciliation,
+  # a dropped database is only recovered from backup.
+  databaseReclaimPolicy: retain

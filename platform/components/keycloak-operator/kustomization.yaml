@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The Keycloak operator.
+#
+# Chosen over the Helm chart because realm import is a first-class resource
+# here: a KeycloakRealmImport CR reconciled from versioned JSON, which is
+# exactly what T-2.5 asks for. With the chart, realm import is an initContainer
+# and a mounted file, and "no manual admin-console configuration" becomes a
+# convention rather than something the platform enforces.
+#
+# Under components/ because nothing here is environment-specific. The Keycloak
+# instance and its realm live per environment.
+namespace: keycloak
+
+resources:
+  # CRDs first. The operator Deployment does not require them at start, but the
+  # Keycloak and KeycloakRealmImport resources in envs/ do, and they are applied
+  # by a later sync wave.
+  - https://raw.githubusercontent.com/keycloak/keycloak-k8s-resources/26.7.1/kubernetes/keycloaks.k8s.keycloak.org-v1.yml
+  - https://raw.githubusercontent.com/keycloak/keycloak-k8s-resources/26.7.1/kubernetes/keycloakrealmimports.k8s.keycloak.org-v1.yml
+  - https://raw.githubusercontent.com/keycloak/keycloak-k8s-resources/26.7.1/kubernetes/kubernetes.yml
