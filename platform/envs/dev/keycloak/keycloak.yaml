@@ -64,12 +64,15 @@ spec:
 
   # The client secret referenced by the realm import below, injected as an
   # environment variable so it never appears in the realm JSON committed to git.
+  # NOTE the shape: the Keycloak CRD defines its own `secret: {name, key}` here
+  # rather than accepting the usual valueFrom.secretKeyRef. Using the Kubernetes
+  # spelling is rejected at apply time with
+  #   .spec.env[0].valueFrom: field not declared in schema
   env:
     - name: GATEWAY_CLIENT_SECRET
-      valueFrom:
-        secretKeyRef:
-          name: keycloak-clients
-          key: GATEWAY_CLIENT_SECRET
+      secret:
+        name: keycloak-clients
+        key: GATEWAY_CLIENT_SECRET
 
   resources:
     requests: {cpu: 200m, memory: 768Mi}

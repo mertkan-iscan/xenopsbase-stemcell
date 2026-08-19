@@ -50,7 +50,9 @@ spec:
         - name: app-admin
           description: Administrative access within the application, NOT within Keycloak.
 
-    scope:
+    # `clientScopes`, not `scope`. The realm representation rejects the latter:
+    #   .spec.realm.scope: field not declared in schema
+    clientScopes:
       # A scope the gateway can request so the core service can distinguish a
       # user-initiated call from a service-to-service one (T-3.5).
       - name: api
@@ -82,8 +84,10 @@ spec:
           - https://app-dev.xenopsoftware.com/login/oauth2/code/keycloak
         webOrigins:
           - https://app-dev.xenopsoftware.com
+        # `openid` is deliberately absent: it is implicit in OIDC and is not a
+        # client-scope object in Keycloak, so listing it here names something
+        # that does not exist.
         defaultClientScopes:
-          - openid
           - profile
           - email
           - api
@@ -103,8 +107,10 @@ spec:
           - https://app-dev.xenopsoftware.com/*
         webOrigins:
           - https://app-dev.xenopsoftware.com
+        # `openid` is deliberately absent: it is implicit in OIDC and is not a
+        # client-scope object in Keycloak, so listing it here names something
+        # that does not exist.
         defaultClientScopes:
-          - openid
           - profile
           - email
           - api
