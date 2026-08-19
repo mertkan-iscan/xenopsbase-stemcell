@@ -39,7 +39,15 @@ something genuinely revealing, post a summary instead of the full plan.
 
 ## Required secrets
 
-Repository → Settings → Secrets and variables → Actions. Nine of them:
+Fifteen of them. Rather than setting each by hand, run the script — it reads every value from the
+same `~/.xenopsbase.env` used for local applies and pipes each straight to `gh secret set`, so no
+value is ever pasted anywhere:
+
+```bash
+source ~/.xenopsbase.env && bash infra/scripts/set-ci-secrets.sh
+```
+
+For reference, what it sets:
 
 | Secret | What |
 |---|---|
@@ -55,11 +63,7 @@ Repository → Settings → Secrets and variables → Actions. Nine of them:
 | `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_ZONE_ID` | edge module identifiers |
 | `FIREWALL_SOURCE_CIDRS` | JSON list, e.g. `["203.0.113.4/32"]` |
 
-Set them yourself rather than pasting values into a session:
-
-```bash
-gh secret set R2_ACCESS_KEY_ID --repo mertkan-iscan/xenopsbase-stemcell
-```
+Verify with `gh secret list`. The script is safe to re-run; setting an existing secret overwrites it.
 
 Until they exist, `plan` emits a warning and skips. Lint and checkov work regardless, so the
 workflow is useful from the moment it merges.
