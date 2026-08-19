@@ -1,0 +1,132 @@
+# Alerts for the failures that do not announce themselves.
+#
+# Every rule here exists because the thing it watches can break while every
+# dashboard stays green. A Postgres Cluster reporting "Cluster in healthy state"
+# says nothing about whether its WAL is reaching object storage -- that exact
+# combination happened on 2026-08-19 and went unnoticed until someone looked in
+# the bucket.
+#
+# Written against metrics verified to exist on this cluster, not guessed. Check
+# with:
+#   curl $PROM/api/v1/label/__name__/values | tr ',' '\n' | grep cnpg_
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: backup-and-archiving
+  namespace: observability
+  labels:
+    # Picked up by the ruleSelector; the stack is configured with
+    # ruleSelectorNilUsesHelmValues: false so rules outside its own release are
+    # still discovered.
+    app.kubernetes.io/part-of: xenopsbase
+spec:
+  groups:
+    - name: postgres-archiving
+      rules:
+        # THE ONE THAT MATTERS. Continuous archiving stopping is invisible:
+        # Postgres keeps serving, the Cluster stays Healthy, Argo stays Synced,
+        # and recoverability quietly stops advancing.
+        - alert: PostgresWALArchivingFailing
+          expr: increase(cnpg_pg_stat_archiver_failed_count[15m]) > 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "WAL archiving is failing on {{ $labels.pod }}"
+            description: >-
+              pg_stat_archiver reports failures over the last 15 minutes. The
+              database is almost certainly still serving, so nothing else will
+              look wrong. Recoverability stops advancing from the moment this
+              started. Check the barman sidecar:
+              kubectl -n {{ $labels.namespace }} logs {{ $labels.pod }} -c plugin-barman-cloud
+
+        # Catches the same failure from the other side: files queued and never
+        # shipped. Survives a case where the archiver reports no NEW failures
+        # because it has stopped trying.
+        - alert: PostgresWALFilesPilingUp
+          expr: cnpg_collector_pg_wal_archive_status{value="ready"} > 20
+          for: 20m
+          labels:
+            severity: warning
+          annotations:
+            summary: "WAL files are queuing for archive on {{ $labels.pod }}"
+            description: >-
+              More than 20 WAL segments are waiting to be archived. Either
+              archiving is failing or it cannot keep up with write volume. Left
+              alone this eventually fills the data volume.
+
+        - alert: PostgresNoRecentBaseBackup
+          # The > 0 guard matters: the metric is 0 when no backup has ever been
+          # taken, and without it this fires with a nonsense 57-year age on a
+          # brand-new cluster and gets muted.
+          expr: >-
+            cnpg_collector_last_available_backup_timestamp > 0
+            and
+            (time() - cnpg_collector_last_available_backup_timestamp) > 108000
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: "No successful base backup for over 30 hours"
+            description: >-
+              ScheduledBackup runs daily at 03:00, so 30 hours means at least one
+              run was missed or failed. WAL replays forward FROM a base backup,
+              so without a recent one, recovery time grows without bound.
+
+        - alert: PostgresLastBackupFailed
+          expr: >-
+            cnpg_collector_last_failed_backup_timestamp > 0
+            and
+            cnpg_collector_last_failed_backup_timestamp > cnpg_collector_last_available_backup_timestamp
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "The most recent base backup attempt failed"
+            description: >-
+              The last failure is more recent than the last success, so the
+              newest backup on record is older than it appears.
+
+        # A cluster that has never archived at all -- the shape a rebuilt cluster
+        # takes when its archive path is not empty and barman refuses it (#113).
+        - alert: PostgresNeverArchived
+          expr: cnpg_pg_stat_archiver_archived_count == 0
+          for: 45m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $labels.pod }} has never archived a WAL segment"
+            description: >-
+              Not a single segment has been archived since the stats were reset.
+              On a freshly rebuilt cluster this is usually barman refusing a
+              non-empty archive path -- "Expected empty archive". The cluster
+              runs normally and has no backups.
+
+    - name: public-path
+      rules:
+        # The entire public path depends on cloudflared holding an outbound
+        # tunnel. If every connector drops, the site is down while the cluster
+        # itself looks perfectly healthy.
+        - alert: CloudflaredNoReplicasAvailable
+          expr: kube_deployment_status_replicas_available{deployment="cloudflared"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "No cloudflared connectors are available"
+            description: >-
+              Nothing is serving public traffic. cloudflared retries with backoff
+              rather than exiting, so its pods can sit Running and Ready-less for
+              a long time -- check for blocked outbound UDP 7844 before anything
+              else.
+
+        - alert: CloudflaredDegraded
+          expr: kube_deployment_status_replicas_available{deployment="cloudflared"} < 2
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "cloudflared is running below two connectors"
+            description: >-
+              Still serving, but a single connector is a single point of failure
+              for the whole public path.
