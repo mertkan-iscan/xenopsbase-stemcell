@@ -8,3 +8,15 @@ kind: Kustomization
 # the whole point of the app-of-apps arrangement (ADR-0004).
 resources:
   - namespaces.yaml
+  - apps/ingress-nginx.yaml
+  - apps/cert-manager.yaml
+
+  # NOT here yet, and deliberately:
+  #
+  #   issuers/     the DNS-01 ClusterIssuers need a Cloudflare API token INSIDE
+  #                the cluster. ADR-0003 makes SOPS the mechanism for that, and
+  #                SOPS arrives in T-2.3. Templating the token into a manifest
+  #                now would write it to the node's filesystem in plaintext,
+  #                one task before the right answer exists.
+  #
+  #   cloudflared  same reason: it needs the tunnel token from T-1.6.

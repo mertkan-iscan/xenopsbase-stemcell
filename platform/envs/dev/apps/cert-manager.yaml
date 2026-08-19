@@ -1,0 +1,46 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://charts.jetstack.io
+    chart: cert-manager
+    targetRevision: v1.21.1
+    helm:
+      values: |
+        crds:
+          enabled: true
+          # Keep the CRDs when the Application is deleted. Removing them would
+          # take every Certificate and Issuer with them, including in other
+          # namespaces -- a much larger blast radius than uninstalling the
+          # controller.
+          keep: true
+
+        resources:
+          requests: {cpu: 50m, memory: 96Mi}
+        webhook:
+          resources:
+            requests: {cpu: 25m, memory: 48Mi}
+        cainjector:
+          resources:
+            requests: {cpu: 25m, memory: 96Mi}
+
+        # DNS-01 only, so the solver never needs to be reachable from outside.
+        # That matters here: with a tunnel there is no public listener for an
+        # HTTP-01 challenge to arrive at, which is why DNS-01 is not merely
+        # preferred but required.
+        dns01RecursiveNameservers: "1.1.1.1:53,9.9.9.9:53"
+        dns01RecursiveNameserversOnly: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
