@@ -142,6 +142,36 @@ module "kube_hetzner" {
     }
   }
 
+  # ----------------------------------------------------------------------------
+  # GitOps bootstrap (ADR-0004, T-2.1)
+  #
+  # Applied by the module during this same terraform apply, so the cluster goes
+  # from nothing to reconciling in one step. Two sets, because ordering matters:
+  # the root Application is an argoproj.io CRD, which does not exist until Argo
+  # CD has installed. Applying both at once fails on a missing resource type.
+  # ----------------------------------------------------------------------------
+  user_kustomizations = {
+    "1" = {
+      source_folder = "${path.module}/manifests/10-argocd"
+      kustomize_parameters = {
+        argocd_chart_version = var.argocd_chart_version
+        argocd_domain        = var.argocd_domain
+      }
+    }
+    "2" = {
+      source_folder = "${path.module}/manifests/20-root-app"
+      kustomize_parameters = {
+        platform_repo_url      = var.platform_repo_url
+        platform_repo_revision = var.platform_repo_revision
+        platform_path          = "platform/envs/${var.environment}"
+      }
+      # k3s installs the chart asynchronously, so the CRD appears some time
+      # after set 1 is applied. Waiting for it explicitly is the difference
+      # between a reliable bootstrap and one that works when the network is fast.
+      pre_commands = "kubectl wait --for=condition=established --timeout=300s crd/applications.argoproj.io"
+    }
+  }
+
   # Do not write a kubeconfig to disk automatically. It is a credential with
   # cluster-admin, and a file that appears next to the Terraform code is a file
   # that eventually gets committed. Retrieved explicitly instead:

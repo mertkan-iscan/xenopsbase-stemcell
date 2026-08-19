@@ -1,0 +1,34 @@
+# Namespaces the platform components land in.
+#
+# Created here rather than by each component's own chart so that the root
+# Application has something real to reconcile from the first apply, and so
+# deleting one demonstrates self-healing rather than merely being described.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ingress-nginx
+  labels: {app.kubernetes.io/managed-by: argocd}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cert-manager
+  labels: {app.kubernetes.io/managed-by: argocd}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cnpg-system
+  labels: {app.kubernetes.io/managed-by: argocd}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability
+  labels: {app.kubernetes.io/managed-by: argocd}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: keycloak
+  labels: {app.kubernetes.io/managed-by: argocd}

@@ -220,6 +220,46 @@ variable "ccm_disable_network_attached_check" {
 }
 
 # ------------------------------------------------------------------------------
+# GitOps (ADR-0004, T-2.1)
+# ------------------------------------------------------------------------------
+
+variable "argocd_chart_version" {
+  description = <<-EOT
+    Argo CD helm chart version, pinned.
+
+    A floating version means a rebuild can install a different Argo CD than the
+    last one for reasons nobody chose, which breaks the promise of ADR-0002 that
+    a rebuild reproduces what was there before.
+  EOT
+  type        = string
+  default     = "10.4.0"
+}
+
+variable "argocd_domain" {
+  description = "Hostname Argo CD believes it serves on. No ingress exists for it; access is by port-forward."
+  type        = string
+  default     = "argocd.internal"
+}
+
+variable "platform_repo_url" {
+  description = <<-EOT
+    Git repository the root Application reconciles from.
+
+    Public, so Argo CD needs no credentials to read it. That is a real
+    simplification of the bootstrap: one fewer secret that must exist before
+    the cluster does.
+  EOT
+  type        = string
+  default     = "https://github.com/mertkan-iscan/xenopsbase-stemcell.git"
+}
+
+variable "platform_repo_revision" {
+  description = "Branch or tag the root Application tracks."
+  type        = string
+  default     = "main"
+}
+
+# ------------------------------------------------------------------------------
 # Network exposure (ADR-0006)
 # ------------------------------------------------------------------------------
 

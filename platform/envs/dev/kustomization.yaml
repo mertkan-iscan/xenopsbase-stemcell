@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Child Applications and platform manifests for dev.
+#
+# Terraform knows only about the root Application that points here. Adding a
+# component is a commit to this file, not an infrastructure change -- which is
+# the whole point of the app-of-apps arrangement (ADR-0004).
+resources:
+  - namespaces.yaml
