@@ -41,8 +41,12 @@ load_balancer_type  = "lb11"
 # Terraform and kubectl reach the cluster over the tailnet.
 #
 # TF_VAR_tailscale_auth_key must be set, and must be a REUSABLE key.
-node_transport_mode       = "tailscale"
+node_transport_mode       = "hetzner_private"
 tailscale_magicdns_domain = "tail894b71.ts.net"
 
-# Only consulted under the hetzner_private escape hatch.
-firewall_source_cidrs = []
+# firewall_source_cidrs is deliberately NOT set here. It is a home IP address
+# and this repository is public, so it comes from TF_VAR_firewall_source_cidrs.
+#
+# It must be absent rather than empty: a -var-file value overrides a TF_VAR_
+# environment variable, so "firewall_source_cidrs = []" here would silently beat
+# the environment and trip the validation.

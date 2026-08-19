@@ -153,6 +153,39 @@ Switch back as soon as the outage ends, and re-run `make verify-exposure`.
 
 ## Troubleshooting
 
+**Workers join the tailnet but never join Kubernetes, and the apply fails on
+`system-upgrade-controller`**
+
+Check `advertise_node_private_routes`. It must be `true`, which is the module default.
+
+Setting it `false` looks harmless for a single-network cluster — `kube.tf.example` even suggests it
+to avoid Tailnet route approvals. It also turns off the Hetzner network routing the cloud
+controller manager depends on. The CCM then deploys with `HCLOUD_NETWORK_ROUTES_ENABLED=false` and
+no `HCLOUD_NETWORK`, so it cannot match the private address the kubelet reports:
+
+```
+failed to get node address from cloud provider that matches ip: 10.255.0.1
+```
+
+From there the failure walks four steps away from its cause:
+
+1. CCM refuses to initialise the node
+2. The `node.cloudprovider.kubernetes.io/uninitialized` taint never lifts
+3. Nothing can schedule, so `system-upgrade-controller` stays `Pending`
+4. The kustomization step waits 900s for it, times out, and the **agents' k3s install never runs**
+
+The visible symptom is workers sitting healthy on the tailnet having never joined the cluster, and
+an error about an upgrade controller. Nothing in that mentions routing.
+
+Confirm with:
+
+```bash
+kubectl -n kube-system get deploy hcloud-cloud-controller-manager \
+  -o jsonpath='{range .spec.template.spec.containers[0].env[*]}{.name}={.value}{"\n"}{end}'
+```
+
+`HCLOUD_NETWORK` must be present. If it is missing, this is the cause.
+
 **Nodes boot but never become Ready, and Terraform hangs**
 Almost always the Tailscale auth key. Check it is **reusable** and not expired — a single-use key
 registers the first node and leaves the others waiting forever. The Tailscale admin console shows

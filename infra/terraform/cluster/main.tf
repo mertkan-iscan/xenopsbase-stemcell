@@ -93,10 +93,28 @@ module "kube_hetzner" {
     }
 
     routing = {
-      # Single-network cluster, so no node-private routes need advertising and
-      # no Tailnet route approvals are required. Set true only if a nodepool
-      # moves to network_scope = "external".
-      advertise_node_private_routes = false
+      # MUST stay true, which is also the module default. Do not "optimise" this
+      # to false for a single-network cluster, however tempting the comment in
+      # kube.tf.example makes it sound.
+      #
+      # Setting it false does more than skip Tailnet route approvals: it also
+      # turns off the Hetzner network routing the cloud controller manager
+      # depends on. The CCM deployment then comes up with
+      # HCLOUD_NETWORK_ROUTES_ENABLED=false and no HCLOUD_NETWORK at all, so it
+      # cannot match the private address the kubelet reports and refuses to
+      # initialise the node:
+      #
+      #   failed to get node address from cloud provider that matches ip: 10.255.0.1
+      #
+      # The node then keeps its node.cloudprovider.kubernetes.io/uninitialized
+      # taint forever, nothing can schedule, system-upgrade-controller never
+      # becomes available, the kustomization step times out after 15 minutes,
+      # and the agents' k3s install never runs -- so the workers sit on the
+      # tailnet having never joined Kubernetes.
+      #
+      # Four steps between cause and symptom, none of which mention routing.
+      # Verified the hard way on 2026-08-19.
+      advertise_node_private_routes = true
     }
   }
 
