@@ -1,0 +1,87 @@
+# cloudflared — the only thing connecting this cluster to the public internet,
+# and it does so by dialling OUT.
+#
+# There is no inbound listener, no load balancer and no public port. Cloudflare
+# receives the request at its edge and hands it down an outbound connection this
+# pod established. That is what lets ADR-0006 close the cluster completely while
+# the application still serves.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/name: cloudflared
+spec:
+  # Two replicas, on a three-node dev cluster where almost everything else is
+  # one. This pod is the entire public path: one replica means an eviction, a
+  # node drain or an OOM takes the site down with nothing to fail over to.
+  # Cloudflare load-balances across connectors automatically, so the second
+  # costs ~30MB and removes a single point of failure.
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cloudflared
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cloudflared
+    spec:
+      # Keep the two replicas off the same node, or the second one is decoration.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: cloudflared
+      containers:
+        - name: cloudflared
+          image: cloudflare/cloudflared:2026.8.2
+          args:
+            - tunnel
+            - --no-autoupdate
+            # Ingress rules live in Cloudflare (config_src = "cloudflare" in the
+            # edge module), so the connector takes none locally. One place
+            # defines routing rather than two that can disagree.
+            - --metrics
+            - 0.0.0.0:2000
+            - run
+          env:
+            - name: TUNNEL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  # Encrypted in git, decrypted by ksops at render time
+                  # (ADR-0003). Never committed in plaintext, never stored
+                  # decrypted.
+                  name: cloudflared-token
+                  key: token
+          # cloudflared exposes readiness on the metrics port. Without these a
+          # rolling update can cut every connector at once, because Kubernetes
+          # has no way to know the new pod has actually registered with
+          # Cloudflare yet.
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 2000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 2000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
