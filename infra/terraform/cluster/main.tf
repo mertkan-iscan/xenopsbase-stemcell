@@ -156,6 +156,7 @@ module "kube_hetzner" {
       kustomize_parameters = {
         argocd_chart_version = var.argocd_chart_version
         argocd_domain        = var.argocd_domain
+        ksops_version        = var.ksops_version
         # Indented to sit under the YAML block scalar in the Secret template.
         sops_age_key = indent(4, var.sops_age_key)
       }

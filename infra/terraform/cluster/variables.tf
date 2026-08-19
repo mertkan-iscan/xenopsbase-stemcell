@@ -235,6 +235,12 @@ variable "argocd_chart_version" {
   default     = "10.4.0"
 }
 
+variable "ksops_version" {
+  description = "ksops release version injected into argocd-repo-server. Pinned, like every other component."
+  type        = string
+  default     = "4.5.1"
+}
+
 variable "sops_age_key" {
   description = <<-EOT
     The age PRIVATE key that decrypts every secret in git (ADR-0003).

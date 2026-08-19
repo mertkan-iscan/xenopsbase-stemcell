@@ -69,14 +69,28 @@ spec:
         requests: {cpu: 50m, memory: 128Mi}
 
       initContainers:
+        # NOT the viaductoss/ksops image, despite that being the recipe in most
+        # guides. Since v4.5 it is built on gcr.io/distroless/base, which has no
+        # shell and no cp -- so `command: ["/bin/sh","-c"]` fails at container
+        # creation with:
+        #
+        #   exec: "/bin/sh": stat /bin/sh: no such file or directory
+        #
+        # and the pod sits in Init:CrashLoopBackOff while the OLD repo-server
+        # keeps serving, so Argo looks healthy while silently not picking up the
+        # change.
+        #
+        # Downloading the release binary into a shared volume needs no shell in
+        # the ksops image at all, and pins the exact version.
         - name: install-ksops
-          image: viaductoss/ksops:v4.5.1
+          image: alpine:3.22
           command: ["/bin/sh", "-c"]
           args:
-            - echo "installing ksops";
-              mv ksops /custom-tools/;
-              mv $GOPATH/bin/kustomize /custom-tools/;
-              echo "done";
+            - |
+              set -eu
+              wget -qO- "https://github.com/viaduct-ai/kustomize-sops/releases/download/v${ksops_version}/ksops_${ksops_version}_Linux_x86_64.tar.gz"                 | tar -xz -C /custom-tools ksops
+              chmod +x /custom-tools/ksops
+              /custom-tools/ksops --version || true
           volumeMounts:
             - mountPath: /custom-tools
               name: custom-tools
@@ -92,9 +106,9 @@ spec:
             secretName: sops-age
 
       volumeMounts:
-        - mountPath: /usr/local/bin/kustomize
-          name: custom-tools
-          subPath: kustomize
+        # kustomize is already present in the repo-server image, so only ksops
+        # is injected. Overwriting the shipped kustomize would risk a version
+        # skew against the Argo CD release for no benefit.
         - mountPath: /usr/local/bin/ksops
           name: custom-tools
           subPath: ksops
