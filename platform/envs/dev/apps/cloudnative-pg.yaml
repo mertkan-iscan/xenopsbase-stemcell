@@ -41,10 +41,8 @@ spec:
           limits:   {memory: 256Mi}
 
         monitoring:
-          # Turned on with kube-prometheus-stack in T-2.6. Enabling it now would
-          # create a ServiceMonitor whose CRD does not exist, and the whole
-          # Application would fail to sync over a metrics scrape.
-          podMonitorEnabled: false
+          # On, now that T-2.6 provides the PodMonitor CRD.
+          podMonitorEnabled: true
   destination:
     server: https://kubernetes.default.svc
     namespace: cnpg-system
