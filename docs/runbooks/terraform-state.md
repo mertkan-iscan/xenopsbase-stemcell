@@ -110,6 +110,18 @@ bash infra/scripts/verify-state-locking.sh infra/terraform/storage/backend.hcl
 documented nothing and turned out not to work; R2 documents support, which is evidence but not
 proof. The script is the proof.
 
+Verified on R2, 2026-08-19:
+
+```
+verify-state-locking.sh
+  contender exit code: 1
+  PASS - the second operation was refused while the lock was held.
+
+aws s3api put-object --if-none-match "*"   # twice, same key
+  PUT #1 -> 200 OK
+  PUT #2 -> PreconditionFailed, original content preserved
+```
+
 ## Backend flags, and why each is present
 
 | Flag | Reason |

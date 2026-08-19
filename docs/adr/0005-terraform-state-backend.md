@@ -49,9 +49,17 @@ chunks — stays in Hetzner Object Storage.
 Only the state bucket moves. This is not a migration away from Hetzner; it is the narrowest
 possible change that makes locking real.
 
-R2 documents `If-None-Match` on `PutObject` as supported, so `use_lockfile` works as designed.
-**That claim is verified with `verify-state-locking.sh` before being trusted** — the same script
-that caught the Hetzner problem, and for the same reason.
+R2 documents `If-None-Match` on `PutObject` as supported, and that claim was **verified rather
+than trusted**, using the same script that caught the Hetzner problem:
+
+| Test | Hetzner | R2 |
+|---|---|---|
+| `plan` while an `apply` holds the lock | exit 0, lock acquired | **refused** |
+| `put-object --if-none-match "*"` twice | 2nd → `200`, overwrote | **2nd → `PreconditionFailed`** |
+| Content after the second PUT | overwritten | **preserved** |
+
+Verified 2026-08-19 against the real bucket. Re-run `verify-state-locking.sh` after any Terraform
+upgrade or backend change; documented support is evidence, not proof.
 
 ### Consequence: two sets of S3 credentials
 
