@@ -142,8 +142,14 @@ spec:
       localeCollate: C
       localeCType: C
 
-  # No monitoring block. enablePodMonitor already defaults to false, and the
-  # operator writes two further defaults into that stanza -- so declaring it
-  # here would claim ownership of a field the operator keeps editing, and Argo
-  # would report drift forever. T-2.6 adds it back deliberately, alongside the
-  # ServiceMonitor CRD that makes it meaningful.
+  monitoring:
+    # On, now that T-2.6 provides the PodMonitor CRD. This is what exports
+    # cnpg_collector_* -- including the archiving and backup-age series the
+    # alerting rules depend on. Without it, the failure that took the longest to
+    # notice tonight stays invisible.
+    #
+    # The operator writes two further defaults into this stanza, so the postgres
+    # Application ignores /spec/monitoring when diffing (see apps/postgres.yaml).
+    # ignoreDifferences suppresses comparison, not application: this value is
+    # still applied.
+    enablePodMonitor: true

@@ -1,0 +1,169 @@
+# Metrics, dashboards and alerting.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  annotations:
+    # Wave 0. The ServiceMonitor and PodMonitor CRDs arrive with this chart, and
+    # other components' monitors reference them.
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    # Pinned. Chart 88.5.0 carries prometheus-operator v0.93.1.
+    targetRevision: 88.5.0
+    helm:
+      # The CRDs in this chart are very large. Without this, Helm's rendered
+      # output is fine but Argo's client-side apply blows the 262144-byte
+      # annotation limit.
+      skipCrds: false
+      values: |
+        # ----------------------------------------------------------------
+        # Prometheus
+        # ----------------------------------------------------------------
+        prometheus:
+          prometheusSpec:
+            # RETENTION IS BOUNDED TWICE, on purpose.
+            #
+            # `retention` alone bounds age, not size: a sudden increase in
+            # series -- a crash-looping pod churning labels, say -- fills the
+            # volume well inside the window. `retentionSize` is the one that
+            # actually protects the disk.
+            #
+            # retentionSize is deliberately well under the 10Gi volume. Prometheus
+            # enforces it on completed blocks only, so the head block and WAL sit
+            # ON TOP of this figure. Setting it at or near the volume size fills
+            # the disk anyway, which is exactly the failure it is meant to prevent.
+            retention: 7d
+            retentionSize: "6GiB"
+
+            # A real volume, not emptyDir. On emptyDir the metrics vanish with the
+            # pod, which means they vanish precisely when a pod is crash-looping
+            # and the history is what you need.
+            storageSpec:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: hcloud-volumes
+                  accessModes: ["ReadWriteOnce"]
+                  # Hetzner's minimum. Nothing smaller is possible.
+                  resources:
+                    requests:
+                      storage: 10Gi
+
+            resources:
+              requests: {cpu: 200m, memory: 768Mi}
+              limits:   {memory: 1536Mi}
+
+            # Discover monitors from EVERY namespace, not just this chart's own
+            # release. Without these four, a ServiceMonitor added next to an
+            # application is silently ignored -- it exists, it is valid, and
+            # nothing scrapes it.
+            serviceMonitorSelectorNilUsesHelmValues: false
+            podMonitorSelectorNilUsesHelmValues: false
+            ruleSelectorNilUsesHelmValues: false
+            probeSelectorNilUsesHelmValues: false
+
+        # ----------------------------------------------------------------
+        # Alertmanager
+        # ----------------------------------------------------------------
+        alertmanager:
+          alertmanagerSpec:
+            # emptyDir in dev. Alertmanager's state is silences and dedup
+            # history; losing it on restart costs a repeated notification, not
+            # data. Not worth a second Hetzner volume at the 10Gi minimum.
+            # Prod gets a volume, where a silence surviving a restart matters.
+            storage: {}
+            resources:
+              requests: {cpu: 25m, memory: 96Mi}
+              limits:   {memory: 192Mi}
+
+        # ----------------------------------------------------------------
+        # Grafana
+        # ----------------------------------------------------------------
+        grafana:
+          # Never the admin/admin default. The credential is SOPS-encrypted in
+          # git (ADR-0003), like every other one here.
+          admin:
+            existingSecret: grafana-admin
+            userKey: admin-user
+            passwordKey: admin-password
+
+          # No persistence. Everything Grafana would store -- dashboards,
+          # datasources -- is provisioned from git below, so a volume would hold
+          # only session state and would quietly become somewhere state could
+          # hide that ADR-0002 does not account for.
+          persistence:
+            enabled: false
+
+          # The sidecar watches for labelled ConfigMaps and drops dashboards
+          # into Grafana. This is what makes "dashboards as code" work: adding
+          # one is a commit, not a click.
+          sidecar:
+            dashboards:
+              enabled: true
+              label: grafana_dashboard
+              labelValue: "1"
+              searchNamespace: ALL
+              folderAnnotation: grafana_folder
+              provider:
+                foldersFromFilesStructure: true
+            datasources:
+              enabled: true
+              searchNamespace: ALL
+
+          resources:
+            requests: {cpu: 50m, memory: 192Mi}
+            limits:   {memory: 384Mi}
+
+          grafana.ini:
+            users:
+              # No sign-up, and viewers cannot edit. Grafana is reachable through
+              # the tunnel like everything else.
+              allow_sign_up: false
+              viewers_can_edit: false
+            auth.anonymous:
+              enabled: false
+
+        # ----------------------------------------------------------------
+        # Cluster components
+        # ----------------------------------------------------------------
+        # k3s does not expose these as scrapeable endpoints the way kubeadm
+        # does: they run inside the k3s server process rather than as separate
+        # static pods. Left enabled they produce permanently firing "target
+        # down" alerts, which is worse than no signal -- an alert that is always
+        # red trains everyone to ignore the alert list.
+        kubeControllerManager:
+          enabled: false
+        kubeScheduler:
+          enabled: false
+        kubeProxy:
+          enabled: false
+        kubeEtcd:
+          enabled: false
+
+        nodeExporter:
+          enabled: true
+        kubeStateMetrics:
+          enabled: true
+
+        prometheus-node-exporter:
+          resources:
+            requests: {cpu: 25m, memory: 48Mi}
+            limits:   {memory: 96Mi}
+        kube-state-metrics:
+          resources:
+            requests: {cpu: 25m, memory: 96Mi}
+            limits:   {memory: 192Mi}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
