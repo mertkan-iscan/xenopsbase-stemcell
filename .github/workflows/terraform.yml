@@ -205,6 +205,21 @@ jobs:
               ;;
           esac
 
+      # The cluster module reads SSH keys from local FILES, which a runner does
+      # not have. The public key must be the real one -- it becomes an
+      # hcloud_ssh_key resource, so a different value would produce a plan that
+      # does not match reality. The private key is only used by provisioners at
+      # apply time, never during plan, so a throwaway satisfies the variable.
+      #
+      # That is the point: a real plan, without putting a key that grants root
+      # on every node into CI.
+      - name: Provide SSH keys for the cluster plan
+        if: env.skip != 'true' && matrix.module == 'cluster'
+        run: |
+          ssh-keygen -t ed25519 -N '' -C 'ci-throwaway-never-authorised' -f /tmp/ci_key >/dev/null
+          echo "${{ secrets.SSH_PUBLIC_KEY }}" > /tmp/ci_key.pub
+          echo "TF_KEY_OVERRIDE=-var ssh_public_key_path=/tmp/ci_key.pub -var ssh_private_key_path=/tmp/ci_key" >> "$GITHUB_ENV"
+
       - name: terraform plan
         if: env.skip != 'true'
         id: plan
