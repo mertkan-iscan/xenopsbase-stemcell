@@ -93,6 +93,9 @@ variable "agent_nodepools" {
     labels      = optional(list(string), [])
     taints      = optional(list(string), [])
     count       = number
+    # Required by the module at plan time under tailscale transport (ADR-0006).
+    # "primary" keeps the pool on the module's own Hetzner network.
+    network_scope = optional(string, "primary")
   }))
   default = [
     {
@@ -168,7 +171,96 @@ variable "load_balancer_type" {
 }
 
 variable "extra_firewall_rules" {
-  description = "Additional firewall rules. T-1.5 owns hardening; this is the seam it will use."
+  description = "Additional firewall rules layered on top of the module's default-deny set."
   type        = list(any)
+  default     = []
+}
+
+# ------------------------------------------------------------------------------
+# Network exposure (ADR-0006)
+# ------------------------------------------------------------------------------
+
+variable "node_transport_mode" {
+  description = <<-EOT
+    How Terraform and operators reach the nodes.
+
+    "tailscale"       nodes join a tailnet at first boot; the public Kubernetes
+                      API and SSH are closed entirely. This is the intended mode.
+
+    "hetzner_private" the escape hatch. Restores public API and SSH, restricted
+                      by firewall_source_cidrs below. It exists because closing
+                      the front door introduces a dependency: if Tailscale is
+                      unreachable and the cluster must be rebuilt, the
+                      alternative to this hatch is waiting out someone else's
+                      outage. Using it is a deliberate, reviewable change.
+  EOT
+  type        = string
+  default     = "tailscale"
+
+  validation {
+    condition     = contains(["tailscale", "hetzner_private"], var.node_transport_mode)
+    error_message = "node_transport_mode must be tailscale or hetzner_private."
+  }
+
+  # These fail at plan time on purpose. Every one of them, left unchecked,
+  # produces a provisioning HANG rather than an error: nodes boot, never join,
+  # and Terraform waits on SSH that will never answer.
+  validation {
+    condition     = var.node_transport_mode != "tailscale" || (var.tailscale_auth_key != null && var.tailscale_auth_key != "")
+    error_message = "node_transport_mode = tailscale needs TF_VAR_tailscale_auth_key. It must be a REUSABLE key: a single-use key registers only the first node and the rest hang waiting to join."
+  }
+
+  validation {
+    condition     = var.node_transport_mode != "tailscale" || (var.tailscale_magicdns_domain != null && var.tailscale_magicdns_domain != "")
+    error_message = "node_transport_mode = tailscale needs tailscale_magicdns_domain, e.g. \"tail1a2b3c.ts.net\". The module requires it at plan time; find it in the Tailscale admin console under DNS."
+  }
+
+  validation {
+    condition     = var.node_transport_mode != "hetzner_private" || length(var.firewall_source_cidrs) > 0
+    error_message = "node_transport_mode = hetzner_private needs firewall_source_cidrs. Leaving it empty would expose the Kubernetes API and SSH to the internet."
+  }
+
+  validation {
+    condition     = var.node_transport_mode != "hetzner_private" || !contains(var.firewall_source_cidrs, "0.0.0.0/0")
+    error_message = "firewall_source_cidrs contains 0.0.0.0/0, which exposes the Kubernetes API and SSH to the entire internet. The escape hatch is meant to be narrower than the front door, not identical to having none."
+  }
+}
+
+variable "tailscale_auth_key" {
+  description = <<-EOT
+    Tailscale auth key. Supply via TF_VAR_tailscale_auth_key; never in a file.
+
+    Must be REUSABLE: a single-use key registers only the first node and the
+    rest hang waiting to join. Second bootstrap secret alongside the age key of
+    ADR-0003 -- something that must exist before the cluster does.
+  EOT
+  type        = string
+  default     = null
+  sensitive   = true
+}
+
+variable "tailscale_magicdns_domain" {
+  description = <<-EOT
+    The tailnet's MagicDNS domain, e.g. "tail1a2b3c.ts.net".
+
+    Required by the module at plan time when node_transport_mode = "tailscale".
+    Found in the Tailscale admin console under DNS.
+  EOT
+  type        = string
+  default     = null
+}
+
+variable "firewall_source_cidrs" {
+  description = <<-EOT
+    Source CIDRs permitted to reach the Kubernetes API and SSH.
+
+    Used ONLY when node_transport_mode = "hetzner_private". Under tailscale
+    both sources are closed outright, so this is ignored.
+
+    Never leave this as 0.0.0.0/0. The module warns that a stale allowlist makes
+    provisioning hang rather than fail, so a wrong value here is worse than an
+    obviously broken one.
+  EOT
+  type        = list(string)
   default     = []
 }

@@ -36,3 +36,13 @@ cni_plugin          = "flannel"
 ingress_controller  = "none"
 enable_cert_manager = false
 load_balancer_type  = "lb11"
+
+# Network exposure (ADR-0006). Public Kubernetes API and SSH are closed;
+# Terraform and kubectl reach the cluster over the tailnet.
+#
+# TF_VAR_tailscale_auth_key must be set, and must be a REUSABLE key.
+node_transport_mode       = "tailscale"
+tailscale_magicdns_domain = "" # e.g. tail1a2b3c.ts.net — from the Tailscale admin console, DNS
+
+# Only consulted under the hetzner_private escape hatch.
+firewall_source_cidrs = []

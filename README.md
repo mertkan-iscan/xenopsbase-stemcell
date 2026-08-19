@@ -73,8 +73,10 @@ reproduces from nothing.
   - [ADR-0003](docs/adr/0003-secrets-management.md) — SOPS and age, one bootstrap secret
   - [ADR-0004](docs/adr/0004-gitops-engine.md) — Argo CD, app-of-apps
   - [ADR-0005](docs/adr/0005-terraform-state-backend.md) — Terraform state in Cloudflare R2
+  - [ADR-0006](docs/adr/0006-tailscale-node-transport.md) — Tailscale transport, no public API endpoint
 - [CONTRIBUTING.md](CONTRIBUTING.md) — branching, commits, and the no-manual-configuration rule
 - Runbooks
+  - [Network access](docs/runbooks/network-access.md) — exposure model, SSH policy, escape hatch
   - [Environments](docs/runbooks/environments.md) — dev/staging/prod layout, ENV targets, guards
   - [Terraform state](docs/runbooks/terraform-state.md) — bootstrap, locking, recovery
   - [Object storage](docs/runbooks/object-storage.md) — per-environment durable buckets, retention, least privilege
