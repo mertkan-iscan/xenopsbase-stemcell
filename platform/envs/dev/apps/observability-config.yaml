@@ -1,0 +1,30 @@
+# Alert rules and dashboards, separate from the chart that consumes them.
+#
+# Separate on purpose: the chart can be upgraded, or even removed and
+# reinstalled, without taking the rules and dashboards with it. They are the
+# part that encodes what this platform knows about its own failure modes, and
+# they should outlive any particular version of the stack.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: observability-config
+  namespace: argocd
+  annotations:
+    # Wave 1: the PrometheusRule CRD arrives with the stack in wave 0.
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mertkan-iscan/xenopsbase-stemcell.git
+    targetRevision: main
+    path: platform/envs/dev/observability
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

@@ -17,6 +17,7 @@ resources:
   - apps/keycloak-operator.yaml
   - apps/keycloak.yaml
   - apps/kube-prometheus-stack.yaml
+  - apps/observability-config.yaml
   - issuers/letsencrypt.yaml
 
   # Decrypted by ksops at render time inside argocd-repo-server (ADR-0003).
