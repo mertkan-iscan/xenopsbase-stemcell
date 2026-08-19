@@ -71,9 +71,17 @@ module "kube_hetzner" {
 
   extra_firewall_rules = var.extra_firewall_rules
 
-  # Merged into the CCM helm release by the module. See the variable for the
-  # metadata-routing failure this works around (#84).
-  hetzner_ccm_values = local.hetzner_ccm_values
+  # MERGE, not replace. The module offers both:
+  #
+  #   hetzner_ccm_values        replaces the default values outright
+  #   hetzner_ccm_merge_values  merges with them, ours winning on conflict
+  #
+  # Using the first one silently dropped every env var the module sets --
+  # including HCLOUD_NETWORK, without which the CCM cannot match the private
+  # address the kubelet reports and refuses to initialise the node. The symptom
+  # was identical to the bug this is meant to fix, which made the regression
+  # look like the fix not working.
+  hetzner_ccm_merge_values = local.hetzner_ccm_values
 
   # ----------------------------------------------------------------------------
   # Network exposure (ADR-0006)
