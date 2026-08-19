@@ -65,125 +65,26 @@ resource "aws_s3_bucket_versioning" "this" {
 }
 
 # ------------------------------------------------------------------------------
-# Lifecycle rules
+# Lifecycle rules are NOT managed here.
 #
-# Hetzner supports Expiration, NoncurrentVersionExpiration (NoncurrentDays only)
-# and AbortIncompleteMultipartUpload. Transitions between storage classes are
-# not supported, since there is only one class.
+# aws_s3_bucket_lifecycle_configuration cannot be used against Hetzner. The PUT
+# succeeds; the provider's post-write stabilization is what fails. It polls
+# GetBucketLifecycleConfiguration until the response matches what it sent, and
+# both HCL forms -- `filter {}` and the deprecated `prefix = ""` -- normalize
+# internally to a V2 Filter. Hetzner always returns the V1 form instead, with a
+# bare <Prefix></Prefix> and no Filter element, so the comparison never
+# converges. Every lifecycle resource burns its full 3 minute timeout and fails
+# having actually applied the rules correctly.
 #
-# Every rule here is a BACKSTOP. The owning component enforces its own, shorter
-# retention. These exist so that a component which stops cleaning up after
-# itself cannot grow the bill without bound.
+# Verified 2026-08-19 against aws provider v6.60.0: 21 polls, a correct
+# response every time, never accepted.
+#
+# The rules therefore live in infra/lifecycle/*.json and are applied by
+# infra/scripts/apply-lifecycle-rules.sh, which reads them back to confirm they
+# stuck. Still reviewable code under version control -- ADR-0002 forbids state
+# created BY HAND, and nothing there is.
+#
+#   make storage-lifecycle
+#
+# See docs/runbooks/object-storage.md.
 # ------------------------------------------------------------------------------
-
-# Documents are user data. Current versions are never expired: only superseded
-# versions are, and only after a long grace period, so that an accidental
-# overwrite or delete stays recoverable.
-resource "aws_s3_bucket_lifecycle_configuration" "documents" {
-  bucket = aws_s3_bucket.this["documents"].id
-
-  rule {
-    id     = "expire-noncurrent-versions"
-    status = "Enabled"
-    filter {}
-
-    noncurrent_version_expiration {
-      noncurrent_days = var.retention_days.documents_noncurrent
-    }
-  }
-
-  rule {
-    id     = "abort-incomplete-uploads"
-    status = "Enabled"
-    filter {}
-
-    abort_incomplete_multipart_upload {
-      days_after_initiation = var.retention_days.abort_multipart
-    }
-  }
-
-  depends_on = [aws_s3_bucket_versioning.this]
-}
-
-# The PITR ceiling. CloudNativePG's own retention policy (T-2.4) must be shorter
-# than this value, or it will still be referencing WAL segments that lifecycle
-# has already deleted, and the failure only surfaces during a restore.
-resource "aws_s3_bucket_lifecycle_configuration" "pg_backups" {
-  bucket = aws_s3_bucket.this["pg_backups"].id
-
-  rule {
-    id     = "expire-old-backups"
-    status = "Enabled"
-    filter {}
-
-    expiration {
-      days = var.retention_days.pg_backups
-    }
-  }
-
-  rule {
-    id     = "abort-incomplete-uploads"
-    status = "Enabled"
-    filter {}
-
-    abort_incomplete_multipart_upload {
-      days_after_initiation = 1
-    }
-  }
-}
-
-# Must stay longer than Loki's own retention_period (T-2.7). If chunks disappear
-# while Loki's index still references them, queries fail rather than returning
-# fewer results.
-resource "aws_s3_bucket_lifecycle_configuration" "loki_chunks" {
-  bucket = aws_s3_bucket.this["loki_chunks"].id
-
-  rule {
-    id     = "expire-old-chunks"
-    status = "Enabled"
-    filter {}
-
-    expiration {
-      days = var.retention_days.loki_chunks
-    }
-  }
-
-  rule {
-    id     = "abort-incomplete-uploads"
-    status = "Enabled"
-    filter {}
-
-    abort_incomplete_multipart_upload {
-      days_after_initiation = 1
-    }
-  }
-}
-
-# State history is small and occasionally priceless. Keep it for a year.
-resource "aws_s3_bucket_lifecycle_configuration" "tfstate" {
-  bucket = aws_s3_bucket.this["tfstate"].id
-
-  rule {
-    id     = "expire-noncurrent-state"
-    status = "Enabled"
-    filter {}
-
-    noncurrent_version_expiration {
-      noncurrent_days = var.retention_days.tfstate_noncurrent
-    }
-  }
-
-  # Stale .tflock objects from crashed runs. Short, because a lock older than a
-  # day is never legitimate.
-  rule {
-    id     = "abort-incomplete-uploads"
-    status = "Enabled"
-    filter {}
-
-    abort_incomplete_multipart_upload {
-      days_after_initiation = 1
-    }
-  }
-
-  depends_on = [aws_s3_bucket_versioning.this]
-}

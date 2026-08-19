@@ -23,6 +23,34 @@ So `infra/terraform/storage/` is its own root module with its own state key
 bucket additionally carries `prevent_destroy`, and there is deliberately no `storage-destroy`
 target. Deleting these should require editing Terraform by hand and meaning it.
 
+## Lifecycle rules are not managed by Terraform
+
+`aws_s3_bucket_lifecycle_configuration` cannot be used against Hetzner. The PUT works; the
+provider's post-write stabilization is what fails.
+
+After writing, the provider polls `GetBucketLifecycleConfiguration` until the response matches what
+it sent. Both HCL forms — `filter {}` and the deprecated `prefix = ""` — normalize internally to a
+V2 `Filter`. Hetzner always returns the V1 form instead:
+
+```xml
+<Rule><ID>..</ID><Prefix></Prefix><Status>Enabled</Status>..</Rule>
+```
+
+No `Filter` element, ever. So the comparison never converges: every lifecycle resource burns its
+full 3-minute timeout and then fails — **having applied the rules correctly**. Verified 2026-08-19
+against aws provider v6.60.0: 21 polls, a correct response every time, never accepted.
+
+The rules therefore live in `infra/lifecycle/*.json` and are applied by
+`infra/scripts/apply-lifecycle-rules.sh`, which reads them back to confirm they stuck:
+
+```bash
+make storage-lifecycle
+```
+
+This is still code under review, not manual configuration. ADR-0002 forbids state created **by
+hand**, and nothing here is. Revisit if Hetzner starts returning `Filter`, or the provider gains a
+way to skip stabilization.
+
 ## Retention is layered, and the order matters
 
 Lifecycle rules here are **backstops**, not the primary policy. Each component enforces its own,
@@ -117,6 +145,10 @@ anything, stop and work out why before continuing.
 
 ```bash
 make storage-apply
+```
+
+```bash
+make storage-lifecycle
 ```
 
 Then verify the key IDs, set `enable_bucket_policies = true`, and apply once more.

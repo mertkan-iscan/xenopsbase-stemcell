@@ -39,9 +39,12 @@ variable "project_id" {
     arn:aws:iam:::user/p<project_id>:<access_key>
   EOT
   type        = string
+  default     = ""
 
+  # Only needed when bucket policies are enabled, so it is not required for the
+  # first apply. policies.tf enforces its presence at the point of use.
   validation {
-    condition     = can(regex("^[0-9]+$", var.project_id))
+    condition     = var.project_id == "" || can(regex("^[0-9]+$", var.project_id))
     error_message = "project_id must be the numeric Hetzner project ID, digits only."
   }
 }
@@ -63,25 +66,34 @@ variable "access_keys" {
       observability - Loki. Log chunks only.
   EOT
   type = object({
-    infra         = string
-    app           = string
-    db            = string
-    observability = string
+    infra         = optional(string, "")
+    app           = optional(string, "")
+    db            = optional(string, "")
+    observability = optional(string, "")
   })
+  default = {}
 
+  # Deliberately not required. The first apply runs with
+  # enable_bucket_policies = false and creates buckets only, so the key IDs can
+  # be checked against real buckets before a wrong one can lock anyone out.
+  # policies.tf enforces what it needs at the point of use.
+  #
+  # What IS checked here: no two consumers may share a key, since that silently
+  # defeats the isolation the policies exist to provide. Empty entries are
+  # ignored, because "not supplied yet" is not "shared".
   validation {
-    condition     = length(trimspace(var.access_keys.infra)) > 0
-    error_message = "access_keys.infra must be set. It is allowlisted on every bucket; without it, applying a policy locks Terraform out of the bucket permanently."
-  }
-
-  validation {
-    condition = length(distinct([
+    condition = length(compact([
       var.access_keys.infra,
       var.access_keys.app,
       var.access_keys.db,
       var.access_keys.observability,
-    ])) == 4
-    error_message = "Each consumer needs its own key. Sharing one key between consumers defeats the point of per-bucket policies."
+      ])) == length(distinct(compact([
+        var.access_keys.infra,
+        var.access_keys.app,
+        var.access_keys.db,
+        var.access_keys.observability,
+    ])))
+    error_message = "Two consumers share an access key. That defeats the isolation these policies exist to provide."
   }
 }
 
