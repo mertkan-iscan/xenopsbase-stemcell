@@ -6,6 +6,7 @@ SHELL := /bin/bash
 #   cluster/ - the K3s cluster. Built and destroyed as a routine operation.
 # A cluster destroy must never be able to reach storage/.
 STORAGE_DIR := infra/terraform/storage
+EDGE_DIR    := infra/terraform/edge
 CLUSTER_DIR := infra/terraform/cluster
 SCRIPTS     := infra/scripts
 
@@ -53,6 +54,7 @@ TFVARS       = env/$(ENV).tfvars
 SECRETS      = env/$(ENV).secrets.tfvars
 STORAGE_KEY  = storage/$(ENV)/terraform.tfstate
 CLUSTER_KEY  = $(ENV)/cluster.tfstate
+EDGE_KEY     = edge/$(ENV)/terraform.tfstate
 
 # Fails loudly if the environment does not exist, or if its tfvars disagrees
 # with ENV. Without the second check, a copy-paste while adding an environment
@@ -152,6 +154,28 @@ storage-lifecycle: ## Apply and verify bucket lifecycle rules from infra/lifecyc
 # editing Terraform by hand and meaning it.
 
 # ------------------------------------------------------------------------------
+# Edge — Cloudflare DNS and tunnel (durable, per environment)
+#
+# Survives every cluster rebuild: the DNS record points at a tunnel UUID, not at
+# an IP, so there is nothing to update when the cluster is replaced.
+# ------------------------------------------------------------------------------
+
+.PHONY: edge-init
+edge-init: ## terraform init for the Cloudflare edge module
+	$(call check_env,$(EDGE_DIR))
+	@cd $(EDGE_DIR) && $(TF_GIT) terraform init -input=false -reconfigure -backend-config=backend.hcl -backend-config="key=$(EDGE_KEY)"
+
+.PHONY: edge-plan
+edge-plan: ## Plan Cloudflare DNS, tunnel and optional zone settings
+	$(call check_env,$(EDGE_DIR))
+	@cd $(EDGE_DIR) && terraform plan -input=false -var-file=$(TFVARS) $$(test -f $(SECRETS) && echo -var-file=$(SECRETS))
+
+.PHONY: edge-apply
+edge-apply: ## Apply Cloudflare edge configuration
+	$(call check_env,$(EDGE_DIR))
+	@cd $(EDGE_DIR) && terraform apply $(APPROVE) -var-file=$(TFVARS) $$(test -f $(SECRETS) && echo -var-file=$(SECRETS))
+
+# ------------------------------------------------------------------------------
 # Cluster (ephemeral, per environment)
 # ------------------------------------------------------------------------------
 
@@ -203,7 +227,7 @@ fmt: ## Rewrite Terraform files into canonical format
 
 .PHONY: validate
 validate: ## Validate every Terraform root module without touching remote state
-	@set -e; for d in $(STORAGE_DIR) $(CLUSTER_DIR); do \
+	@set -e; for d in $(STORAGE_DIR) $(EDGE_DIR) $(CLUSTER_DIR); do \
 		echo "==> $$d"; \
 		( cd $$d && { test -d .terraform/providers || $(TF_GIT) terraform init -backend=false -input=false >/dev/null; } && terraform validate ); \
 	done

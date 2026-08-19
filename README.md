@@ -17,6 +17,7 @@ Planning board: [XenOpsBase Stemcell (project #5)](https://github.com/users/mert
 | Generator | JHipster to bootstrap, then detach and own the code |
 | Database | PostgreSQL via CloudNativePG operator, PITR archived to object storage |
 | Documents | Hetzner Object Storage (S3-compatible), S3 API only |
+| Edge | Cloudflare Tunnel — no public load balancer, DNS stable across rebuilds |
 | Observability | Self-hosted Grafana LGTM (Loki, Grafana, Tempo, Prometheus) + OpenTelemetry |
 | Identity | Keycloak, realm defined declaratively in git |
 | GitOps | Argo CD, app-of-apps, bootstrapped by Terraform |
@@ -76,6 +77,7 @@ reproduces from nothing.
   - [ADR-0006](docs/adr/0006-tailscale-node-transport.md) — Tailscale transport, no public API endpoint
 - [CONTRIBUTING.md](CONTRIBUTING.md) — branching, commits, and the no-manual-configuration rule
 - Runbooks
+  - [Edge](docs/runbooks/edge.md) — Cloudflare tunnel, DNS, and the shared-zone hazard
   - [Network access](docs/runbooks/network-access.md) — exposure model, SSH policy, escape hatch
   - [Environments](docs/runbooks/environments.md) — dev/staging/prod layout, ENV targets, guards
   - [Terraform state](docs/runbooks/terraform-state.md) — bootstrap, locking, recovery

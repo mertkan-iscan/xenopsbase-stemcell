@@ -1,0 +1,127 @@
+variable "cloudflare_api_token" {
+  description = <<-EOT
+    Cloudflare API token. Supply via TF_VAR_cloudflare_api_token; never in a file.
+
+    NOT the R2 token — that one is object-storage scoped and cannot touch DNS.
+    Needs, scoped to this zone only:
+      Zone / DNS / Edit
+      Zone / Zone Settings / Edit   (only if manage_zone_settings = true)
+      Account / Cloudflare Tunnel / Edit
+  EOT
+  type        = string
+  sensitive   = true
+}
+
+variable "account_id" {
+  description = "Cloudflare account ID. Shown in the dashboard sidebar."
+  type        = string
+}
+
+variable "zone_id" {
+  description = "Zone ID for the domain. Shown on the zone's overview page."
+  type        = string
+}
+
+variable "environment" {
+  description = "Environment this tunnel and hostname belong to."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]{1,15}$", var.environment))
+    error_message = "environment must be lower-case alphanumeric with hyphens, 2-16 chars."
+  }
+}
+
+variable "hostname" {
+  description = <<-EOT
+    The fully-qualified hostname this environment serves on.
+
+    Keep it ONE label below the apex — app.example.com, not dev.app.example.com.
+    Cloudflare's Universal SSL certificate covers the apex and *.example.com
+    only; a second level needs Advanced Certificate Manager, which is paid. So
+    environments are distinguished by hyphen rather than by depth:
+
+      prod     app.xenopsoftware.com
+      staging  app-staging.xenopsoftware.com
+      dev      app-dev.xenopsoftware.com
+  EOT
+  type        = string
+
+  validation {
+    condition     = length(regexall("\\.", var.hostname)) == 2
+    error_message = "hostname must be exactly one label below the apex (two dots total). A deeper name is not covered by Cloudflare's Universal SSL certificate."
+  }
+}
+
+variable "tunnel_service" {
+  description = <<-EOT
+    Where cloudflared forwards traffic once inside the cluster.
+
+    The in-cluster ingress controller service, which T-2.2 installs. Until then
+    this points at a service that does not exist yet — harmless, because an
+    ingress rule is inert until DNS sends traffic to the tunnel and cloudflared
+    is actually running.
+  EOT
+  type        = string
+  default     = "http://ingress-nginx-controller.ingress-nginx.svc.cluster.local:80"
+}
+
+# ------------------------------------------------------------------------------
+# Zone-wide settings
+#
+# xenopsoftware.com is a COMPANY domain with a live site on it. Everything below
+# applies to the WHOLE ZONE, not just this project's hostnames -- Cloudflare has
+# no per-hostname TLS mode.
+#
+# So both default to false. Turning them on is a deliberate, reviewed act by
+# someone who has checked what else lives in the zone.
+# ------------------------------------------------------------------------------
+
+variable "manage_zone_settings" {
+  description = <<-EOT
+    Let Terraform manage ZONE-WIDE TLS settings.
+
+    Default false, deliberately. Setting the zone to Full (strict) requires
+    EVERY origin in the zone to present a valid, publicly-trusted certificate.
+    If the existing company site is on Flexible or Full (not strict), flipping
+    this breaks it — immediately, and for everyone, not just for this project.
+
+    Traffic through the tunnel does not need it: cloudflared makes an outbound
+    mTLS connection to Cloudflare's edge, so the origin leg is already
+    authenticated and encrypted regardless of the zone's TLS mode. The strict
+    setting protects origins reached over the public internet, which a tunnelled
+    origin is not.
+
+    In other words, for this project it is optional. For the rest of the zone it
+    may be breaking. That asymmetry is why it is off.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "zone_tls_mode" {
+  description = "Zone TLS mode, applied only when manage_zone_settings is true."
+  type        = string
+  default     = "strict"
+
+  validation {
+    condition     = contains(["off", "flexible", "full", "strict"], var.zone_tls_mode)
+    error_message = "zone_tls_mode must be one of off, flexible, full, strict. \"strict\" is Cloudflare's Full (strict)."
+  }
+}
+
+variable "manage_waf" {
+  description = <<-EOT
+    Let Terraform manage a baseline WAF ruleset.
+
+    Default false, for the same reason as zone settings: WAF rules are
+    zone-scoped, so a rule written for this project's hostname still evaluates
+    against every request to the company site. A badly-scoped rule blocks real
+    customers.
+
+    When enabled, every rule created here is explicitly constrained to
+    var.hostname so it cannot affect anything else in the zone.
+  EOT
+  type        = bool
+  default     = false
+}
