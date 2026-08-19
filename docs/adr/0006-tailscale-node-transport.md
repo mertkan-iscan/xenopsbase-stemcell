@@ -1,8 +1,35 @@
 # ADR-0006: Tailscale is the node transport, and the public API is closed
 
-- **Status:** Accepted
+- **Status:** Accepted — **not yet in effect**, blocked by a module limitation (see below)
 - **Date:** 2026-08-19
 - **Task:** T-1.5
+
+## Implementation status, 2026-08-19
+
+The decision stands. It does not work yet.
+
+Tailscale itself did exactly what this ADR describes: all nodes joined the tailnet with direct
+WireGuard paths, Terraform reached them by MagicDNS name, and `verify-exposure` confirmed nodes
+answered nothing on 22, 6443, 2379 or 10250 while being provisioned.
+
+The cluster still failed to converge, because enabling Tailscale disables the Hetzner CCM's network
+awareness:
+
+```
+hetzner_ccm_networking_enabled  = cluster_has_ipv4 && !cross_network_transport_enabled
+cross_network_transport_enabled = multinetwork_overlay_enabled || node_transport_tailscale_enabled
+```
+
+The CCM then cannot match the private node IP k3s advertises, so the node keeps its
+`uninitialized` taint, nothing schedules, and the agents' k3s install never runs.
+
+`dev` therefore runs on the **escape hatch** below — `hetzner_private` with an IP allowlist — which
+is precisely the situation the hatch was written for. Tracked as a follow-up; this ADR is not
+superseded, and the escape hatch is not the decision.
+
+Two things this does not change: the reasoning for preferring Tailscale over an IP allowlist stands
+unaltered, and the allowlist's known weaknesses — a dynamic home IP, and CI ranges too broad to
+allowlist — are now live problems rather than hypothetical ones.
 
 ## Context
 

@@ -153,6 +153,73 @@ Switch back as soon as the outage ends, and re-run `make verify-exposure`.
 
 ## Troubleshooting
 
+**The CCM crash-loops with `serverIsAttachedToNetwork ... context deadline exceeded`, and
+only the control plane ever registers**
+
+The cloud controller manager cannot reach the Hetzner metadata service:
+
+```
+Cloud provider could not be initialized: hcloud/newCloud:
+checking if server is in Network not possible: serverIsAttachedToNetwork:
+Get "http://169.254.169.254/hetzner/v1/metadata/private-networks": context deadline exceeded
+```
+
+The cause is routing, not the firewall. On the node:
+
+```
+$ ip route get 169.254.169.254
+169.254.169.254 via 10.0.0.1 dev eth1 proto dhcp src 10.255.0.1 metric 30000
+```
+
+A DHCP-installed route sends metadata traffic over **eth1**, the Hetzner private network, where it
+black-holes. Over **eth0** it answers immediately:
+
+```
+curl --interface eth0 http://169.254.169.254/hetzner/v1/metadata/private-networks  ->  200
+curl                  (default route, eth1)                                       ->  timeout
+```
+
+The knock-on effects look nothing like a routing problem: the node keeps its
+`node.cloudprovider.kubernetes.io/uninitialized` taint, nothing schedules,
+`system-upgrade-controller` stays Pending, the kustomization step times out after 900s, and the
+agents' k3s install never runs. Workers end up healthy but never joined.
+
+Observed under **both** `tailscale` and `hetzner_private` transport, so it is not transport-specific.
+Tracked in #84.
+
+**Workers join the tailnet but never join Kubernetes, and the apply fails on
+`system-upgrade-controller`**
+
+Check `advertise_node_private_routes`. It must be `true`, which is the module default.
+
+Setting it `false` looks harmless for a single-network cluster — `kube.tf.example` even suggests it
+to avoid Tailnet route approvals. It also turns off the Hetzner network routing the cloud
+controller manager depends on. The CCM then deploys with `HCLOUD_NETWORK_ROUTES_ENABLED=false` and
+no `HCLOUD_NETWORK`, so it cannot match the private address the kubelet reports:
+
+```
+failed to get node address from cloud provider that matches ip: 10.255.0.1
+```
+
+From there the failure walks four steps away from its cause:
+
+1. CCM refuses to initialise the node
+2. The `node.cloudprovider.kubernetes.io/uninitialized` taint never lifts
+3. Nothing can schedule, so `system-upgrade-controller` stays `Pending`
+4. The kustomization step waits 900s for it, times out, and the **agents' k3s install never runs**
+
+The visible symptom is workers sitting healthy on the tailnet having never joined the cluster, and
+an error about an upgrade controller. Nothing in that mentions routing.
+
+Confirm with:
+
+```bash
+kubectl -n kube-system get deploy hcloud-cloud-controller-manager \
+  -o jsonpath='{range .spec.template.spec.containers[0].env[*]}{.name}={.value}{"\n"}{end}'
+```
+
+`HCLOUD_NETWORK` must be present. If it is missing, this is the cause.
+
 **Nodes boot but never become Ready, and Terraform hangs**
 Almost always the Tailscale auth key. Check it is **reusable** and not expired — a single-use key
 registers the first node and leaves the others waiting forever. The Tailscale admin console shows
