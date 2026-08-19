@@ -50,3 +50,33 @@ tailscale_magicdns_domain = "tail894b71.ts.net"
 # It must be absent rather than empty: a -var-file value overrides a TF_VAR_
 # environment variable, so "firewall_source_cidrs = []" here would silently beat
 # the environment and trip the validation.
+
+# cloudflared reaches Cloudflare's edge over QUIC on UDP 7844.
+#
+# The module's default outbound rules allow 80, 443, DNS, NTP and ICMP -- and on
+# Hetzner, defining ANY outbound rule denies everything not listed. So QUIC is
+# blocked, and the failure is not obviously a firewall one:
+#
+#   Failed to dial a quic connection: timeout: no recent network activity
+#
+# cloudflared retries forever with backoff, so the pods sit Running but never
+# Ready and the site simply never comes up.
+#
+# TCP 7844 is the documented fallback path; allowing both means a QUIC problem
+# degrades to http2 rather than to an outage.
+extra_firewall_rules = [
+  {
+    description     = "cloudflared tunnel (QUIC)"
+    direction       = "out"
+    protocol        = "udp"
+    port            = "7844"
+    destination_ips = ["0.0.0.0/0", "::/0"]
+  },
+  {
+    description     = "cloudflared tunnel (http2 fallback)"
+    direction       = "out"
+    protocol        = "tcp"
+    port            = "7844"
+    destination_ips = ["0.0.0.0/0", "::/0"]
+  },
+]
