@@ -32,14 +32,31 @@ spec:
             requests: {cpu: 100m, memory: 256Mi}
             limits:   {memory: 512Mi}
           persistence:
-            # emptyDir rather than a volume. Hetzner's 10Gi minimum makes a PVC
-            # here disproportionate for dev, and the durable copy is the bucket
-            # -- this holds only the write-ahead log, so a restart loses at most
+            # No PVC. Hetzner's 10Gi minimum makes a volume disproportionate for
+            # dev, and the durable copy is the bucket -- this path holds only the
+            # write-ahead log and compactor scratch, so a restart loses at most
             # the last few seconds of unflushed logs.
             #
             # Staging and prod should give this a real volume: there, losing
             # seconds of logs during an incident is exactly the wrong moment.
             enabled: false
+
+          # Disabling persistence does NOT leave an emptyDir behind -- it leaves
+          # NOTHING, and the container root is read-only, so Loki dies on
+          # startup:
+          #
+          #   init compactor: mkdir /var/loki: read-only file system
+          #
+          # Note it is the compactor that fails, which is only enabled because
+          # retention has to be enforced. Turning retention off would have
+          # "fixed" this crash and silently kept every log forever.
+          extraVolumes:
+            - name: loki-data
+              emptyDir:
+                sizeLimit: 2Gi
+          extraVolumeMounts:
+            - name: loki-data
+              mountPath: /var/loki
 
         # Everything the chart deploys by default that this cluster cannot afford
         # or does not need. Each of these is a pod, and several are memcached.
