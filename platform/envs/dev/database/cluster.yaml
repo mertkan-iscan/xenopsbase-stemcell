@@ -30,6 +30,10 @@ spec:
 
   plugins:
     - name: barman-cloud.cloudnative-pg.io
+      # The operator defaults this to true and writes it back INTO the array
+      # element. Argo compares array items whole, so an operator-added field
+      # inside one reads as drift even though every field we set matches.
+      enabled: true
       # This is what makes continuous archiving happen at all. Without
       # isWALArchiver the plugin is loaded, base backups still work, and WAL is
       # never shipped -- so the cluster looks backed up and can only ever be
