@@ -17,6 +17,10 @@ spec:
   storage:
     size: 10Gi
     storageClass: hcloud-volumes
+    # The operator defaults this to true and writes it back into the spec. Set
+    # explicitly so git and the cluster agree; otherwise Argo reports the
+    # Cluster permanently OutOfSync against a field nobody changed.
+    resizeInUseVolumes: true
 
   # No separate walStorage in dev. Splitting WAL onto its own volume is the
   # right production choice -- it stops a WAL burst from filling the data
@@ -58,8 +62,24 @@ spec:
     initdb:
       database: app
       owner: app
+      # Pinned rather than defaulted, and not only to stop Argo reporting drift.
+      #
+      # Collation is baked into every text index at creation. If the underlying
+      # glibc changes its collation rules -- which it has, notably in glibc 2.28
+      # -- indexes built under the old rules silently disagree with the new
+      # ones, and queries return wrong results rather than errors. Locale C has
+      # no such dependency: it sorts by byte value and never changes.
+      #
+      # The cost is that ORDER BY on text is ASCII order, not linguistic order.
+      # Applications that need human-language sorting should ask for a collation
+      # per column or per query, which is explicit and reviewable, rather than
+      # inheriting one from whatever libc the base image happened to ship.
+      encoding: UTF8
+      localeCollate: C
+      localeCType: C
 
-  monitoring:
-    # On with kube-prometheus-stack in T-2.6, for the same reason the operator's
-    # podMonitor is off: the CRD does not exist yet.
-    enablePodMonitor: false
+  # No monitoring block. enablePodMonitor already defaults to false, and the
+  # operator writes two further defaults into that stanza -- so declaring it
+  # here would claim ownership of a field the operator keeps editing, and Argo
+  # would report drift forever. T-2.6 adds it back deliberately, alongside the
+  # ServiceMonitor CRD that makes it meaningful.

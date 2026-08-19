@@ -1,0 +1,38 @@
+# Base backups on a schedule.
+#
+# WAL archiving alone is not a backup. WAL only replays forward from some base,
+# so without a periodic base backup the recovery time grows without bound and,
+# once retention expires the oldest segments, recoverability is lost entirely.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: postgres-daily
+  namespace: database
+spec:
+  # SIX fields, not five. CNPG does not use Kubernetes CronJob syntax -- it
+  # prepends a seconds specifier. A five-field expression copied from a CronJob
+  # is not rejected, it is misread: "0 3 * * *" schedules at 3 seconds past
+  # every minute of every hour, which is a backup storm rather than a nightly.
+  #
+  #             sec min hour dom mon dow
+  schedule:    "0   0   3    *   *   *"
+
+  # MUST be plugin. This field defaults to barmanObjectStore -- the deprecated
+  # in-tree path, which this cluster deliberately does not configure. Leaving it
+  # out produces a ScheduledBackup that looks correct and fails every night.
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+
+  cluster:
+    name: postgres
+
+  # Take one on creation rather than waiting until 03:00. A backup
+  # configuration that has never run is a hypothesis, and the first thing worth
+  # knowing about this one is whether it works at all.
+  immediate: true
+
+  # Backups are owned by this schedule, so deleting it cleans up the Backup
+  # objects it created. It does NOT delete anything already in object storage --
+  # that is retention's job, and it belongs to the ObjectStore.
+  backupOwnerReference: self
