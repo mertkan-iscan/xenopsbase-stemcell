@@ -325,3 +325,42 @@ hcloud volume list && hcloud load-balancer list && hcloud placement-group list
 
 These bill independently of servers. T-8.4 automates this check; until then it is worth running
 after any failed destroy.
+
+## Tearing down
+
+```bash
+make cluster-destroy ENV=dev
+```
+
+This does three things in a fixed order, and the order is not optional:
+
+1. **Releases PVC-backed volumes.** The Hetzner CSI driver creates these in response to a
+   PersistentVolumeClaim, so Terraform never tracks them and `terraform destroy` never removes them.
+   It reports success and leaves them billing forever. **The CSI driver runs inside the cluster**, so
+   this must happen while the nodes are alive — afterwards nothing is left to do it and the volumes
+   can only be removed by hand.
+2. **Destroys the cluster.**
+3. **Verifies the durable boundary held** — buckets and OS snapshot still present, no servers,
+   volumes, load balancers or placement groups left. A leak here is invisible and permanent, so it
+   fails the target rather than waiting to be noticed.
+
+**Step 1 deletes data.** Every PVC goes, because the storage class is `reclaimPolicy=Delete`. That
+is intended under [ADR-0002](../adr/0002-ephemeral-cluster-and-durable-state.md): Postgres is
+continuously archived to object storage, and metrics are not durable state. To skip it:
+
+```bash
+KEEP_VOLUMES=1 make cluster-destroy ENV=dev
+```
+
+which leaves the volumes — and therefore the orphans — for you to deal with.
+
+### If the cluster is already gone
+
+The release step skips cleanly when there is no kubeconfig or the API does not answer. It warns
+rather than failing, because refusing to proceed would leave you unable to tear down a broken
+cluster — worse than a leaked volume. Check afterwards:
+
+```bash
+make verify-teardown ENV=dev
+hcloud volume delete <id>     # for anything it lists
+```
