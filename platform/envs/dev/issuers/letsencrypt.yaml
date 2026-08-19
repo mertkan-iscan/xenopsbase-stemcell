@@ -1,0 +1,51 @@
+# Let's Encrypt issuers, solving DNS-01 through Cloudflare.
+#
+# DNS-01 rather than HTTP-01 is not a preference here: with a Cloudflare Tunnel
+# there is no public listener for an HTTP-01 challenge to arrive at, so it is
+# the only mechanism that can work.
+#
+# WHAT THESE CERTIFICATES ARE FOR. Cloudflare terminates TLS for clients using
+# its own certificate, so these do NOT serve public traffic. They secure the
+# in-cluster hop between cloudflared and ingress, and give Keycloak and any
+# service-to-service TLS a real issuer to use. Defence in depth, not the front
+# door -- which is also why the rate-limit worry behind "staging in dev" is
+# smaller than it looks.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: mertkan.iscan.1@gmail.com
+    privateKeySecretRef:
+      name: letsencrypt-staging-account
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token
+---
+# Production issuer. Deliberately present but UNUSED in dev.
+#
+# Let's Encrypt's production rate limits are per registered domain and count
+# certificates issued, not attempts. A cluster rebuilt several times a day would
+# burn through them, and the penalty is a week of no certificates at all --
+# which would arrive exactly when a rebuild is being tested.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: mertkan.iscan.1@gmail.com
+    privateKeySecretRef:
+      name: letsencrypt-prod-account
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token

@@ -156,7 +156,13 @@ module "kube_hetzner" {
       kustomize_parameters = {
         argocd_chart_version = var.argocd_chart_version
         argocd_domain        = var.argocd_domain
+        # Indented to sit under the YAML block scalar in the Secret template.
+        sops_age_key = indent(4, var.sops_age_key)
       }
+      # The rendered Secret contains the age private key in cleartext. Once
+      # applied it is in etcd, where it has to be; leaving a copy on the node's
+      # filesystem as well is gratuitous, and that copy outlives the apply.
+      post_commands = "shred -u /var/user_kustomize/1/sops-age-secret.yaml 2>/dev/null || rm -f /var/user_kustomize/1/sops-age-secret.yaml"
     }
     "2" = {
       source_folder = "${path.module}/manifests/20-root-app"
