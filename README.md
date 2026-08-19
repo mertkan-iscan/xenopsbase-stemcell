@@ -83,6 +83,7 @@ reproduces from nothing.
   - [Network access](docs/runbooks/network-access.md) — exposure model, SSH policy, escape hatch
   - [Environments](docs/runbooks/environments.md) — dev/staging/prod layout, ENV targets, guards
   - [Terraform state](docs/runbooks/terraform-state.md) — bootstrap, locking, recovery
+  - [Database](docs/runbooks/database.md) — backups, restore, failover, and what a rebuild does not restore
   - [Ingress and TLS](docs/runbooks/ingress-tls.md) — the serving path, QUIC firewall, DNS-01 certificates
   - [Object storage](docs/runbooks/object-storage.md) — per-environment durable buckets, retention, least privilege
 
