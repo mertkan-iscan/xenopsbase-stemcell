@@ -1,0 +1,32 @@
+# Keycloak itself, plus its realm.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: keycloak
+  namespace: argocd
+  annotations:
+    # Wave 3: after the operator (1) and after Postgres (2). Keycloak will not
+    # start without its database, and the database role and schema are created
+    # by the postgres Application.
+    argocd.argoproj.io/sync-wave: "3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mertkan-iscan/xenopsbase-stemcell.git
+    targetRevision: main
+    path: platform/envs/dev/keycloak
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keycloak
+  syncPolicy:
+    automated:
+      # prune: false, like the database. A KeycloakRealmImport removed from git
+      # should not take a realm -- and its users, clients and sessions -- with
+      # it on the next reconcile.
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

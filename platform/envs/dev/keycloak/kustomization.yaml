@@ -1,0 +1,8 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The Keycloak instance first: KeycloakRealmImport names it by keycloakCRName,
+# and an import whose target does not exist waits rather than failing.
+resources:
+  - keycloak.yaml
+  - realm-import.yaml

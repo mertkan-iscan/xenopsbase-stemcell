@@ -1,0 +1,76 @@
+# The Keycloak instance.
+apiVersion: k8s.keycloak.org/v2beta1
+kind: Keycloak
+metadata:
+  name: keycloak
+  namespace: keycloak
+spec:
+  # One in dev. Keycloak clusters via Infinispan and a second replica buys
+  # session survival across a pod restart, not throughput -- and in dev a
+  # restart losing sessions costs nothing. Prod runs 2+.
+  instances: 1
+
+  # Pinned, and deliberately NOT 26.7.2, which was released the same day this
+  # was written. An identity provider is the wrong component to be first on.
+  image: quay.io/keycloak/keycloak:26.7.1
+
+  db:
+    vendor: postgres
+    # The -rw service follows the primary across a failover. Pointing at a pod
+    # name works exactly until the first promotion.
+    host: postgres-rw.database.svc.cluster.local
+    port: 5432
+    database: keycloak
+    usernameSecret:
+      name: keycloak-db
+      key: username
+    passwordSecret:
+      name: keycloak-db
+      key: password
+
+  # The initial admin. NEVER the admin/admin default: the operator would
+  # otherwise generate one and store it in a secret nobody rotates, and this
+  # cluster is reachable from the internet through the tunnel.
+  bootstrapAdmin:
+    user:
+      secret: keycloak-initial-admin
+
+  hostname:
+    hostname: https://auth-dev.xenopsoftware.com
+    # strict: false in dev only. Strict hostname is what stops Keycloak
+    # honouring a Host header an attacker controls -- which matters because
+    # Keycloak puts that hostname into tokens and password-reset links. Turn it
+    # on in staging and prod, where the hostname is stable.
+    strict: false
+
+  http:
+    # Plain HTTP inside the cluster. TLS is terminated by Cloudflare at the edge
+    # (ADR-0006 / T-2.2); the hop from ingress to here is in-cluster. This is
+    # the same trade recorded as a known gap in the ingress runbook, and it is
+    # what T-8.2's default-deny will revisit.
+    httpEnabled: true
+
+  proxy:
+    # Keycloak must trust X-Forwarded-* to know the request arrived over HTTPS.
+    # Without it, it builds redirect URIs as http:// and the OIDC flow breaks in
+    # a way that looks like a client misconfiguration.
+    headers: xforwarded
+
+  ingress:
+    # The operator's own Ingress is off. Routing is ours: Cloudflare tunnel ->
+    # ingress-nginx. Letting the operator also create one would mean two
+    # Ingresses for one hostname and no clear owner.
+    enabled: false
+
+  # The client secret referenced by the realm import below, injected as an
+  # environment variable so it never appears in the realm JSON committed to git.
+  env:
+    - name: GATEWAY_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: keycloak-clients
+          key: GATEWAY_CLIENT_SECRET
+
+  resources:
+    requests: {cpu: 200m, memory: 768Mi}
+    limits: {memory: 1280Mi}

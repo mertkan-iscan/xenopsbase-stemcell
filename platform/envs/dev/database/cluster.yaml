@@ -88,6 +88,30 @@ spec:
       max_connections: "100"
       shared_buffers: "128MB"
 
+  managed:
+    roles:
+      # Keycloak owns its own role and its own database (database/keycloak.yaml)
+      # rather than sharing the `app` role. Two reasons, and the second is the
+      # one that matters: a shared role means a compromised application can read
+      # and rewrite the identity provider's tables, and a schema migration in
+      # one can lock the other.
+      #
+      # Declared here rather than created by hand, so a rebuilt cluster has it
+      # without anyone remembering to run SQL -- which is the whole point of
+      # T-2.5's "reproduces exactly on a rebuilt cluster".
+      - name: keycloak
+        ensure: present
+        login: true
+        # NOT superuser, NOT createdb. Keycloak needs to own its own schema and
+        # nothing else. The operator runs migrations inside its database, which
+        # ownership already permits.
+        superuser: false
+        createdb: false
+        createrole: false
+        passwordSecret:
+          name: keycloak-db
+        comment: "Owner of the keycloak database. Managed by CNPG, password from SOPS."
+
   bootstrap:
     initdb:
       database: app
