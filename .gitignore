@@ -31,6 +31,10 @@ crash.*.log
 # .terraform.lock.hcl IS committed on purpose: provider versions must be
 # reproducible across a rebuild.
 
+# kube-hetzner writes this next to the Terraform code as a local_sensitive_file.
+# It is cluster configuration and is not safe to publish.
+*_kustomization_backup.yaml
+
 # --- kubernetes --------------------------------------------------------------
 kubeconfig
 kubeconfig.yaml
