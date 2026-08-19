@@ -166,9 +166,25 @@ module "kube_hetzner" {
         platform_path          = "platform/envs/${var.environment}"
       }
       # k3s installs the chart asynchronously, so the CRD appears some time
-      # after set 1 is applied. Waiting for it explicitly is the difference
-      # between a reliable bootstrap and one that works when the network is fast.
-      pre_commands = "kubectl wait --for=condition=established --timeout=300s crd/applications.argoproj.io"
+      # after set 1 is applied.
+      #
+      # `kubectl wait` alone is NOT enough: it errors immediately when the
+      # object does not exist yet, rather than waiting for it to appear. So the
+      # first loop waits for existence, and only then does wait block on the
+      # condition. Getting this wrong fails with
+      #
+      #   Error from server (NotFound): customresourcedefinitions ...
+      #     "applications.argoproj.io" not found
+      #
+      # which reads like the chart is broken rather than like a race.
+      pre_commands = <<-EOT
+        for i in $(seq 1 60); do
+          kubectl get crd applications.argoproj.io >/dev/null 2>&1 && break
+          echo "waiting for the Argo CD CRDs to appear ($i/60)"
+          sleep 5
+        done
+        kubectl wait --for=condition=established --timeout=120s crd/applications.argoproj.io
+      EOT
     }
   }
 

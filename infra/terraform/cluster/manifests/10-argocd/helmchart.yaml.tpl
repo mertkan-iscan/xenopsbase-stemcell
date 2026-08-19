@@ -41,6 +41,13 @@ spec:
     notifications:
       enabled: false
     applicationSet:
+      # NOTE: verified NOT to take effect on chart 10.4.0 -- the
+      # applicationset-controller runs regardless. dex and notifications are
+      # genuinely gone; this one is not. Left in place because it is the
+      # documented key and costs nothing, but do not read it as a statement
+      # about what is running. ApplicationSet is useful later anyway (T-6.3
+      # promotion between environments), so this is a footprint annoyance
+      # rather than a problem to solve now.
       enabled: false
 
     server:
