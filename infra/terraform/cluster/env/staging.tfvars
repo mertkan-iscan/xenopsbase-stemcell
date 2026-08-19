@@ -41,7 +41,7 @@ load_balancer_type  = "lb11"
 #
 # TF_VAR_tailscale_auth_key must be set, and must be a REUSABLE key.
 node_transport_mode       = "tailscale"
-tailscale_magicdns_domain = "" # e.g. tail1a2b3c.ts.net — from the Tailscale admin console, DNS
+tailscale_magicdns_domain = "tail894b71.ts.net"
 
 # Only consulted under the hetzner_private escape hatch.
 firewall_source_cidrs = []
