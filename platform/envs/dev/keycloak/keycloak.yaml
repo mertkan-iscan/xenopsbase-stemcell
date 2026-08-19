@@ -14,6 +14,23 @@ spec:
   # was written. An identity provider is the wrong component to be first on.
   image: quay.io/keycloak/keycloak:26.7.1
 
+  # Required BECAUSE spec.image is set. Naming an image makes the operator
+  # assume it is a custom, pre-built (augmented) image and start it with
+  # --optimized. The stock quay.io image is not pre-built, so it exits:
+  #
+  #   The '--optimized' flag was used for first ever server start. Please don't
+  #   use this flag for the first startup or use 'kc.sh build' to build the
+  #   server first.
+  #
+  # Dropping spec.image would also fix it, by letting the operator pick its own
+  # default. The pin is kept instead: a rebuild reproducing a DIFFERENT Keycloak
+  # than the last one breaks ADR-0002's promise, and that matters more than the
+  # few seconds this costs at startup.
+  #
+  # The real fix for production is a pre-built image produced by the build
+  # pipeline (T-6.1), at which point this becomes true again.
+  startOptimized: false
+
   db:
     vendor: postgres
     # The -rw service follows the primary across a failover. Pointing at a pod
