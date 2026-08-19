@@ -111,6 +111,16 @@ spec:
         passwordSecret:
           name: keycloak-db
         comment: "Owner of the keycloak database. Managed by CNPG, password from SOPS."
+        # Both are CNPG defaults that the operator writes back into this list
+        # ELEMENT. Argo compares array items whole, so a field the operator adds
+        # inside one reads as drift even though every field set here matches --
+        # the same trap as plugins[].enabled above.
+        #
+        # Stated rather than ignored on purpose: an ignoreDifferences on
+        # managed.roles would also hide a real change to this role's privileges,
+        # which is exactly the change worth noticing.
+        inherit: true
+        connectionLimit: -1
 
   bootstrap:
     initdb:
