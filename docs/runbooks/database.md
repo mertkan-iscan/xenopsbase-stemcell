@@ -153,9 +153,30 @@ That is deliberate — `bootstrap` only applies at creation, and a manifest that
 could not create a database the first time. But it means restoring after a rebuild is a **conscious
 act**: apply a recovery Cluster as above.
 
-Be aware of the interaction: a fresh cluster archiving under a `serverName` that already has data
-is refused, rather than silently mixing timelines. If a rebuilt cluster reports archiving failures,
-that is why — recover into a new name, or retire the old archive path deliberately.
+### Archiving breaks on rebuild unless the generation is bumped
+
+A fresh cluster archiving under a `serverName` that already holds another cluster's history is
+refused:
+
+```
+WAL archive check failed for server postgres: Expected empty archive
+```
+
+The refusal is correct — interleaving WAL from two timelines under one path corrupts the archive for
+both. But the cluster still starts, reports `Cluster in healthy state`, and Argo reports `Healthy`,
+so **the only symptom is that backups silently stop**.
+
+`ObjectStore.spec.configuration.serverName` is therefore pinned rather than defaulted. **Bump it on
+any rebuild whose database is not being recovered from the previous generation:**
+
+```yaml
+    serverName: postgres-g3      # was postgres-g2
+```
+
+Every previous generation stays in the bucket and stays restorable — point `externalClusters[].plugin.parameters.serverName`
+at whichever one you want.
+
+This is interim; #113 decides whether rebuilds should recover from the archive instead.
 
 ## Connecting
 
