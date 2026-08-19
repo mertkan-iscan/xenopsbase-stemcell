@@ -230,6 +230,27 @@ change kube-hetzner just made. T-2.2 installs both through GitOps.
 object storage (T-2.4) and every manifest is in git. An etcd backup would restore a cluster we
 would rather rebuild, and would quietly become durable state ADR-0002 does not account for.
 
+## Measured baselines
+
+First real destroy/rebuild cycle, 2026-08-19, dev sizing (1 control plane + 2 workers, cx23, fsn1):
+
+| Step | Time | ADR-0002 target |
+|---|---|---|
+| `terraform destroy` (53 resources) | ~2 min | — |
+| `terraform apply` rebuild, snapshot present | **305 s** | 20 min warm start |
+| Packer snapshot build (only on a new project) | 322 s | part of the 60 min cold path |
+
+The rebuild is well inside target, which matters more than the margin suggests: a rebuild path that
+is slow stops being exercised, and an unexercised recovery path does not work.
+
+Note the snapshot build is a *separate* number. A rebuild with the snapshot present is the everyday
+path; a rebuild into a genuinely empty Hetzner project pays both. T-7.2 should measure and record
+both rather than collapsing them into one figure.
+
+Verified in the same cycle: an object written to the documents bucket before the destroy read back
+byte-identical afterwards, and the storage module's Terraform state was untouched — 12 resources,
+unreachable from the cluster destroy by design.
+
 ## High availability
 
 The dev default is **one** control plane node. That is not an oversight: the cluster is destroyed
