@@ -11,6 +11,16 @@ SCRIPTS     := infra/scripts
 
 # State lives in Cloudflare R2, not Hetzner (ADR-0005). Set R2_ENDPOINT to
 # https://<account_id>.r2.cloudflarestorage.com
+# Git for Windows sets core.autocrlf=true at SYSTEM level. Terraform fetches
+# registry modules with `git clone`, so that setting rewrites every module file
+# to CRLF -- including the shell heredocs kube-hetzner uploads to nodes, which
+# then die on Linux with a syntax error on $''.
+#
+# Scoped to the terraform invocation via GIT_CONFIG_* rather than changing the
+# user's global git config, which would affect all their other repositories.
+# Harmless on Linux and macOS, where autocrlf is already off.
+TF_GIT := GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.autocrlf GIT_CONFIG_VALUE_0=false
+
 BUCKET      ?= xenopsbase-tfstate
 R2_ENDPOINT ?=
 R2_REGION   ?= auto
@@ -49,7 +59,7 @@ verify-locking: ## Prove state locking actually refuses a concurrent operation
 
 .PHONY: storage-init
 storage-init: ## terraform init for the storage module
-	@cd $(STORAGE_DIR) && terraform init -input=false -backend-config=backend.hcl
+	@cd $(STORAGE_DIR) && $(TF_GIT) terraform init -input=false -backend-config=backend.hcl
 
 .PHONY: storage-adopt-state
 storage-adopt-state: ## Import the bootstrap-created state bucket into Terraform (run once)
@@ -83,7 +93,7 @@ snapshot: ## Build the OS snapshot kube-hetzner provisions nodes from (once per 
 
 .PHONY: cluster-init
 cluster-init: ## terraform init for the cluster module
-	@cd $(CLUSTER_DIR) && terraform init -input=false -backend-config=backend.hcl
+	@cd $(CLUSTER_DIR) && $(TF_GIT) terraform init -input=false -backend-config=backend.hcl
 
 .PHONY: cluster-plan
 cluster-plan: ## Plan cluster changes
@@ -115,7 +125,7 @@ fmt: ## Rewrite Terraform files into canonical format
 validate: ## Validate every Terraform root module without touching remote state
 	@set -e; for d in $(STORAGE_DIR) $(CLUSTER_DIR); do \
 		echo "==> $$d"; \
-		( cd $$d && terraform init -backend=false -input=false >/dev/null && terraform validate ); \
+		( cd $$d && $(TF_GIT) terraform init -backend=false -input=false >/dev/null && terraform validate ); \
 	done
 
 # make up / make down arrive with T-1.7, and will drive $(CLUSTER_DIR) only.
