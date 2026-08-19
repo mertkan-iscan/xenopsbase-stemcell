@@ -25,10 +25,35 @@ Once per tailnet, not per cluster.
    comfortably.
 2. Install the client on the machine that runs Terraform, and sign in. **That machine must be on
    the tailnet** — it is how Terraform reaches the nodes.
-3. Admin console → **Settings → Keys** → *Generate auth key*. It must be **Reusable**. A single-use
-   key registers only the first node; the rest hang waiting to join, which looks like a network
-   fault rather than a key problem.
+3. Admin console → **Settings → Keys** → *Generate auth key*:
+
+   | Field | Value | Why |
+   |---|---|---|
+   | Description | `xenopsbase-nodes` | The only way to identify it later for revocation |
+   | **Reusable** | **on** | Every node authenticates with this one key. Off means only the first node joins and the rest hang waiting — which looks like a network fault rather than a key problem |
+   | Expiration | 90 days (the maximum) | The key expires, not the nodes. Diarise a regeneration |
+   | **Ephemeral** | **on** | See below |
+   | Tags | off | Requires `tagOwners` / `autoApprovers` in the tailnet ACL first. The module treats tags as optional; skip until there is a reason |
+
 4. Admin console → **DNS** → note the **tailnet name**, e.g. `tail1a2b3c.ts.net`.
+
+### Why Ephemeral, specifically for this design
+
+Ephemeral devices are removed automatically once they go offline. That is a niche option in most
+setups and close to essential here.
+
+Clusters are destroyed and rebuilt as the normal operating mode, and every rebuild produces **new**
+node names. Without Ephemeral, each teardown leaves its nodes in the tailnet permanently. The free
+tier caps at 100 devices, so roughly thirty rebuild cycles would fill it with corpses — in a project
+whose entire premise is rebuilding constantly.
+
+kube-hetzner recommends ephemeral keys for autoscaler nodes for the same reason. Here the static
+nodes are equally disposable.
+
+The trade: a node offline long enough to be reaped must re-register on return. It still holds the
+key in its cloud-init data so it can, but its tailnet address may change — and the kubeconfig points
+at the control plane's tailnet address. In practice a rebuild regenerates the kubeconfig anyway
+(`make kubeconfig`), so this is an annoyance rather than a trap.
 
 Then:
 
