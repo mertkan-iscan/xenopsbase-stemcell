@@ -40,6 +40,10 @@ ENV         ?= dev
 # disables the prompt rather than answering it, so the command fails with "error
 # asking for approval: EOF" instead of asking. It is used on plan and init only.
 AUTO        ?= 0
+
+# Pass EXPECT_WEB=expect-web to verify-exposure once an ingress controller
+# exists (T-2.2), to require 80/443 to answer rather than merely tolerate them.
+EXPECT_WEB  ?=
 ifeq ($(AUTO),1)
 APPROVE := -auto-approve -input=false
 else
@@ -178,6 +182,10 @@ cluster-destroy: ## Destroy the cluster. Does NOT touch the durable buckets or t
 .PHONY: verify-teardown
 verify-teardown: ## Assert a destroy left durable state intact and nothing orphaned
 	@bash $(SCRIPTS)/verify-teardown.sh $(ENV)
+
+.PHONY: verify-exposure
+verify-exposure: ## Probe every public address and assert only intended ports answer
+	@bash $(SCRIPTS)/verify-exposure.sh $(EXPECT_WEB)
 
 .PHONY: kubeconfig
 kubeconfig: ## Write the kubeconfig out of Terraform state (gitignored)
