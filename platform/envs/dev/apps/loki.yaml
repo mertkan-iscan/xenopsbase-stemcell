@@ -1,0 +1,135 @@
+# Loki: log storage, with chunks in object storage so they outlive the cluster.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: loki
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: loki
+    # Pinned. Chart 7.3.0 carries Loki 3.6.12.
+    targetRevision: 7.3.0
+    helm:
+      values: |
+        # SingleBinary, not the default distributed topology.
+        #
+        # The chart's default splits Loki into read, write and backend
+        # StatefulSets plus a gateway -- sensible at volume, and roughly a
+        # gigabyte of memory before a single log line arrives. These workers
+        # have around 600Mi free each, so the distributed layout does not fit
+        # and would evict something already running.
+        deploymentMode: SingleBinary
+
+        singleBinary:
+          replicas: 1
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits:   {memory: 512Mi}
+          persistence:
+            # emptyDir rather than a volume. Hetzner's 10Gi minimum makes a PVC
+            # here disproportionate for dev, and the durable copy is the bucket
+            # -- this holds only the write-ahead log, so a restart loses at most
+            # the last few seconds of unflushed logs.
+            #
+            # Staging and prod should give this a real volume: there, losing
+            # seconds of logs during an incident is exactly the wrong moment.
+            enabled: false
+
+        # Everything the chart deploys by default that this cluster cannot afford
+        # or does not need. Each of these is a pod, and several are memcached.
+        chunksCache:
+          enabled: false
+        resultsCache:
+          enabled: false
+        lokiCanary:
+          enabled: false
+        test:
+          enabled: false
+        gateway:
+          # The gateway is an nginx in front of Loki for multi-tenant routing.
+          # With auth_enabled false and one writer, it is a hop that adds a pod.
+          enabled: false
+
+        # Zero out the distributed components explicitly. SingleBinary should
+        # already do this, but a chart default flipping back on is a silent way
+        # to double memory use.
+        backend:   {replicas: 0}
+        read:      {replicas: 0}
+        write:     {replicas: 0}
+
+        loki:
+          # Single tenant. Multi-tenancy would mean every read and write carries
+          # an X-Scope-OrgID header, which is a real feature for a SaaS and pure
+          # friction for one team's platform.
+          auth_enabled: false
+
+          commonConfig:
+            replication_factor: 1
+
+          storage:
+            type: s3
+            bucketNames:
+              chunks: xenopsbase-dev-loki-chunks
+              ruler: xenopsbase-dev-loki-chunks
+              admin: xenopsbase-dev-loki-chunks
+            s3:
+              endpoint: https://fsn1.your-objectstorage.com
+              region: fsn1
+              # Hetzner needs path-style addressing. With virtual-host style the
+              # bucket name becomes a subdomain that does not resolve, and the
+              # failure looks like a DNS problem rather than a config one.
+              s3ForcePathStyle: true
+              insecure: false
+              # Credentials come from the environment (extraEnv below), never
+              # from these fields -- values here would be rendered into a
+              # ConfigMap in plaintext.
+
+          schemaConfig:
+            configs:
+              - from: "2024-04-01"
+                store: tsdb
+                object_store: s3
+                schema: v13
+                index:
+                  prefix: index_
+                  period: 24h
+
+          limits_config:
+            retention_period: 168h
+            # Bounded on purpose. Without a cap, one crash-looping pod emitting
+            # a stack trace per millisecond becomes the whole log budget and
+            # pushes out everything worth reading.
+            ingestion_rate_mb: 4
+            ingestion_burst_size_mb: 8
+            max_query_series: 500
+            reject_old_samples: true
+            reject_old_samples_max_age: 168h
+
+          compactor:
+            # Retention is only ENFORCED if the compactor is told to do it.
+            # Setting retention_period alone makes Loki refuse queries beyond the
+            # window while the objects stay in the bucket forever, paying storage
+            # for data nobody can read.
+            retention_enabled: true
+            delete_request_store: s3
+
+          # The observability access key, scoped by bucket policy to
+          # loki-chunks and nothing else. Verified: 200 on loki-chunks, 403 on
+          # pg-backups and documents.
+          extraEnvFrom:
+            - secretRef:
+                name: loki-s3
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
