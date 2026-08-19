@@ -31,9 +31,18 @@ spec:
   # The initial admin. NEVER the admin/admin default: the operator would
   # otherwise generate one and store it in a secret nobody rotates, and this
   # cluster is reachable from the internet through the tunnel.
+  # The secret name MUST NOT be "<Keycloak name>-initial-admin". The operator
+  # manages a secret at exactly that name as one of its own dependent
+  # resources, and a pre-existing one collides:
+  #
+  #   KeycloakAdminSecretDependentResource -> secrets "keycloak-initial-admin"
+  #   already exists ... code=409
+  #
+  # The operator then exhausts its retries and NEVER CREATES THE STATEFULSET, so
+  # the symptom is no Keycloak pod at all rather than an authentication error.
   bootstrapAdmin:
     user:
-      secret: keycloak-initial-admin
+      secret: keycloak-bootstrap-admin
 
   hostname:
     hostname: https://auth-dev.xenopsoftware.com
