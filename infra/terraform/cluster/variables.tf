@@ -178,6 +178,47 @@ variable "extra_firewall_rules" {
   default     = []
 }
 
+variable "ccm_disable_network_attached_check" {
+  description = <<-EOT
+    Disable the cloud controller manager's "is this server attached to the
+    configured network" check.
+
+    That check queries the Hetzner metadata service at 169.254.169.254. On this
+    setup the metadata route is installed by DHCP over the PRIVATE interface,
+    where it black-holes:
+
+      ip route get 169.254.169.254
+        169.254.169.254 via 10.0.0.1 dev eth1 proto dhcp src 10.255.0.1
+
+      curl --interface eth0 ...  ->  200
+      curl (default route)  ...  ->  timeout
+
+    So the CCM crash-loops at startup before doing anything:
+
+      Cloud provider could not be initialized: hcloud/newCloud:
+      checking if server is in Network not possible: serverIsAttachedToNetwork:
+      ... context deadline exceeded
+
+    Everything downstream then fails in ways that never mention metadata: the
+    node keeps its uninitialized taint, nothing schedules,
+    system-upgrade-controller times out, and the agents never install k3s.
+
+    WHAT THIS GIVES UP. The check exists to catch a genuine misconfiguration --
+    a control plane running on a server that is not on the configured network.
+    Here that has been verified directly instead:
+
+      hcloud server list -o columns=name,private_net
+
+    shows all three nodes on xenopsbase-dev. The check is not wrong, it is
+    merely unreachable, and skipping it does not make an unattached server work.
+
+    Set false once the metadata routing is fixed (#84), so the safety check
+    comes back rather than being permanently disabled.
+  EOT
+  type        = bool
+  default     = true
+}
+
 # ------------------------------------------------------------------------------
 # Network exposure (ADR-0006)
 # ------------------------------------------------------------------------------

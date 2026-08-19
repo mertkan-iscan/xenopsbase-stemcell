@@ -16,6 +16,18 @@
 # See docs/runbooks/cluster.md.
 # ==============================================================================
 
+locals {
+  # Kept in a local because HCL does not allow a heredoc inside a conditional
+  # expression.
+  ccm_disable_attached_check_values = <<-EOT
+    env:
+      HCLOUD_NETWORK_DISABLE_ATTACHED_CHECK:
+        value: "true"
+  EOT
+
+  hetzner_ccm_values = var.ccm_disable_network_attached_check ? local.ccm_disable_attached_check_values : ""
+}
+
 module "kube_hetzner" {
   source = "kube-hetzner/kube-hetzner/hcloud"
 
@@ -58,6 +70,10 @@ module "kube_hetzner" {
   load_balancer_type = var.load_balancer_type
 
   extra_firewall_rules = var.extra_firewall_rules
+
+  # Merged into the CCM helm release by the module. See the variable for the
+  # metadata-routing failure this works around (#84).
+  hetzner_ccm_values = local.hetzner_ccm_values
 
   # ----------------------------------------------------------------------------
   # Network exposure (ADR-0006)
