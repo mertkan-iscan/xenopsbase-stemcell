@@ -1,0 +1,105 @@
+# Grafana Alloy: collects container logs from every node and ships them to Loki.
+#
+# Alloy rather than Promtail. Promtail reached end of life and Alloy is its
+# stated replacement, so starting a new platform on Promtail would mean adopting
+# something already scheduled for removal.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: alloy
+  namespace: argocd
+  annotations:
+    # Wave 2: after Loki. Alloy buffers and retries, so starting first is not
+    # fatal -- but it fills the logs with connection errors, which is a poor
+    # first impression from the component whose job is logs.
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: alloy
+    # Pinned. Chart 1.11.1 carries Alloy v1.18.1.
+    targetRevision: 1.11.1
+    helm:
+      values: |
+        controller:
+          # One per node: container logs are read from each node's own disk, so
+          # a Deployment would only ever see the logs of the node it landed on.
+          type: daemonset
+
+        alloy:
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits:   {memory: 256Mi}
+
+          # Needs the host log directory to read container stdout/stderr.
+          mounts:
+            varlog: true
+
+          # Clustering off: each instance handles its own node's files, so there
+          # is nothing to distribute and the gossip traffic buys nothing.
+          clustering:
+            enabled: false
+
+          configMap:
+            content: |-
+              // Discover every pod in the cluster.
+              discovery.kubernetes "pods" {
+                role = "pod"
+              }
+
+              // Keep only pods on THIS node. Without it every Alloy instance
+              // targets every pod, and each log line is shipped once per node --
+              // triple-counted on a three-node cluster, and it looks like a
+              // Loki duplication bug rather than a collector misconfiguration.
+              discovery.relabel "pods" {
+                targets = discovery.kubernetes.pods.targets
+
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_node_name"]
+                  regex         = env("HOSTNAME")
+                  action        = "keep"
+                }
+
+                // Labels worth querying by. Deliberately few: every distinct
+                // label value is a separate stream in Loki, and high-cardinality
+                // labels (pod UID, request id) are what make it slow and
+                // expensive. Details belong in the log LINE, not the labels.
+                rule {
+                  source_labels = ["__meta_kubernetes_namespace"]
+                  target_label  = "namespace"
+                }
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_name"]
+                  target_label  = "pod"
+                }
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_container_name"]
+                  target_label  = "container"
+                }
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+                  target_label  = "app"
+                }
+              }
+
+              loki.source.kubernetes "pods" {
+                targets    = discovery.relabel.pods.output
+                forward_to = [loki.write.default.receiver]
+              }
+
+              loki.write "default" {
+                endpoint {
+                  url = "http://loki.observability.svc.cluster.local:3100/loki/api/v1/push"
+                }
+              }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
