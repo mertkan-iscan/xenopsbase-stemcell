@@ -26,6 +26,7 @@ help: ## Show this help
 	@echo "    3. cp $(STORAGE_DIR)/backend.hcl.example $(STORAGE_DIR)/backend.hcl   # edit"
 	@echo "    4. cp $(STORAGE_DIR)/terraform.tfvars.example $(STORAGE_DIR)/terraform.tfvars   # edit"
 	@echo "    5. make storage-init && make storage-adopt-state && make storage-apply"
+	@echo "    5b. make storage-lifecycle"
 	@echo "    6. make verify-locking      <- do not skip"
 	@echo "    7. verify key IDs, set enable_bucket_policies = true, make storage-apply"
 
@@ -54,6 +55,10 @@ storage-init: ## terraform init for the storage module
 storage-adopt-state: ## Import the bootstrap-created state bucket into Terraform (run once)
 	@cd $(STORAGE_DIR) && terraform import 'aws_s3_bucket.this["tfstate"]' $(BUCKET) || \
 		echo "  already imported, nothing to do"
+
+.PHONY: storage-lifecycle
+storage-lifecycle: ## Apply and verify bucket lifecycle rules from infra/lifecycle/*.json
+	@bash $(SCRIPTS)/apply-lifecycle-rules.sh
 
 .PHONY: storage-plan
 storage-plan: ## Plan changes to the durable buckets

@@ -64,7 +64,25 @@ resource "aws_s3_bucket_policy" "least_privilege" {
     ]
   })
 
+  # These fire only when policies are being applied, which is why the variables
+  # themselves are optional: a first apply with policies off must not demand
+  # values whose correctness cannot yet be checked against real buckets.
   lifecycle {
+    precondition {
+      condition     = length(trimspace(var.project_id)) > 0
+      error_message = "project_id is required before bucket policies can be applied. It forms the principal ARN, and a wrong one denies everybody."
+    }
+
+    precondition {
+      condition     = length(trimspace(var.access_keys.infra)) > 0
+      error_message = "access_keys.infra is required before bucket policies can be applied. It is allowlisted on every bucket; without it, applying a policy locks Terraform out permanently."
+    }
+
+    precondition {
+      condition     = length(trimspace(each.value.owner)) > 0
+      error_message = "This bucket has no owner key set in access_keys. Applying a policy now would leave only the infra key with access, silently cutting off the component that needs the bucket."
+    }
+
     precondition {
       condition     = contains(local.bucket_principals[each.key], "arn:aws:iam:::user/p${var.project_id}:${var.access_keys.infra}")
       error_message = "The infra key is missing from the allowlist for this bucket. Applying would lock Terraform out permanently."

@@ -1,0 +1,20 @@
+{
+  "Rules": [
+    {
+      "ID": "expire-noncurrent-state",
+      "Prefix": "",
+      "Status": "Enabled",
+      "NoncurrentVersionExpiration": {
+        "NoncurrentDays": 365
+      }
+    },
+    {
+      "ID": "abort-incomplete-uploads",
+      "Prefix": "",
+      "Status": "Enabled",
+      "AbortIncompleteMultipartUpload": {
+        "DaysAfterInitiation": 1
+      }
+    }
+  ]
+}
