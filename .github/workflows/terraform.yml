@@ -229,7 +229,7 @@ jobs:
           EXTRA=""
           [ -f "env/${ENVIRONMENT}.secrets.tfvars" ] && EXTRA="-var-file=env/${ENVIRONMENT}.secrets.tfvars"
           terraform plan -input=false -no-color -lock-timeout=5m \
-            -var-file="env/${ENVIRONMENT}.tfvars" $EXTRA > plan.txt 2>&1
+            -var-file="env/${ENVIRONMENT}.tfvars" $EXTRA ${TF_KEY_OVERRIDE:-} > plan.txt 2>&1
           echo "exitcode=$?" >> "$GITHUB_OUTPUT"
           # Keep the comment inside GitHub's 65536-character limit.
           tail -c 60000 plan.txt > plan.trimmed
