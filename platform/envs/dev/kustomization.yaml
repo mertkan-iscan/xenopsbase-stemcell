@@ -12,6 +12,7 @@ resources:
   - apps/cert-manager.yaml
   - apps/cloudflared.yaml
   - apps/cloudnative-pg.yaml
+  - apps/barman-cloud-plugin.yaml
   - issuers/letsencrypt.yaml
 
   # Decrypted by ksops at render time inside argocd-repo-server (ADR-0003).
