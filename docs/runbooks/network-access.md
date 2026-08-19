@@ -153,6 +153,40 @@ Switch back as soon as the outage ends, and re-run `make verify-exposure`.
 
 ## Troubleshooting
 
+**The CCM crash-loops with `serverIsAttachedToNetwork ... context deadline exceeded`, and
+only the control plane ever registers**
+
+The cloud controller manager cannot reach the Hetzner metadata service:
+
+```
+Cloud provider could not be initialized: hcloud/newCloud:
+checking if server is in Network not possible: serverIsAttachedToNetwork:
+Get "http://169.254.169.254/hetzner/v1/metadata/private-networks": context deadline exceeded
+```
+
+The cause is routing, not the firewall. On the node:
+
+```
+$ ip route get 169.254.169.254
+169.254.169.254 via 10.0.0.1 dev eth1 proto dhcp src 10.255.0.1 metric 30000
+```
+
+A DHCP-installed route sends metadata traffic over **eth1**, the Hetzner private network, where it
+black-holes. Over **eth0** it answers immediately:
+
+```
+curl --interface eth0 http://169.254.169.254/hetzner/v1/metadata/private-networks  ->  200
+curl                  (default route, eth1)                                       ->  timeout
+```
+
+The knock-on effects look nothing like a routing problem: the node keeps its
+`node.cloudprovider.kubernetes.io/uninitialized` taint, nothing schedules,
+`system-upgrade-controller` stays Pending, the kustomization step times out after 900s, and the
+agents' k3s install never runs. Workers end up healthy but never joined.
+
+Observed under **both** `tailscale` and `hetzner_private` transport, so it is not transport-specific.
+Tracked in #84.
+
 **Workers join the tailnet but never join Kubernetes, and the apply fails on
 `system-upgrade-controller`**
 

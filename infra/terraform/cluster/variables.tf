@@ -93,9 +93,11 @@ variable "agent_nodepools" {
     labels      = optional(list(string), [])
     taints      = optional(list(string), [])
     count       = number
-    # Required by the module at plan time under tailscale transport (ADR-0006).
-    # "primary" keeps the pool on the module's own Hetzner network.
-    network_scope = optional(string, "primary")
+    # Left null, matching the module default. Tailscale transport requires an
+    # explicit value, but that path is blocked (see #84) and defaulting to
+    # "primary" here was a deviation from upstream for no benefit -- both
+    # resolve to network_id 0.
+    network_scope = optional(string, null)
   }))
   default = [
     {
