@@ -1,0 +1,37 @@
+# The database itself, separate from both the operator and the backup plugin.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: postgres
+  namespace: argocd
+  annotations:
+    # Wave 2: last. The Cluster names the barman-cloud plugin, and a Cluster
+    # that names a plugin which has not registered yet does not fail loudly --
+    # it comes up healthy and never archives. Silent non-archiving is the worst
+    # failure mode available here, so this ordering is enforced rather than
+    # left to chance.
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mertkan-iscan/xenopsbase-stemcell.git
+    targetRevision: main
+    path: platform/envs/dev/database
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: database
+  syncPolicy:
+    automated:
+      # prune: true everywhere else in this repository. NOT here.
+      #
+      # Argo pruning a Deployment recreates it. Argo pruning a Cluster deletes
+      # the PVCs with it, and the only remaining copy of the data is whatever
+      # reached object storage before the delete. A mistaken path change in git
+      # should not be able to drop the database.
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

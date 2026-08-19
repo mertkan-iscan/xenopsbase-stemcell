@@ -1,0 +1,65 @@
+# The Postgres cluster.
+#
+# Deliberately holds no schema and no domain tables. Flyway owns the schema from
+# commit one (T-3.6), and the stemcell ships a database that is ready rather
+# than a database that is populated.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+  namespace: database
+spec:
+  # Two, on a cluster with two schedulable workers. One instance cannot fail
+  # over, so the failover criterion of T-2.4 would be untestable and, worse,
+  # would look fine right up until the node it was on rebooted.
+  instances: 2
+
+  storage:
+    size: 10Gi
+    storageClass: hcloud-volumes
+
+  # No separate walStorage in dev. Splitting WAL onto its own volume is the
+  # right production choice -- it stops a WAL burst from filling the data
+  # volume and stalling writes -- but Hetzner volumes have a 10Gi minimum, so
+  # it would double the volume count and cost for a database with no traffic.
+  # Turn it on in staging and prod, where the failure it prevents is real.
+
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      # This is what makes continuous archiving happen at all. Without
+      # isWALArchiver the plugin is loaded, base backups still work, and WAL is
+      # never shipped -- so the cluster looks backed up and can only ever be
+      # restored to the last base backup.
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: pg-backups
+
+  affinity:
+    # Keep the replica off the primary's node. Without this both instances can
+    # land on one worker, and the second instance protects against a process
+    # crash but not against losing the machine -- which is the failure that
+    # actually happens.
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required
+
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits:   {memory: 512Mi}
+
+  postgresql:
+    parameters:
+      # Modest and explicit rather than tuned. Tuning belongs with the load
+      # baseline in T-5.6, against measurements instead of guesses.
+      max_connections: "100"
+      shared_buffers: "128MB"
+
+  bootstrap:
+    initdb:
+      database: app
+      owner: app
+
+  monitoring:
+    # On with kube-prometheus-stack in T-2.6, for the same reason the operator's
+    # podMonitor is off: the CRD does not exist yet.
+    enablePodMonitor: false
