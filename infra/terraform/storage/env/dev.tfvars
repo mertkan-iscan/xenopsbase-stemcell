@@ -8,14 +8,10 @@ environment = "dev"
 region = "fsn1"
 prefix = "xenopsbase"
 
-# Backstops only. Each component enforces its own, SHORTER retention; these must
-# stay longer, or objects vanish underneath a component that still owns them.
-retention_days = {
-  documents_noncurrent = 90
-  pg_backups           = 35
-  loki_chunks          = 30
-  abort_multipart      = 7
-}
 
 # Verified working against real buckets on 2026-08-19.
 enable_bucket_policies = true
+
+# Retention is NOT set here. Lifecycle rules live in infra/lifecycle/*.json and
+# are applied by `make storage-lifecycle`, because Terraform cannot manage them
+# against Hetzner. One definition, one place.

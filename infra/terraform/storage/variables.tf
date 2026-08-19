@@ -122,35 +122,11 @@ variable "enable_bucket_policies" {
   default     = false
 }
 
-variable "retention_days" {
-  description = <<-EOT
-    Lifecycle retention, in days.
-
-    These are backstops, not the primary retention policy. CloudNativePG (T-2.4)
-    and Loki (T-2.7) each enforce their own, shorter retention. These values must
-    stay LONGER than those, or objects vanish underneath a component that still
-    believes it owns them.
-
-      documents_noncurrent - old versions of overwritten or deleted documents
-      pg_backups           - base backups and WAL. Sets the ceiling on the PITR window
-      loki_chunks          - log chunks
-      abort_multipart      - cleanup of failed uploads
-  EOT
-  type = object({
-    documents_noncurrent = number
-    pg_backups           = number
-    loki_chunks          = number
-    abort_multipart      = number
-  })
-  default = {
-    documents_noncurrent = 90
-    pg_backups           = 35
-    loki_chunks          = 30
-    abort_multipart      = 7
-  }
-
-  validation {
-    condition     = var.retention_days.pg_backups >= 8
-    error_message = "pg_backups retention below 8 days leaves no meaningful PITR window and would breach the recovery objectives in ADR-0002."
-  }
-}
+# retention_days used to live here. It was removed when lifecycle rules moved
+# out of Terraform: aws_s3_bucket_lifecycle_configuration cannot be applied
+# against Hetzner (see infra/scripts/apply-lifecycle-rules.sh), so the retention
+# numbers are now in infra/lifecycle/*.json, which is the single place they are
+# defined.
+#
+# Leaving the variable behind would have been dead config inherited by every
+# fork. tflint caught it on the first CI run.
