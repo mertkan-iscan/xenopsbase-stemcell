@@ -9,14 +9,27 @@ kind: Kustomization
 # and a mounted file, and "no manual admin-console configuration" becomes a
 # convention rather than something the platform enforces.
 #
+# REFERENCES THE RELEASE'S OWN KUSTOMIZATION rather than listing manifests.
+#
+# Listing them by hand looked tidier and was wrong twice over. 26.7.1 ships FOUR
+# CRDs -- keycloaks, keycloakrealmimports, keycloakoidcclients and
+# keycloaksamlclients -- and the operator starts an informer for every one of
+# them, refusing to start at all if any is missing:
+#
+#   Informer startup error. Operator will be stopped.
+#   .../keycloaksamlclients?resourceVersion=0. Message: Not Found.
+#   Failed to start application: Failed to start quarkus
+#
+# It crash-loops on a CRD for a feature this platform does not even use. The
+# upstream kustomization also carries a NamespaceTransformer with
+# setRoleBindingSubjects: allServiceAccounts, which a plain `namespace:` here
+# does NOT reproduce -- it would leave the ClusterRoleBinding subjects pointing
+# at the wrong namespace.
+#
+# Pinned by ref, so this tracks whatever that release needs rather than whatever
+# was true when it was written.
+#
 # Under components/ because nothing here is environment-specific. The Keycloak
 # instance and its realm live per environment.
-namespace: keycloak
-
 resources:
-  # CRDs first. The operator Deployment does not require them at start, but the
-  # Keycloak and KeycloakRealmImport resources in envs/ do, and they are applied
-  # by a later sync wave.
-  - https://raw.githubusercontent.com/keycloak/keycloak-k8s-resources/26.7.1/kubernetes/keycloaks.k8s.keycloak.org-v1.yml
-  - https://raw.githubusercontent.com/keycloak/keycloak-k8s-resources/26.7.1/kubernetes/keycloakrealmimports.k8s.keycloak.org-v1.yml
-  - https://raw.githubusercontent.com/keycloak/keycloak-k8s-resources/26.7.1/kubernetes/kubernetes.yml
+  - https://github.com/keycloak/keycloak-k8s-resources//kubernetes?ref=26.7.1
