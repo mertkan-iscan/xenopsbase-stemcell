@@ -13,7 +13,7 @@ easy to forget:
 
 | Survives destroy | Why |
 |---|---|
-| **The OS snapshot** | Built by Packer, lives in the Hetzner project, never touched by Terraform |
+| **The OS snapshot** | Built by Packer (Leap Micro), lives in the Hetzner project, never touched by Terraform |
 | **The SSH key pair** | Yours, on your machine. Lose it and you cannot reach nodes |
 
 The snapshot is the one addition this task makes to ADR-0002's durable list. It is the same
@@ -25,10 +25,25 @@ slowest single step in a genuinely cold start.
 | Tool | For |
 |---|---|
 | Terraform ≥ 1.10 | Everything |
-| Packer | Building the OS snapshot, once per project |
+| Packer **exactly 1.16.0** | Building the OS snapshot, once per project |
 | hcloud CLI | Verifying the snapshot exists |
 | kubectl | Talking to the cluster afterwards |
 | An SSH key pair | Node access. `ssh-keygen -t ed25519` if you have none |
+
+The Packer version is an **exact** pin, not a minimum. The kube-hetzner template declares
+`required_version = "= 1.16.0"`, so both older and newer Packer are rejected outright:
+
+```
+Error: Unsupported Packer Core version
+  This configuration does not support Packer version 1.15.1.
+```
+
+On Windows: `scoop install main/packer` then `scoop update packer`. If the update reports
+`Running process detected, skip updating`, a Packer process from a failed run is still alive —
+`taskkill //PID <pid> //F` and retry.
+
+The pin moves with the module version, so bumping kube-hetzner may require a matching Packer bump.
+Check the template's `required_version` before upgrading either.
 
 ```bash
 export HCLOUD_TOKEN=<hetzner cloud api token>     # for packer and the hcloud CLI
@@ -44,11 +59,28 @@ bash infra/scripts/build-snapshot.sh
 Several minutes. It creates a temporary billable server and removes it when finished. Confirm:
 
 ```bash
-hcloud image list --selector microos-snapshot=yes
+hcloud image list --selector leapmicro-snapshot=yes
 ```
 
 **No snapshot means `terraform apply` fails before creating anything.** kube-hetzner does not
 install an operating system; it provisions every node from this image.
+
+### Leap Micro, not MicroOS
+
+kube-hetzner 3.1.0 defaults **new** node pools to Leap Micro
+(`locals.tf: control_plane_nodepool_default_os -> "leapmicro"`), and then looks for a snapshot
+labelled:
+
+```
+leapmicro-snapshot=yes,kube-hetzner/os=leapmicro,kube-hetzner/k8s-distro=<distro>
+```
+
+Building the MicroOS template instead produces a snapshot the module never looks for, and apply
+fails with a no-image-found error that gives no hint the wrong OS was built. Most tutorials and
+older docs still say `microos-snapshot=yes`, which is where the confusion comes from.
+
+To use MicroOS instead, set `os = "microos"` per nodepool **and** build the matching template:
+`bash infra/scripts/build-snapshot.sh 3.1.0 microos`.
 
 ## Building the cluster
 
@@ -160,8 +192,10 @@ rebuild starts failing a week later.
 ## Troubleshooting
 
 **`terraform apply` fails immediately with no snapshot found**
-The snapshot is missing or mislabelled. `hcloud image list --selector microos-snapshot=yes` must
-return a row. Rebuild it.
+The snapshot is missing, or it is the wrong OS.
+`hcloud image list --selector leapmicro-snapshot=yes` must return a row. If a MicroOS snapshot was
+built by mistake it will not match, and the error does not say so — see Leap Micro, not MicroOS
+above.
 
 **Nodes never become Ready**
 Almost always SSH. The module provisions over SSH, so `ssh_private_key_path` must match the public
