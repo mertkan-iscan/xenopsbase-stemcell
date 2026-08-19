@@ -25,6 +25,12 @@ spec:
       domain: ${argocd_domain}
 
     configs:
+      cm:
+        # Required for KSOPS. Kustomize refuses to run an exec plugin without
+        # both flags, and the failure is a bare "plugin not found" rather than
+        # anything about flags.
+        kustomize.buildOptions: "--enable-alpha-plugins --enable-exec"
+
       params:
         # No TLS on the Argo API itself. Nothing reaches it from outside the
         # cluster: there is no ingress for it, and the public surface is one
@@ -53,9 +59,52 @@ spec:
     server:
       resources:
         requests: {cpu: 50m, memory: 128Mi}
+
+    # KSOPS: the cost ADR-0004 knowingly accepted when choosing Argo CD over
+    # Flux, which decrypts SOPS natively. Argo needs the binary injected into
+    # repo-server and the age key mounted, so decryption happens at manifest
+    # render time rather than anything decrypted being stored in the cluster.
     repoServer:
       resources:
         requests: {cpu: 50m, memory: 128Mi}
+
+      initContainers:
+        - name: install-ksops
+          image: viaductoss/ksops:v4.5.1
+          command: ["/bin/sh", "-c"]
+          args:
+            - echo "installing ksops";
+              mv ksops /custom-tools/;
+              mv $GOPATH/bin/kustomize /custom-tools/;
+              echo "done";
+          volumeMounts:
+            - mountPath: /custom-tools
+              name: custom-tools
+
+      volumes:
+        - name: custom-tools
+          emptyDir: {}
+        - name: sops-age
+          secret:
+            # Created by Terraform, not by Argo. This is the one link in the
+            # chain that cannot be reconciled from git, because it is the key
+            # that makes reconciling from git possible (ADR-0003).
+            secretName: sops-age
+
+      volumeMounts:
+        - mountPath: /usr/local/bin/kustomize
+          name: custom-tools
+          subPath: kustomize
+        - mountPath: /usr/local/bin/ksops
+          name: custom-tools
+          subPath: ksops
+        - mountPath: /home/argocd/.config/sops/age
+          name: sops-age
+          readOnly: true
+
+      env:
+        - name: SOPS_AGE_KEY_FILE
+          value: /home/argocd/.config/sops/age/keys.txt
     controller:
       resources:
         requests: {cpu: 100m, memory: 256Mi}

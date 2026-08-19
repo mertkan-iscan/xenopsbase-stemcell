@@ -235,6 +235,23 @@ variable "argocd_chart_version" {
   default     = "10.4.0"
 }
 
+variable "sops_age_key" {
+  description = <<-EOT
+    The age PRIVATE key that decrypts every secret in git (ADR-0003).
+
+    Supply via TF_VAR_sops_age_key; never in a file, never in a tfvars. The
+    public half lives in .sops.yaml and is committed.
+
+    This is the one bootstrap secret. Everything else the platform needs is
+    encrypted in the repository and unreachable without it -- which is exactly
+    why the set is kept to one, and why losing it means reissuing every
+    credential at its source rather than restoring a backup.
+  EOT
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "argocd_domain" {
   description = "Hostname Argo CD believes it serves on. No ingress exists for it; access is by port-forward."
   type        = string
