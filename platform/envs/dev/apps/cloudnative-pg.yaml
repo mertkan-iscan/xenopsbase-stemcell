@@ -1,0 +1,60 @@
+# The CloudNativePG operator.
+#
+# Split from the Postgres Cluster itself (apps/postgres.yaml) on purpose. The
+# Cluster is a postgresql.cnpg.io CRD, which does not exist until this has
+# installed -- the same ordering problem the Argo CD bootstrap has in
+# infra/terraform/cluster/main.tf, and it fails the same way: a sync that
+# reports "no matches for kind Cluster" rather than "the operator is not ready".
+#
+# Sync waves rather than two Applications would also work, but separate
+# Applications mean the database can be re-synced, paused or rolled back without
+# touching the operator that keeps it alive.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cloudnative-pg
+  namespace: argocd
+  annotations:
+    # Wave 0: everything that installs CRDs others depend on.
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://cloudnative-pg.github.io/charts
+    chart: cloudnative-pg
+    # Pinned. Chart 0.29.0 carries operator 1.30.0.
+    targetRevision: 0.29.0
+    helm:
+      values: |
+        crds:
+          create: true
+
+        # One replica in dev. The operator is not in the data path -- Postgres
+        # keeps serving if it restarts -- so a second replica buys faster
+        # failover handling, not availability, and dev does not need it.
+        replicaCount: 1
+
+        resources:
+          requests: {cpu: 50m, memory: 128Mi}
+          limits:   {memory: 256Mi}
+
+        monitoring:
+          # Turned on with kube-prometheus-stack in T-2.6. Enabling it now would
+          # create a ServiceMonitor whose CRD does not exist, and the whole
+          # Application would fail to sync over a metrics scrape.
+          podMonitorEnabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cnpg-system
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      # The CNPG CRDs are large enough to blow the 262144-byte annotation limit
+      # that client-side apply uses to store last-applied-configuration.
+      # ServerSideApply above avoids it; this makes the intent explicit for
+      # anyone who removes that line.
+      - Replace=false
