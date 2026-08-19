@@ -1,0 +1,12 @@
+# Copy to backend.hcl and fill in. backend.hcl is gitignored.
+#
+# State lives in Cloudflare R2 (ADR-0005), using the R2 credentials in
+# AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY. The state key is derived from ENV
+# by the Makefile.
+
+bucket = "xenopsbase-tfstate"
+region = "auto"
+
+endpoints = {
+  s3 = "https://<account_id>.r2.cloudflarestorage.com"
+}
