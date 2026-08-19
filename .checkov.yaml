@@ -1,0 +1,131 @@
+# Checkov runs over every root module on each pull request.
+#
+# Every skip below is a decision with a stated reason. The list was written by
+# running checkov and waiving what actually fired — not by guessing which checks
+# might. A speculative skip list is worse than none, because it silently
+# suppresses findings that appear later.
+#
+# READ THIS BEFORE ADDING TO THE LIST
+#
+# Checkov's Terraform rules are written for AWS. Hetzner Object Storage
+# implements a subset of the S3 API, so a large fraction of the S3 checks are
+# not "risks accepted" but "APIs that do not exist to configure". That makes the
+# skip list long, which in turn makes it easy to wave through a real finding.
+#
+# So checkov's value here is REGRESSION DETECTION — catching a new class of
+# problem in code we write — rather than acting as a security bar in its own
+# right. The security properties that actually matter are verified directly:
+# bucket isolation by probing with each credential (T-1.2), and public exposure
+# by port-scanning from outside (T-1.5).
+#
+# External modules are NOT downloaded. kube-hetzner is upstream code we pin but
+# do not control; scanning it would bury our findings in noise. The handful of
+# reported parsing errors are that module, and are expected.
+
+# NOTE: directory and framework are passed on the command line, not set here.
+# When they are set in the config file the scan scope resolves differently and
+# silently covers less — observed as "Passed checks: 0" against the same tree
+# that reports 7 via the CLI flag. Keeping scope on the command line makes the
+# scan reproducible between CI and a laptop.
+
+quiet: true
+compact: true
+
+skip-check:
+  # ============================================================================
+  # The one worth reading
+  # ============================================================================
+
+  # CKV_AWS_93 — "bucket policy does not lockout all but root user"
+  #
+  # Checkov is RIGHT about the risk, and this is the most useful thing it found.
+  # The Deny/NotPrincipal policies in storage/policies.tf deny every principal
+  # not on the allowlist, so a wrong entry locks everyone out including the key
+  # needed to remove the policy. On Hetzner that is a support ticket, not an
+  # undo.
+  #
+  # It is skipped because the check cannot see the three mitigations that exist,
+  # not because the risk is dismissed:
+  #
+  #   1. The infra key is appended to EVERY allowlist unconditionally, enforced
+  #      by a Terraform precondition that fails the plan if it is missing.
+  #   2. enable_bucket_policies defaults to false, so the first apply creates
+  #      buckets with no policy and the key IDs can be checked against reality.
+  #   3. The runbook requires proving the principal ARN format on a disposable
+  #      canary bucket before touching real ones — because the unrecoverable
+  #      mistake is a wrong project_id, which makes every ARN wrong at once.
+  #
+  # See docs/runbooks/object-storage.md. If those mitigations are ever removed,
+  # this skip must go with them.
+  - CKV_AWS_93
+
+  # ============================================================================
+  # APIs Hetzner Object Storage does not implement
+  #
+  # Not risks accepted — configuration surfaces that do not exist.
+  # ============================================================================
+
+  # Access logging. Hetzner has no bucket access logging. Auditing is instead
+  # per-consumer credentials plus bucket policies (T-1.2).
+  - CKV_AWS_18
+
+  # Server-side encryption configuration. Not exposed by Hetzner's API.
+  - CKV_AWS_19
+
+  # Default encryption with KMS. Hetzner has no KMS.
+  - CKV_AWS_145
+
+  # Public access block. Hetzner buckets are private by default and there is no
+  # equivalent API. Isolation is enforced by the policies verified in T-1.2.
+  - CKV2_AWS_6
+
+  # Event notifications. Not implemented, and nothing here consumes them.
+  - CKV2_AWS_62
+
+  # Cross-region replication. Does not exist on Hetzner. The offsite-copy gap
+  # that IS actionable is tracked in #71.
+  - CKV_AWS_144
+
+  # ============================================================================
+  # Deliberate design decisions
+  # ============================================================================
+
+  # CKV_AWS_21 — bucket versioning.
+  # ON for documents, where an overwrite is worth recovering. OFF for
+  # pg-backups and loki-chunks: WAL segments and log chunks are written once and
+  # never rewritten, so versioning would double storage cost and protect
+  # nothing. A deliberate split, not an oversight.
+  - CKV_AWS_21
+
+  # CKV2_AWS_61 — bucket lifecycle configuration.
+  # The buckets DO have lifecycle rules; they are not in Terraform because
+  # aws_s3_bucket_lifecycle_configuration cannot be applied against Hetzner. The
+  # provider polls until the response matches what it sent, and Hetzner always
+  # returns the V1 rule form with no Filter element, so it never converges —
+  # verified against aws provider v6.60.0. Rules live in infra/lifecycle/*.json
+  # and are applied by a script that reads them back to confirm.
+  # Revisit if Hetzner starts returning Filter.
+  - CKV2_AWS_61
+
+  # ============================================================================
+  # False positives
+  # ============================================================================
+
+  # CKV_AWS_20 / CKV_AWS_57 — public READ / WRITE ACL.
+  # No ACL is set on any bucket. The check fires on the absence of an explicit
+  # private ACL rather than on a public one being present.
+  - CKV_AWS_20
+  - CKV_AWS_57
+
+  # CKV_AWS_41 — hard coded credentials in a provider block.
+  # The aws provider is pointed at Hetzner and takes access_key/secret_key from
+  # sensitive VARIABLES supplied by the environment (ADR-0005). Nothing is
+  # hard coded; the check fires on the attribute existing at all.
+  - CKV_AWS_41
+
+  # CKV_TF_1 / CKV_TF_2 — module source pinned by commit hash or tag.
+  # kube-hetzner is pinned to an exact registry version (3.1.0), which is
+  # reproducible and is the strongest pin the registry protocol offers. Registry
+  # sources cannot be referenced by commit hash.
+  - CKV_TF_1
+  - CKV_TF_2
