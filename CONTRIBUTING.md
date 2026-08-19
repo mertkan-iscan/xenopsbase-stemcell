@@ -3,6 +3,26 @@
 The stemcell is a template other projects are forked from. Conventions here are inherited by
 every fork, so they are worth being strict about.
 
+## The board
+
+Every task moves through all five columns. Skipping straight from Backlog to Done hides what is
+actually being worked on, which is the one question a board exists to answer.
+
+| Column | Means |
+|---|---|
+| **Backlog** | Not started, and not necessarily startable — may be blocked by another task |
+| **Ready** | Unblocked and specified well enough to begin without asking anything first |
+| **In progress** | Someone is working on it *right now*. Move it here **before** the first commit, not after |
+| **In review** | The work is done but a criterion cannot be verified yet — usually because it needs a credential, a decision, or something only a human can do. The reason belongs in a comment on the issue |
+| **Done** | Every acceptance criterion met and verified, or explicitly superseded with the reason recorded |
+
+**In review is not a waiting room for finished work.** If everything is verified, it is Done. If
+something is genuinely outstanding, the issue must say what, and who has to do it.
+
+**A task that cannot close because the remainder is a different piece of work** should have that
+remainder split into its own issue, and the original closed. Carrying a half-finished task forever
+is how a board stops reflecting reality.
+
 ## Branching
 
 `main` is protected. No direct pushes. Work happens on a branch and lands through a pull request
