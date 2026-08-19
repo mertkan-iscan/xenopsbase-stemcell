@@ -1,0 +1,34 @@
+# The Barman Cloud plugin: what actually moves WAL and base backups into object
+# storage.
+#
+# Separate from both the operator and the database, and sequenced between them.
+# It needs cert-manager, because the plugin talks to the operator over gRPC with
+# certificates cert-manager issues -- so a missing cert-manager shows up as the
+# plugin Deployment never becoming ready, not as a TLS error.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: barman-cloud-plugin
+  namespace: argocd
+  annotations:
+    # Wave 1: after cert-manager and the CNPG operator (both wave 0), before the
+    # database (wave 2). The database references this plugin by name, and a
+    # Cluster that names a plugin which has not registered yet does not fail
+    # loudly -- it simply never archives.
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mertkan-iscan/xenopsbase-stemcell.git
+    targetRevision: main
+    path: platform/components/barman-cloud-plugin
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cnpg-system
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The Barman Cloud plugin (CNPG-I).
+#
+# Lives under components/ rather than envs/dev/ because nothing here is
+# environment-specific: staging and prod reference this same directory. What
+# differs per environment is the ObjectStore, which names the bucket.
+#
+# WHY A PLUGIN AT ALL. CloudNativePG still accepts spec.backup.barmanObjectStore
+# inside the Cluster, and it is simpler. It has been deprecated since 1.26, and
+# CNPG is moving to a backup-agnostic architecture where the in-tree path gets
+# no new features. Building the stemcell on it would hand every forked project
+# the same migration later. See ADR-0007.
+#
+# The cost is real and worth stating: the plugin is still pre-1.0 (v0.14.0 after
+# two years), so its own API may change under us. That is a tracked upgrade
+# rather than a forced rewrite, which is the trade being made.
+#
+# Referenced by pinned release URL rather than vendored. Argo CD's repo-server
+# fetches it at render time, exactly as it already fetches Helm charts, and the
+# version in the URL is what makes that reproducible.
+resources:
+  - https://github.com/cloudnative-pg/plugin-barman-cloud/releases/download/v0.14.0/manifest.yaml
