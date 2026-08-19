@@ -42,6 +42,32 @@ spec:
       parameters:
         barmanObjectName: pg-backups
 
+        # The directory inside the bucket. Defaults to the Cluster's name, and
+        # belongs HERE rather than on the ObjectStore -- the API refuses it
+        # there, and says so plainly:
+        #
+        #   spec.configuration.serverName: Forbidden: use the 'serverName'
+        #   plugin parameter in the Cluster resource
+        #
+        # Pinned because the default breaks on rebuild. barman refuses to
+        # archive a NEW cluster into a path that already holds a different
+        # cluster's history:
+        #
+        #   WAL archive check failed for server postgres: Expected empty archive
+        #
+        # That refusal is correct: interleaving WAL from two timelines under one
+        # path corrupts the archive for both. But a cluster rebuilt per ADR-0002
+        # comes back with a fresh identity while the old path is still
+        # populated, so it starts Healthy and never archives again. Green
+        # dashboards, no backups.
+        #
+        # Naming the generation gives each rebuild its own path and leaves every
+        # earlier archive intact and restorable. BUMP THIS on a rebuild whose
+        # database is not being recovered from the previous generation.
+        #
+        # INTERIM: #113 decides the real answer.
+        serverName: postgres-g2
+
   affinity:
     # Keep the replica off the primary's node. Without this both instances can
     # land on one worker, and the second instance protects against a process

@@ -13,28 +13,6 @@ spec:
     destinationPath: s3://xenopsbase-dev-pg-backups/
     endpointURL: https://fsn1.your-objectstorage.com
 
-    # The directory inside the bucket. Defaults to the Cluster's name, and is
-    # pinned here because that default breaks on rebuild.
-    #
-    # barman refuses to archive a NEW cluster into a path that already holds a
-    # different cluster's history:
-    #
-    #   WAL archive check failed for server postgres: Expected empty archive
-    #
-    # That refusal is correct -- interleaving WAL from two timelines under one
-    # path corrupts the archive for both. But a cluster rebuilt per ADR-0002
-    # comes back with a fresh identity and the old path still populated, so it
-    # starts up Healthy and never archives again. Silent, and green.
-    #
-    # Naming the generation gives each rebuild its own path and keeps every
-    # previous archive intact and restorable. BUMP THIS on a rebuild whose
-    # database is not being recovered from the previous generation.
-    #
-    # INTERIM. #113 decides the real answer -- the candidates are recovering
-    # from the archive on rebuild instead of initdb, or retiring old paths
-    # deliberately. This is the option that unblocks archiving without deleting
-    # a backup, which is the one thing that cannot be undone.
-    serverName: postgres-g2
 
     s3Credentials:
       # The `db` key from the storage module, NOT the infra key. Its bucket

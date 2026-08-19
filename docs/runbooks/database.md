@@ -166,7 +166,8 @@ The refusal is correct — interleaving WAL from two timelines under one path co
 both. But the cluster still starts, reports `Cluster in healthy state`, and Argo reports `Healthy`,
 so **the only symptom is that backups silently stop**.
 
-`ObjectStore.spec.configuration.serverName` is therefore pinned rather than defaulted. **Bump it on
+`serverName` is therefore pinned rather than defaulted. It lives in the **Cluster's plugin
+parameters**, not on the ObjectStore — the API refuses it there. **Bump it on
 any rebuild whose database is not being recovered from the previous generation:**
 
 ```yaml
