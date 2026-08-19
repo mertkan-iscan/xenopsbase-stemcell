@@ -22,6 +22,22 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: database
+  # The operator owns spec.monitoring outright: it injects a customQueriesConfigMap
+  # and disableDefaultQueries into that stanza on every reconcile. Declaring
+  # them here would pin an operator-internal ConfigMap name that is free to
+  # change between operator versions, so the manifest stays out of the stanza
+  # and Argo is told to stop comparing it.
+  #
+  # Scoped to one pointer deliberately. A broader ignore would also hide real
+  # changes to the fields this Application does own.
+  ignoreDifferences:
+    - group: postgresql.cnpg.io
+      kind: Cluster
+      name: postgres
+      namespace: database
+      jsonPointers:
+        - /spec/monitoring
+
   syncPolicy:
     automated:
       # prune: true everywhere else in this repository. NOT here.
