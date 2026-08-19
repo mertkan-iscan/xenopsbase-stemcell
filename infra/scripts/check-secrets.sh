@@ -37,6 +37,19 @@ if [ "${#SECRET_FILES[@]}" -eq 0 ]; then
   echo "  no secret files tracked yet"
 else
   for f in "${SECRET_FILES[@]}"; do
+    # Only files that actually DECLARE a Secret need encrypting. A secrets/
+    # directory also holds the machinery that decrypts them -- a kustomization
+    # and a ksops generator -- which carry no sensitive data.
+    #
+    # Keying on location rather than content made this check fail on its own
+    # plumbing, which is the false positive its own comments warn about: a check
+    # people routinely override is not a check.
+    if ! grep -qE '^kind:[[:space:]]*Secret[[:space:]]*$' "$f" 2>/dev/null; then
+      printf '  %-56s %s
+' "$f" "skipped (not a Secret)"
+      continue
+    fi
+
     printf '  %-56s ' "$f"
     if grep -q '^sops:' "$f" 2>/dev/null || grep -q '"sops"' "$f" 2>/dev/null; then
       # Encrypted, but confirm the payload really is ciphertext rather than a
