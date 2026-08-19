@@ -82,6 +82,44 @@ older docs still say `microos-snapshot=yes`, which is where the confusion comes 
 To use MicroOS instead, set `os = "microos"` per nodepool **and** build the matching template:
 `bash infra/scripts/build-snapshot.sh 3.1.0 microos`.
 
+## Windows: line endings will break the apply
+
+Git for Windows ships `core.autocrlf=true` at **system** level. Terraform fetches registry modules
+with `git clone`, so that setting rewrites every file in the module to CRLF -- including the shell
+heredocs kube-hetzner uploads to nodes. They then fail on Linux:
+
+```
+/tmp/terraform_1990458969.sh: line 14: syntax error near unexpected token $'
+'
+Error: remote-exec provisioner error ... Process exited with status 2
+```
+
+The symptom is misleading: SSH connects, the `file` provisioners deliver correctly, nodes boot and
+show as `running`. Only the inline scripts fail, and the error names a temp file that has already
+been deleted.
+
+This is neither a kube-hetzner bug nor a Terraform bug, and nothing in this repository can prevent
+it -- `.gitattributes` does not apply to a checkout Terraform performs itself into `.terraform/`.
+
+The `make` targets scope the override to the Terraform invocation:
+
+```
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.autocrlf GIT_CONFIG_VALUE_0=false terraform init ...
+```
+
+Deliberately **not** a change to the global git config, which would affect every other repository
+on the machine. Harmless on Linux and macOS, where `autocrlf` is already off.
+
+Running `terraform init` by hand on Windows needs the same prefix. To check an existing checkout:
+
+```bash
+grep -qU $'
+' infra/terraform/cluster/.terraform/modules/kube_hetzner/locals.tf && echo "CRLF - reinit needed"
+```
+
+The fix is `rm -rf .terraform` and init again with the override. Editing the fetched files is not a
+fix; the next `init` undoes it.
+
 ## Building the cluster
 
 ```bash
@@ -113,6 +151,13 @@ provision a real Hetzner volume. Neither is much use unverified:
 kubectl -n kube-system get pods | grep -E 'hcloud|csi'
 ```
 
+### The PVC test needs a pod
+
+`hcloud-volumes` uses `volumeBindingMode: WaitForFirstConsumer`, so **a PVC on its own stays
+`Pending` forever, by design**. That is not a CSI failure, and treating it as one is the obvious
+way to misdiagnose a perfectly healthy cluster. The volume is only provisioned once a pod that
+mounts it is scheduled, so that the volume lands in the same location as the node.
+
 ```bash
 kubectl apply -f - <<'EOF'
 apiVersion: v1
@@ -125,23 +170,52 @@ spec:
   resources:
     requests:
       storage: 10Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: csi-smoke-test
+spec:
+  containers:
+    - name: probe
+      image: busybox:1.36
+      command: ["sh","-c","echo csi-ok > /data/probe && sleep 3600"]
+      volumeMounts:
+        - name: vol
+          mountPath: /data
+  volumes:
+    - name: vol
+      persistentVolumeClaim:
+        claimName: csi-smoke-test
 EOF
 ```
 
 ```bash
-kubectl get pvc csi-smoke-test -w
+kubectl wait --for=condition=Ready pod/csi-smoke-test --timeout=180s
 ```
 
-It must reach `Bound`, and a matching volume must appear in `hcloud volume list`. Stuck in
-`Pending` means CSI is not working, and Postgres (T-2.4) will fail the same way later but less
-obviously. Clean up:
+Then the PVC must be `Bound` and a matching volume must appear:
 
 ```bash
-kubectl delete pvc csi-smoke-test
+kubectl get pvc csi-smoke-test && hcloud volume list
 ```
 
-Confirm the volume disappears from `hcloud volume list`. A volume that outlives its PVC bills
-indefinitely, and orphaned volumes are the most common way this design leaks money.
+### Clean up, and check the volume actually went
+
+```bash
+kubectl delete pod csi-smoke-test && kubectl delete pvc csi-smoke-test
+```
+
+```bash
+hcloud volume list
+```
+
+This must come back empty. A volume that outlives its PVC bills indefinitely, and orphaned volumes
+are the most likely way this design leaks money — they survive `make down` because Terraform never
+knew about them.
+
+Verified 2026-08-19: PVC `Bound`, volume `106649780` created and attached to a worker, removed
+within seconds of the PVC being deleted.
 
 ## What this module deliberately does not install
 
