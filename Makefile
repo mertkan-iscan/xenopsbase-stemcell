@@ -14,7 +14,8 @@ SCRIPTS     := infra/scripts
 # Git for Windows sets core.autocrlf=true at SYSTEM level. Terraform fetches
 # registry modules with `git clone`, so that setting rewrites every module file
 # to CRLF -- including the shell heredocs kube-hetzner uploads to nodes, which
-# then die on Linux with a syntax error on $''.
+# then die on Linux with a syntax error on $'
+'.
 #
 # Scoped to the terraform invocation via GIT_CONFIG_* rather than changing the
 # user's global git config, which would affect all their other repositories.
@@ -106,6 +107,10 @@ cluster-apply: ## Build or update the cluster
 .PHONY: cluster-destroy
 cluster-destroy: ## Destroy the cluster. Does NOT touch the durable buckets or the OS snapshot
 	@cd $(CLUSTER_DIR) && terraform destroy -input=false
+
+.PHONY: verify-teardown
+verify-teardown: ## Assert a destroy left durable state intact and nothing orphaned
+	@bash $(SCRIPTS)/verify-teardown.sh
 
 .PHONY: kubeconfig
 kubeconfig: ## Write the kubeconfig out of Terraform state (gitignored)
