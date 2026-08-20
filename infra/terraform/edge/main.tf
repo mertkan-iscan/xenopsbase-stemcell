@@ -1,4 +1,12 @@
 locals {
+  # Every hostname this module publishes, as a WAF host match. Built from the
+  # same variables the DNS records are, so a hostname added there cannot be
+  # forgotten here.
+  waf_all_hosts = format(
+    "http.host in {%s}",
+    join(" ", [for h in concat([var.hostname], [for e in var.extra_hostnames : e.hostname]) : "\"${h}\""])
+  )
+
   tunnel_name = "xenopsbase-${var.environment}"
 
   # A tunnel is reached by CNAME to this synthetic hostname. It is derived from
@@ -143,9 +151,9 @@ resource "cloudflare_zone_setting" "min_tls_version" {
 # ------------------------------------------------------------------------------
 # WAF — OFF by default
 #
-# Every expression below is anchored to var.hostname. A zone-scoped rule that
-# forgets that anchor evaluates against the company site too, and a wrong rule
-# there blocks real customers rather than merely failing a test.
+# Every expression below is anchored to hostnames this module owns. A zone-scoped
+# rule that forgets that anchor evaluates against everything else in the zone,
+# and a wrong rule there blocks real traffic rather than merely failing a test.
 # ------------------------------------------------------------------------------
 
 resource "cloudflare_ruleset" "waf" {
@@ -159,15 +167,24 @@ resource "cloudflare_ruleset" "waf" {
   rules = [
     {
       # Administrative and metadata paths are never legitimate from the public
-      # internet. Scoped to this hostname so the rest of the zone is untouched.
+      # internet. Covers every hostname this module owns -- identity included,
+      # since auth-*.  is the one most worth probing -- and nothing else in the
+      # zone.
       action      = "block"
-      description = "block admin and metadata paths on ${var.hostname}"
-      expression  = "(http.host eq \"${var.hostname}\" and (starts_with(http.request.uri.path, \"/actuator\") or starts_with(http.request.uri.path, \"/.git\") or starts_with(http.request.uri.path, \"/.env\")))"
+      description = "block admin and metadata paths on xenopsbase ${var.environment} hostnames"
+      expression  = "(${local.waf_all_hosts} and (starts_with(http.request.uri.path, \"/actuator\") or starts_with(http.request.uri.path, \"/.git\") or starts_with(http.request.uri.path, \"/.env\")))"
       enabled     = true
     },
     {
       # Managed challenge rather than block: bot scoring is probabilistic, and
       # blocking outright turns a false positive into a support ticket.
+      #
+      # Deliberately NOT applied to the identity hostnames. A challenge is a
+      # browser interstitial, and the OIDC endpoints are called by things that
+      # cannot solve one: the PKCE code exchange is a back-channel POST, and
+      # service-account token requests have no browser at all. Challenging them
+      # returns HTML to a client expecting JSON, which surfaces as an
+      # unintelligible login failure rather than as a WAF event.
       action      = "managed_challenge"
       description = "challenge likely automated traffic on ${var.hostname}"
       expression  = "(http.host eq \"${var.hostname}\" and cf.client.bot and not cf.verified_bot_category in {\"Search Engine Crawler\" \"Monitoring & Analytics\"})"

@@ -9,10 +9,17 @@ environment = "dev"
 # app-dev.xenopsoftware.com is covered; dev.app.xenopsoftware.com is not.
 hostname = "app-dev.xenopsoftware.com"
 
-# Zone-wide, and this zone hosts a live company site. Both stay false until
-# someone has checked what else is in the zone. See variables.tf.
-manage_zone_settings = false
-manage_waf           = false
+# Zone-wide. Enabled 2026-08-20 on an explicit decision: the safepass demo that
+# these were held back for is finished and no longer needs to keep working, so
+# there is no origin left in the zone that Full (strict) can break.
+#
+# Full (strict) requires every origin reached over the public internet to present
+# a valid, publicly-trusted certificate. Tunnelled traffic does not depend on it
+# -- cloudflared makes an outbound mTLS connection, so that leg is authenticated
+# whatever the zone says -- but anything else in the zone does.
+manage_zone_settings = true
+zone_tls_mode        = "strict"
+manage_waf           = true
 
 # Keycloak needs its own publicly-resolvable hostname.
 #
