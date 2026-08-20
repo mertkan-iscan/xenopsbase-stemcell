@@ -1,0 +1,13 @@
+# Copy to backend.hcl and fill in. backend.hcl is gitignored.
+#
+# State lives in Cloudflare R2 (ADR-0005), using the R2 credentials in
+# AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY. Unlike the other modules the state
+# key is fixed rather than derived from ENV: there is one mail zone, not one per
+# environment.
+
+bucket = "xenopsbase-tfstate"
+region = "auto"
+
+endpoints = {
+  s3 = "https://<account_id>.r2.cloudflarestorage.com"
+}

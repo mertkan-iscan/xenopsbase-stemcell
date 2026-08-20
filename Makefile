@@ -7,6 +7,7 @@ SHELL := /bin/bash
 # A cluster destroy must never be able to reach storage/.
 STORAGE_DIR := infra/terraform/storage
 EDGE_DIR    := infra/terraform/edge
+MAIL_DIR    := infra/terraform/mail-dns
 CLUSTER_DIR := infra/terraform/cluster
 SCRIPTS     := infra/scripts
 
@@ -55,6 +56,9 @@ SECRETS      = env/$(ENV).secrets.tfvars
 STORAGE_KEY  = storage/$(ENV)/terraform.tfstate
 CLUSTER_KEY  = $(ENV)/cluster.tfstate
 EDGE_KEY     = edge/$(ENV)/terraform.tfstate
+
+# Not derived from ENV: there is one mail zone, not one per environment.
+MAIL_KEY     = mail-dns/terraform.tfstate
 
 # Fails loudly if the environment does not exist, or if its tfvars disagrees
 # with ENV. Without the second check, a copy-paste while adding an environment
@@ -174,6 +178,39 @@ edge-plan: ## Plan Cloudflare DNS, tunnel and optional zone settings
 edge-apply: ## Apply Cloudflare edge configuration
 	$(call check_env,$(EDGE_DIR))
 	@cd $(EDGE_DIR) && terraform apply $(APPROVE) -var-file=$(TFVARS) $$(test -f $(SECRETS) && echo -var-file=$(SECRETS))
+
+# ------------------------------------------------------------------------------
+# Mail DNS — deliverability records (durable, NOT per environment)
+#
+# One zone, one state file. Alert delivery fails silently without these: Brevo
+# returns "250 OK: queued" and discards the message, and Alertmanager logs
+# "Notify success" either way.
+#
+# Needs TF_VAR_cloudflare_api_token scoped to Zone / DNS / Edit on the mail zone.
+# That is a DIFFERENT token from the edge one, on a different account.
+# ------------------------------------------------------------------------------
+
+MAIL_VARS = -var-file=mail.tfvars $$(test -f mail.secrets.tfvars && echo -var-file=mail.secrets.tfvars)
+
+.PHONY: mail-dns-init
+mail-dns-init: ## terraform init for the mail DNS module
+	@cd $(MAIL_DIR) && $(TF_GIT) terraform init -input=false -reconfigure -backend-config=backend.hcl -backend-config="key=$(MAIL_KEY)"
+
+.PHONY: mail-dns-plan
+mail-dns-plan: ## Plan the mail deliverability records
+	@cd $(MAIL_DIR) && terraform plan -input=false $(MAIL_VARS)
+
+.PHONY: mail-dns-apply
+mail-dns-apply: ## Apply the mail deliverability records
+	@cd $(MAIL_DIR) && terraform apply $(APPROVE) $(MAIL_VARS)
+
+.PHONY: mail-dns-verify
+mail-dns-verify: ## Resolve every mail record and report what is actually published
+	@bash $(SCRIPTS)/verify-mail-dns.sh $(MAIL_DIR)
+
+# Deliberately absent: mail-dns-destroy. Destroying this module takes the
+# personal site at the apex down with it, and nothing in the monitoring would
+# notice. The apex record carries prevent_destroy for the same reason.
 
 # ------------------------------------------------------------------------------
 # Cluster (ephemeral, per environment)
