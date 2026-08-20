@@ -1,0 +1,263 @@
+# ===================================================================
+# Spring Boot configuration.
+#
+# This configuration will be overridden by the Spring profile you use,
+# for example application-dev.yml if you use the "dev" profile.
+#
+# More information on profiles: https://www.jhipster.tech/profiles/
+# More information on configuration properties: https://www.jhipster.tech/common-application-properties/
+# ===================================================================
+
+# ===================================================================
+# Standard Spring Boot properties.
+# Full reference is available at:
+# https://docs.spring.io/spring-boot/appendix/application-properties/index.html
+# ===================================================================
+
+---
+# Conditionally disable springdoc on missing api-docs profile
+spring:
+  config:
+    activate:
+      on-profile: '!api-docs'
+springdoc:
+  api-docs:
+    enabled: false
+---
+reactive:
+  feign:
+    circuit:
+      breaker:
+        enabled: true
+  # client:
+  #   config:
+  #     default:
+  #       connectTimeout: 5000
+  #       readTimeout: 5000
+management:
+  endpoints:
+    web:
+      base-path: /management
+      exposure:
+        include:
+          - configprops
+          - env
+          - gateway
+          - health
+          - info
+          - jhimetrics
+          - jhiopenapigroups
+          - logfile
+          - loggers
+          - prometheus
+          - threaddump
+  endpoint:
+    health:
+      show-details: when_authorized
+      roles: 'ROLE_ADMIN'
+      probes:
+        enabled: true
+      group:
+        liveness:
+          include: livenessState
+        readiness:
+          include: readinessState
+    jhimetrics:
+      access: read-only
+  info:
+    git:
+      mode: full
+    env:
+      enabled: true
+  health:
+    mail:
+      enabled: false # When using the MailService, configure an SMTP server and set this to true
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+        step: 60
+  observations:
+    key-values:
+      application: ${spring.application.name}
+  metrics:
+    enable:
+      http: true
+      jvm: true
+      logback: true
+      process: true
+      system: true
+    distribution:
+      percentiles-histogram:
+        all: true
+      percentiles:
+        all: 0, 0.5, 0.75, 0.95, 0.99, 1.0
+    data:
+      repository:
+        autotime:
+          enabled: true
+    tags:
+      application: ${spring.application.name}
+
+spring:
+  application:
+    name: gateway
+  cloud:
+    gateway:
+      server:
+        webflux:
+          default-filters:
+            - TokenRelay
+          httpclient:
+            pool:
+              max-connections: 1000
+          routes:
+            # Kubernetes Service DNS, not lb://. There is no service registry
+            # (JDL: serviceDiscoveryType no) because Kubernetes already provides
+            # discovery; lb:// here would fail to resolve at runtime rather than
+            # at startup, so the first symptom would be a 503 on a real request.
+            #
+            # CORE_URI is overridden per environment. The default is the
+            # in-cluster name so a deployment needs no configuration to work.
+            - id: core
+              uri: ${CORE_URI:http://core:8081}
+              predicates:
+                - Path=/services/core/**
+              filters:
+                # /services/core/api/x  ->  /api/x
+                - StripPrefix=2
+          # See alternatives in https://github.com/spring-cloud/spring-cloud-gateway/issues/3818
+          trusted-proxies: '.*'
+  docker:
+    compose:
+      # Off. The generated compose files duplicated Keycloak, Postgres, Grafana
+      # and Prometheus, all of which the cluster already runs; they were deleted
+      # in T-3.2. Left enabled, startup fails looking for a file that is gone.
+      enabled: false
+  profiles:
+    # The commented value for `active` can be replaced with valid Spring profiles to load.
+    # Otherwise, it will be filled in by maven when building the JAR file
+    # Either way, it can be overridden by `--spring.profiles.active` value passed in the commandline or `-Dspring.profiles.active` set in `JAVA_OPTS`
+    active: '@spring.profiles.active@'
+    group:
+      dev:
+        - secret-samples
+        - api-docs
+        # Uncomment to activate TLS for the dev profile
+        #- tls
+  jmx:
+    enabled: false
+  messages:
+    basename: i18n/messages
+  main:
+    allow-bean-definition-overriding: true
+  webflux:
+    problemdetails:
+      enabled: true
+  security:
+    oauth2:
+      client:
+        provider:
+          oidc:
+            # Points at the Keycloak realm imported from git in T-2.5.
+            #
+            # The default is the IN-CLUSTER service name, so a pod needs no
+            # configuration to work. That relies on Keycloak running with
+            # hostname strict: false in dev, which makes it issue tokens whose
+            # `iss` matches the host the request arrived on -- so an in-cluster
+            # caller gets an in-cluster issuer and validation matches.
+            #
+            # In staging and prod, where hostname strict is ON, this MUST be the
+            # public issuer, because every token will carry that value and a
+            # mismatched issuer-uri rejects every token with a message about the
+            # issuer rather than about configuration.
+            issuer-uri: ${OIDC_ISSUER_URI:http://keycloak-service.keycloak.svc.cluster.local:8080/realms/xenopsbase}
+        registration:
+          oidc:
+            client-id: ${OIDC_CLIENT_ID:gateway}
+            # Never defaulted. A gateway that starts with a placeholder secret
+            # is a gateway that authenticates against nothing and looks fine.
+            client-secret: ${OIDC_CLIENT_SECRET}
+            # offline_access is what makes the refresh-token filter useful; the
+            # `api` scope is the one the realm defines for reaching the core
+            # service (T-2.5).
+            scope: openid, profile, email, offline_access, api
+  task:
+    execution:
+      thread-name-prefix: gateway-task-
+      pool:
+        core-size: 2
+        max-size: 50
+        queue-capacity: 10000
+    scheduling:
+      thread-name-prefix: gateway-scheduling-
+      pool:
+        size: 2
+  thymeleaf:
+    mode: HTML
+  output:
+    ansi:
+      console-available: true
+
+server:
+  servlet:
+    session:
+      cookie:
+        http-only: true
+
+springdoc:
+  show-actuator: true
+
+# Properties to be exposed on the /info management endpoint
+info:
+  # Comma separated list of profiles that will trigger the ribbon to show
+  display-ribbon-on-profiles: 'dev'
+
+# ===================================================================
+# JHipster specific properties
+#
+# Full reference is available at: https://www.jhipster.tech/common-application-properties/
+# ===================================================================
+
+jhipster:
+  mail:
+    from: gateway@localhost
+  api-docs:
+    default-include-pattern: /api/**
+    management-include-pattern: /management/**
+    title: Gateway API
+    description: Gateway API documentation
+    version: 0.0.1
+    terms-of-service-url:
+    contact-name:
+    contact-url:
+    contact-email:
+    license: unlicensed
+    license-url:
+  security:
+    oauth2:
+      audience:
+        # Checked by security/oauth2/AudienceValidator. These must match the
+        # `aud` claim Keycloak actually puts in the token, or every request is
+        # rejected with a valid-looking token.
+        #
+        # `account` is Keycloak's built-in audience and is present by default;
+        # `gateway` is this client. Okta's api://default is removed -- keeping a
+        # foreign audience in the accepted list widens what this gateway trusts
+        # for no reason.
+        - account
+        - gateway
+
+
+# jhipster-needle-add-application-yaml-document
+---
+# ===================================================================
+# Application specific properties
+# Add your own application properties here, see the ApplicationProperties class
+# to have type-safe configuration, like in the JHipsterProperties above
+#
+# More documentation is available at:
+# https://www.jhipster.tech/common-application-properties/
+# ===================================================================
+
+# application:
