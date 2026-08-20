@@ -77,14 +77,30 @@ if [ "$PVCS" -eq 0 ]; then
 fi
 kubectl get pvc -A --no-headers 2>/dev/null | awk '{printf "    %-16s %s\n", $1, $2}'
 
-# Scale down first. A StatefulSet whose pod is still running holds the volume
-# attached, and the PVC then sits Terminating until the pod goes -- which looks
-# like a hang rather than a dependency.
+# STOP ARGO CD FIRST. This is the step whose absence made the first attempt
+# fail: selfHeal is on for every Application, so scaling a StatefulSet to zero
+# or deleting a CNPG Cluster is undone within seconds. The PVCs stay bound, the
+# volumes are never released, and the loop below counts down to a timeout
+# against an opponent that is actively putting everything back.
+#
+# Nothing here needs Argo: the cluster is about to cease existing.
 echo
+echo "  stopping the Argo CD application controller so it stops self-healing..."
+kubectl -n argocd scale statefulset --all --replicas=0 >/dev/null 2>&1
+for i in $(seq 1 12); do
+  RUNNING="$(kubectl -n argocd get pods -l app.kubernetes.io/name=argocd-application-controller --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+  [ "$RUNNING" -eq 0 ] && break
+  sleep 5
+done
+
+# Now the scale-down sticks. A StatefulSet whose pod is still running holds its
+# volume attached, and the PVC then sits Terminating until the pod goes --
+# which looks like a hang rather than a dependency.
 echo "  scaling down workloads that hold volumes..."
-kubectl scale statefulset --all --replicas=0 -A >/dev/null 2>&1
 kubectl -n database delete cluster --all --wait=false >/dev/null 2>&1
-sleep 10
+kubectl scale statefulset --all --replicas=0 -A >/dev/null 2>&1
+kubectl scale deployment --all --replicas=0 -A >/dev/null 2>&1
+sleep 15
 
 echo "  deleting PersistentVolumeClaims..."
 kubectl delete pvc --all -A --wait=false >/dev/null 2>&1
