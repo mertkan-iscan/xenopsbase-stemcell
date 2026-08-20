@@ -102,9 +102,15 @@ spring:
     name: core
   docker:
     compose:
-      enabled: true
-      lifecycle-management: start-only
-      file: src/main/docker/postgresql.yml
+      # Off, and it must be. The generated compose files were deleted in T-3.2
+      # because they shipped their own Postgres, Keycloak, Grafana and Prometheus
+      # duplicating what the cluster already runs. Left enabled, the application
+      # refuses to start:
+      #
+      #   'files' content [src\main\docker\postgresql.yml] must exist
+      #
+      # Postgres comes from CloudNativePG (T-2.4), not from a compose file.
+      enabled: false
   profiles:
     # The commented value for `active` can be replaced with valid Spring profiles to load.
     # Otherwise, it will be filled in by maven when building the JAR file
@@ -154,9 +160,17 @@ spring:
   security:
     oauth2:
       client:
-        registration:
+        provider:
           oidc:
-            scope: openid, profile
+            # The core service is a RESOURCE SERVER: it never starts a login, it
+            # only validates tokens the gateway relays inward. SecurityConfiguration
+            # reads this property directly, so leaving it unset fails at startup.
+            #
+            # Must be the public issuer, because that is the value Keycloak puts
+            # in every token's `iss` claim regardless of which host the request
+            # arrived on. Pointing this at the in-cluster Service name would
+            # reject every relayed token while looking correctly configured.
+            issuer-uri: ${OIDC_ISSUER_URI:https://auth-dev.xenopsoftware.com/realms/xenopsbase}
   task:
     execution:
       thread-name-prefix: core-task-
@@ -212,8 +226,12 @@ jhipster:
   security:
     oauth2:
       audience:
+        # Must match the `aud` claim Keycloak actually issues, or every relayed
+        # token is rejected by AudienceValidator while looking valid.
+        # Okta's api://default is removed: accepting a foreign audience widens
+        # what this service trusts for no reason.
         - account
-        - api://default
+        - gateway
 
 
 # jhipster-needle-add-application-yaml-document

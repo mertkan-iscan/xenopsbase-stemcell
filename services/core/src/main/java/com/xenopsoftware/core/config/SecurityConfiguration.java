@@ -53,8 +53,19 @@ public class SecurityConfiguration {
                     .requestMatchers("/management/**").hasAuthority(AuthoritiesConstants.ADMIN)
             )
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(authenticationConverter())))
-            .oauth2Client(withDefaults());
+            // Resource server ONLY. The core service validates the token the
+            // gateway relays inward; it never starts a login and never calls
+            // another service on a user's behalf.
+            //
+            // .oauth2Client(withDefaults()) was generated here and is removed
+            // deliberately. It requires a ClientRegistrationRepository, so the
+            // service refuses to start without OAuth2 CLIENT credentials it has
+            // no use for -- and the message names a missing bean rather than
+            // the unnecessary feature that demanded it.
+            //
+            // If the core ever needs to call another service as itself, add a
+            // client-credentials registration on purpose, and put this back.
+            .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(authenticationConverter())));
         return http.build();
     }
 

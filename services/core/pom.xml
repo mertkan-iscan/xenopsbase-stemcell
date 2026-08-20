@@ -299,6 +299,16 @@
             <version>${jackson-databind-nullable.version}</version>
         </dependency>
         <dependency>
+            <!-- Spring Boot 4 moved autoconfiguration out of the monolithic
+                 spring-boot-autoconfigure into per-module artifacts. Without
+                 this, flyway-core sits on the classpath and is NEVER RUN: no
+                 error, no log line, and the first symptom is Hibernate's
+                 "Schema validation: missing table" for a table the migration
+                 would have created. -->
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-flyway</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-core</artifactId>
         </dependency>
