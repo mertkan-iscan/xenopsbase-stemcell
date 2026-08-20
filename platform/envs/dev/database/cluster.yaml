@@ -65,8 +65,18 @@ spec:
         # earlier archive intact and restorable. BUMP THIS on a rebuild whose
         # database is not being recovered from the previous generation.
         #
-        # INTERIM: #113 decides the real answer.
-        serverName: postgres-g2
+        # INTERIM: #113 decides the real answer, and #122 the durable one.
+        #
+        # BUMPED TO g3 on 2026-08-20 after the second recurrence. The rebuild
+        # that morning produced a cluster that never archived a single WAL
+        # segment: barman refused the non-empty g2 path, the scheduled base
+        # backup started and hung waiting for archiving, and the cluster ran for
+        # five hours reporting Healthy with no backup of anything created that
+        # day.
+        #
+        # That is twice. The manual bump is not a fix, it is a reminder nobody
+        # gets - which is exactly what #122 exists to remove.
+        serverName: postgres-g3
 
   affinity:
     # Keep the replica off the primary's node. Without this both instances can
