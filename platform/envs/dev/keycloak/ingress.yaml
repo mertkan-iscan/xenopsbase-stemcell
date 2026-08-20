@@ -1,0 +1,35 @@
+# Routes auth-dev.xenopsoftware.com to Keycloak.
+#
+# The tunnel delivers every hostname to this same ingress controller, which then
+# routes by Host header. Identity therefore needs no second entry point, no
+# second tunnel and no load balancer.
+#
+# WHY KEYCLOAK IS PUBLIC AT ALL. It would be tempting to keep the identity
+# provider cluster-internal. It cannot be: the OIDC authorization-code flow
+# redirects the user's BROWSER to Keycloak to log in. A browser cannot resolve
+# keycloak-service.keycloak.svc.cluster.local, so a private Keycloak means no
+# login at all.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: keycloak
+  namespace: keycloak
+  annotations:
+    # Keycloak builds absolute URLs (redirects, issuer, password-reset links)
+    # from the forwarded headers. Without these it emits http:// URLs behind an
+    # https:// edge, and the login round-trip breaks in a way that looks like a
+    # client misconfiguration.
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: auth-dev.xenopsoftware.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak-service
+                port:
+                  number: 8080

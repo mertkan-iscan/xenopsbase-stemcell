@@ -161,17 +161,23 @@ spring:
           oidc:
             # Points at the Keycloak realm imported from git in T-2.5.
             #
-            # The default is the IN-CLUSTER service name, so a pod needs no
-            # configuration to work. That relies on Keycloak running with
-            # hostname strict: false in dev, which makes it issue tokens whose
-            # `iss` matches the host the request arrived on -- so an in-cluster
-            # caller gets an in-cluster issuer and validation matches.
+            # This MUST be the PUBLIC issuer, not the in-cluster Service name.
             #
-            # In staging and prod, where hostname strict is ON, this MUST be the
-            # public issuer, because every token will carry that value and a
-            # mismatched issuer-uri rejects every token with a message about the
-            # issuer rather than about configuration.
-            issuer-uri: ${OIDC_ISSUER_URI:http://keycloak-service.keycloak.svc.cluster.local:8080/realms/xenopsbase}
+            # Verified rather than assumed: Keycloak's discovery document
+            # reports
+            #   "issuer":"https://auth-dev.xenopsoftware.com/realms/xenopsbase"
+            # even when fetched over localhost. hostname.strict: false relaxes
+            # which Host headers are ACCEPTED; it does not make the issuer
+            # follow the request. Every token carries the configured hostname.
+            #
+            # So a gateway configured with the in-cluster URL rejects every
+            # token with an issuer-mismatch error, while Keycloak, the realm and
+            # the network all look fine.
+            #
+            # It also has to be publicly reachable regardless: the login flow
+            # redirects the user's BROWSER to Keycloak, which cannot resolve a
+            # cluster-internal name.
+            issuer-uri: ${OIDC_ISSUER_URI:https://auth-dev.xenopsoftware.com/realms/xenopsbase}
         registration:
           oidc:
             client-id: ${OIDC_CLIENT_ID:gateway}
