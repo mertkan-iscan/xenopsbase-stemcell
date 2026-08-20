@@ -3,10 +3,12 @@ package com.xenopsoftware.core.web.rest;
 import com.xenopsoftware.core.domain.ExampleItem;
 import com.xenopsoftware.core.repository.ExampleItemRepository;
 import jakarta.validation.Valid;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -36,11 +38,24 @@ public class ExampleItemResource {
         if (authentication == null) {
             return Map.of("authenticated", false);
         }
-        return Map.of(
-            "authenticated", authentication.isAuthenticated(),
-            "name", authentication.getName(),
-            "authorities", authentication.getAuthorities().stream().map(Object::toString).toList()
-        );
+        // HashMap, not Map.of: Map.of rejects null values, and getName() is null
+        // for a client-credentials token, which carries no preferred_username.
+        // That turned a working relay into an opaque 500 -- the identity had
+        // arrived correctly and the endpoint reporting it was what failed.
+        Map<String, Object> out = new HashMap<>();
+        out.put("authenticated", authentication.isAuthenticated());
+        out.put("name", authentication.getName());
+        out.put("authorities", authentication.getAuthorities().stream().map(Object::toString).toList());
+        if (authentication.getPrincipal() instanceof Jwt jwt) {
+            // What the CORE service sees in the relayed token, which is the
+            // whole point of this endpoint.
+            out.put("iss", jwt.getClaimAsString("iss"));
+            out.put("aud", jwt.getClaimAsStringList("aud"));
+            out.put("azp", jwt.getClaimAsString("azp"));
+            out.put("scope", jwt.getClaimAsString("scope"));
+            out.put("sub", jwt.getClaimAsString("sub"));
+        }
+        return out;
     }
 
     /** Proves JPA, Flyway and ddl-auto=validate agree about the schema. */

@@ -118,6 +118,40 @@ spec:
           - email
           - api
 
+      # DEV ONLY. A client that can exchange a username and password directly
+      # for a token, so automated tests can authenticate without driving a
+      # browser (T-5.5).
+      #
+      # directAccessGrants is the OAuth2 password grant, which is deprecated for
+      # real applications precisely because it hands the user's password to the
+      # client. It is acceptable here because this client exists solely for
+      # tests, against a throwaway user, in a realm that holds nothing.
+      #
+      # DO NOT COPY THIS INTO staging OR prod. The realm files there should not
+      # contain this client at all.
+      - clientId: smoke-tests
+        name: Automated smoke tests (dev only)
+        enabled: true
+        protocol: openid-connect
+        publicClient: true
+        standardFlowEnabled: false
+        directAccessGrantsEnabled: true
+        defaultClientScopes:
+          - profile
+          - email
+          - api
+        protocolMappers:
+          # Same reason as the gateway client: without this the token has no
+          # `aud` and every resource server rejects it.
+          - name: smoke-audience
+            protocol: openid-connect
+            protocolMapper: oidc-audience-mapper
+            config:
+              included.client.audience: gateway
+              id.token.claim: "false"
+              access.token.claim: "true"
+              introspection.token.claim: "true"
+
       # The single-page app: public, PKCE. A browser client cannot keep a
       # secret, so it does not get one -- PKCE is what replaces it.
       - clientId: frontend
@@ -140,3 +174,28 @@ spec:
           - profile
           - email
           - api
+
+    # DEV ONLY, and deliberately the only user this realm contains.
+    #
+    # Exists so the token relay and the smoke suite can authenticate as a
+    # PERSON rather than a service account. That distinction matters: the
+    # gateway enriches tokens from Keycloak's /userinfo endpoint, which returns
+    # 403 for a client-credentials token because a service account has no user
+    # profile. A relay that works for one does not prove the other.
+    #
+    # The password is not a secret in any meaningful sense -- it grants access
+    # to an empty dev realm -- but it is still the kind of thing that should
+    # never appear in a staging or prod realm file.
+    users:
+      - username: smoke
+        enabled: true
+        emailVerified: true
+        email: smoke@example.invalid
+        firstName: Smoke
+        lastName: Test
+        credentials:
+          - type: password
+            value: smoke-dev-only
+            temporary: false
+        realmRoles:
+          - app-user
