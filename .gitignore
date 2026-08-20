@@ -72,9 +72,10 @@ services/gen.log
 # T-4.1 wants a clone to build without Maven pre-installed. A fork that has to
 # install a build tool first is a fork that starts with a yak.
 
-# JHipster writes generator state here. Kept OUT of git deliberately: T-3.4
-# detaches from the generator, and a committed .yo-rc.json invites someone to
-# re-run it over hand-edited code and silently restore what was deleted.
+# Generator state. DELETED in T-3.4, not merely ignored -- re-running the
+# generator over this tree would restore the user mirroring, the docker files
+# and Liquibase as though they were an update. These entries exist so a stray
+# regeneration attempt cannot be committed by accident.
 services/.yo-rc.json
 services/*/.yo-rc.json
 services/*/.jhipster/

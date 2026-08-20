@@ -234,7 +234,6 @@ jhipster:
         - gateway
 
 
-# jhipster-needle-add-application-yaml-document
 ---
 # ===================================================================
 # Application specific properties
