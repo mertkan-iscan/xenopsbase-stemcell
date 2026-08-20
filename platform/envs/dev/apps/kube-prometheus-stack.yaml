@@ -92,10 +92,21 @@ spec:
               # here, so a ${VAR} would be sent to the SMTP server verbatim.
               # Only the SMTP key is a secret, and it is read from a file below.
               #
-              # smtp_from MUST be a sender verified in Brevo. An unverified
-              # sender is rejected at send time, which would look like the
-              # alert pipeline working while nothing is delivered.
-              smtp_from: mertiscan34@gmail.com
+              # smtp_from MUST be an address on a domain AUTHENTICATED in Brevo.
+              #
+              # This was mertiscan34@gmail.com and nothing was ever delivered.
+              # Brevo accepted the SMTP transaction, returned "250 OK: queued",
+              # and then discarded the message: a relay cannot send as @gmail.com
+              # because nobody but Google can authenticate that domain. The
+              # failure is invisible from this side -- Alertmanager logs "Notify
+              # success" and the message simply does not exist.
+              #
+              # mertkaniscan.com is authenticated: brevo-code on the apex, SPF on
+              # the branded send. subdomain, DMARC, and DKIM published as CNAMEs
+              # at brevo1/brevo2._domainkey resolving to real RSA keys. DKIM
+              # signs as d=mertkaniscan.com, which aligns with this From header
+              # and satisfies DMARC.
+              smtp_from: alerts@mertkaniscan.com
               smtp_smarthost: smtp-relay.brevo.com:587
               smtp_auth_username: b3b140001@smtp-brevo.com
               # Read from a file rather than inlined, so the credential stays in
