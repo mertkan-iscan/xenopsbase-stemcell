@@ -23,8 +23,17 @@ control_plane_nodepools = [
 
 agent_nodepools = [
   {
-    name        = "worker"
-    server_type = "cx23"
+    name = "worker"
+    # cx33 (8Gi) rather than cx23 (4Gi). Two cx23 workers could not carry the
+    # platform: memory hit 93% on one node and Argo's repo-server began failing
+    # its probes, so committed changes silently stopped arriving (T-1.12, #133).
+    #
+    # That is the failure worth paying to avoid. It does not present as "out of
+    # memory" -- it presents as a fix not working, three layers from the cause.
+    #
+    # The cost is about a cent an hour more for the pair, and the cluster is
+    # destroyed between sessions, so the monthly figure is not what is paid.
+    server_type = "cx33"
     location    = "fsn1"
     count       = 2
   }
