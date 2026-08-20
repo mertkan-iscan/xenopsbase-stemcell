@@ -61,27 +61,6 @@ spec:
         attributes:
           include.in.token.scope: "true"
           display.on.consent.screen: "false"
-        protocolMappers:
-          # WITHOUT THIS, TOKENS CARRY NO `aud` CLAIM AT ALL.
-          #
-          # Keycloak does not add an audience by itself. A realm can look
-          # complete -- clients, roles, scopes all present -- and still issue
-          # tokens that every audience-validating resource server rejects.
-          # Verified the hard way: a client_credentials token contained only
-          # iss, azp, scope, sub, typ, and both the gateway and the core service
-          # returned 401 for a token that was otherwise perfectly valid.
-          #
-          # `azp` names the client that ASKED for the token; `aud` names who it
-          # is FOR. Validators check aud, which is what stops a token minted for
-          # one service being replayed against another.
-          - name: api-audience
-            protocol: openid-connect
-            protocolMapper: oidc-audience-mapper
-            config:
-              included.client.audience: gateway
-              id.token.claim: "false"
-              access.token.claim: "true"
-              introspection.token.claim: "true"
 
     clients:
       # The gateway: confidential, authorization-code flow. This is the only
@@ -91,6 +70,32 @@ spec:
         enabled: true
         protocol: openid-connect
         publicClient: false
+        protocolMappers:
+          # WITHOUT THIS, TOKENS CARRY NO `aud` CLAIM AT ALL.
+          #
+          # Keycloak does not add an audience by itself. The realm can look
+          # complete -- clients, roles, scopes all present -- and still issue
+          # tokens that every audience-validating service rejects. Verified: a
+          # client_credentials token contained only iss, azp, scope, sub, typ,
+          # exp, iat and jti, and both services returned 401 for a token that
+          # was otherwise perfectly valid.
+          #
+          # `azp` names the client that ASKED for the token; `aud` names who it
+          # is FOR. Validators check aud, because that is what stops a token
+          # minted for one service being replayed against another.
+          #
+          # Attached to the CLIENT, not to the `api` client scope. The scope was
+          # tried first and Keycloak's import created the scope while silently
+          # dropping its protocolMappers -- the scope existed, the mapper did
+          # not, and tokens still had no audience.
+          - name: gateway-audience
+            protocol: openid-connect
+            protocolMapper: oidc-audience-mapper
+            config:
+              included.client.audience: gateway
+              id.token.claim: "false"
+              access.token.claim: "true"
+              introspection.token.claim: "true"
         # Read from the environment at import time, so the secret lives in SOPS
         # (ADR-0003) rather than in this file. The realm JSON in git shows THAT
         # the client has a secret, never what it is.
