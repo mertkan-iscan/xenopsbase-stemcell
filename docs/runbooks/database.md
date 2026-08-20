@@ -242,8 +242,9 @@ WAL burst filling the data volume and stalling writes is a real failure.
 **Deleting a Cluster deletes its PVCs, and orphans the underlying Hetzner volumes** if the cluster
 is torn down by Terraform first. See #109 — `make verify-teardown` catches it; nothing else does.
 
-**No monitoring yet.** `enablePodMonitor` is off until T-2.6 provides the ServiceMonitor CRD. Until
-then, backup failures are discovered by looking, which is the weakest part of this setup.
+**Schema changes are not covered here.** Migrations, their naming and review conventions, and why
+rollback is forward-only rather than an undo script, live in
+[schema-migrations.md](schema-migrations.md).
 
 **Retention is 30 days and lives on the ObjectStore**, not in a bucket lifecycle rule. Expiring a
 WAL segment that a base backup still depends on silently destroys recoverability for everything

@@ -21,7 +21,10 @@ class TechnicalStructureTest {
         .optionalLayer("Service").definedBy("..service..")
         .layer("Security").definedBy("..security..")
         .optionalLayer("Persistence").definedBy("..repository..")
-        .layer("Domain").definedBy("..domain..")
+        // Optional, and empty on purpose. The gateway routes and relays tokens; Keycloak is the
+        // single source of truth for identity, so there is no local user model to persist. See
+        // services/README.md. Domain entities belong in core.
+        .optionalLayer("Domain").definedBy("..domain..")
 
         .whereLayer("Config").mayNotBeAccessedByAnyLayer()
         .whereLayer("Web").mayOnlyBeAccessedByLayers("Config")

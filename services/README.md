@@ -67,6 +67,8 @@ Rules that are not obvious from the tree:
   outside that tree is easy to expose accidentally.
 - **Entities are only created alongside a Flyway migration**, and the migration is written first.
   `ddl-auto: validate` enforces this: an entity that disagrees with its migration refuses to start.
+  Naming, review conventions and the forward-only rollback strategy are in
+  [docs/runbooks/schema-migrations.md](../docs/runbooks/schema-migrations.md).
 
 ## Building
 

@@ -58,19 +58,44 @@ class SecurityUtilsUnitTest {
         assertThat(login).contains("admin");
     }
 
+    /**
+     * Keycloak puts realm roles in a nested {@code realm_access.roles} array. This is the shape every
+     * token from this platform actually has, and reading only the flat claims below is what made
+     * authorization silently deny everyone until T-3.5.
+     */
+    @Test
+    void testExtractAuthorityFromRealmAccess() {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("realm_access", Map.of("roles", List.of(AuthoritiesConstants.ADMIN, AuthoritiesConstants.USER)));
+
+        List<GrantedAuthority> authorities = SecurityUtils.extractAuthorityFromClaims(claims);
+
+        assertThat(authorities)
+            .extracting(GrantedAuthority::getAuthority)
+            .containsExactlyInAnyOrder("app-admin", "app-user", "ROLE_APP_ADMIN", "ROLE_APP_USER");
+    }
+
+    /** Client roles arrive per-client under {@code resource_access.<client>.roles}. */
+    @Test
+    void testExtractAuthorityFromResourceAccess() {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("resource_access", Map.of("gateway", Map.of("roles", List.of(AuthoritiesConstants.ADMIN))));
+
+        List<GrantedAuthority> authorities = SecurityUtils.extractAuthorityFromClaims(claims);
+
+        assertThat(authorities).extracting(GrantedAuthority::getAuthority).containsExactlyInAnyOrder("app-admin", "ROLE_APP_ADMIN");
+    }
+
     @Test
     void testExtractAuthorityFromClaims() {
         Map<String, Object> claims = new HashMap<>();
         claims.put("groups", List.of(AuthoritiesConstants.ADMIN, AuthoritiesConstants.USER));
 
-        List<GrantedAuthority> expectedAuthorities = List.of(
-            new SimpleGrantedAuthority(AuthoritiesConstants.ADMIN),
-            new SimpleGrantedAuthority(AuthoritiesConstants.USER)
-        );
-
         List<GrantedAuthority> authorities = SecurityUtils.extractAuthorityFromClaims(claims);
 
-        assertThat(authorities).isNotNull().isNotEmpty().hasSize(2).containsAll(expectedAuthorities);
+        assertThat(authorities)
+            .extracting(GrantedAuthority::getAuthority)
+            .containsExactlyInAnyOrder("app-admin", "app-user", "ROLE_APP_ADMIN", "ROLE_APP_USER");
     }
 
     @Test
@@ -78,14 +103,39 @@ class SecurityUtilsUnitTest {
         Map<String, Object> claims = new HashMap<>();
         claims.put(SecurityUtils.CLAIMS_NAMESPACE + "roles", List.of(AuthoritiesConstants.ADMIN, AuthoritiesConstants.USER));
 
-        List<GrantedAuthority> expectedAuthorities = List.of(
-            new SimpleGrantedAuthority(AuthoritiesConstants.ADMIN),
-            new SimpleGrantedAuthority(AuthoritiesConstants.USER)
-        );
+        List<GrantedAuthority> authorities = SecurityUtils.extractAuthorityFromClaims(claims);
+
+        assertThat(authorities)
+            .extracting(GrantedAuthority::getAuthority)
+            .containsExactlyInAnyOrder("app-admin", "app-user", "ROLE_APP_ADMIN", "ROLE_APP_USER");
+    }
+
+    /**
+     * Each Keycloak role yields two authorities: the raw name, which {@code @PreAuthorize} checks
+     * with {@code hasAuthority}, and a normalised {@code ROLE_} alias for {@code hasRole} and for
+     * any generator-era code that still expects the Spring convention.
+     */
+    @Test
+    void testExtractAuthorityFromClaims_MapsHyphensAndDotsInTheRoleAlias() {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("realm_access", Map.of("roles", List.of("billing.read-only")));
 
         List<GrantedAuthority> authorities = SecurityUtils.extractAuthorityFromClaims(claims);
 
-        assertThat(authorities).isNotNull().isNotEmpty().hasSize(2).containsAll(expectedAuthorities);
+        assertThat(authorities)
+            .extracting(GrantedAuthority::getAuthority)
+            .containsExactlyInAnyOrder("billing.read-only", "ROLE_BILLING_READ_ONLY");
+    }
+
+    /** A role already carrying the prefix must not become {@code ROLE_ROLE_ADMIN}. */
+    @Test
+    void testExtractAuthorityFromClaims_DoesNotDoublePrefix() {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("realm_access", Map.of("roles", List.of("ROLE_ADMIN")));
+
+        List<GrantedAuthority> authorities = SecurityUtils.extractAuthorityFromClaims(claims);
+
+        assertThat(authorities).extracting(GrantedAuthority::getAuthority).containsExactly("ROLE_ADMIN");
     }
 
     @Test
