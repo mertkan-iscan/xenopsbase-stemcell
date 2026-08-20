@@ -148,26 +148,45 @@ spec:
         inherit: true
         connectionLimit: -1
 
+  # RECOVERY, not initdb.
+  #
+  # bootstrap only runs when the Cluster is CREATED, so this is what happens on
+  # every rebuild: the database is restored from the archive rather than starting
+  # empty. That is what ADR-0002 has always implied - the cluster is disposable
+  # because the data is not - and it is what makes the promise real instead of
+  # aspirational.
+  #
+  # It also removes the failure that recurred twice. A cluster bootstrapped with
+  # initdb is a NEW lineage, so barman refuses to archive into a path that already
+  # holds another cluster's history:
+  #
+  #   WAL archive check failed for server postgres-gN: Expected empty archive
+  #
+  # ...and the cluster then runs indefinitely reporting Healthy with no backups.
+  # The workaround was a human remembering to bump serverName on every rebuild,
+  # which failed both times it was needed. A recovered cluster is a CONTINUATION
+  # of the same lineage, so the check does not apply and serverName never changes.
+  #
+  # FIRST INSTALL IN A NEW ENVIRONMENT will fail here, loudly, because there is
+  # nothing to recover from. That is the correct default for a system that holds
+  # data: creating an empty database is the exceptional act, not the routine one.
+  # docs/runbooks/database.md has the one-time bootstrap procedure.
   bootstrap:
-    initdb:
+    recovery:
+      source: archive
       database: app
       owner: app
-      # Pinned rather than defaulted, and not only to stop Argo reporting drift.
-      #
-      # Collation is baked into every text index at creation. If the underlying
-      # glibc changes its collation rules -- which it has, notably in glibc 2.28
-      # -- indexes built under the old rules silently disagree with the new
-      # ones, and queries return wrong results rather than errors. Locale C has
-      # no such dependency: it sorts by byte value and never changes.
-      #
-      # The cost is that ORDER BY on text is ASCII order, not linguistic order.
-      # Applications that need human-language sorting should ask for a collation
-      # per column or per query, which is explicit and reviewable, rather than
-      # inheriting one from whatever libc the base image happened to ship.
-      encoding: UTF8
-      localeCollate: C
-      localeCType: C
 
+  externalClusters:
+    - name: archive
+      plugin:
+        name: barman-cloud.cloudnative-pg.io
+        parameters:
+          barmanObjectName: pg-backups
+          # The path this cluster both restores FROM and archives TO. It is the
+          # same value because recovery continues the lineage; there is no
+          # generation to bump.
+          serverName: postgres-g3
   monitoring:
     # On, now that T-2.6 provides the PodMonitor CRD. This is what exports
     # cnpg_collector_* -- including the archiving and backup-age series the
