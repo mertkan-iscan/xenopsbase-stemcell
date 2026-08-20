@@ -1,0 +1,107 @@
+// ============================================================================
+// xenopsbase — JDL for the gateway and the core service.
+//
+// This file is the INPUT to T-3.1's evaluation, not a commitment to keep
+// JHipster. T-3.4 ("detach from the generator") already assumes the generator
+// is scaffolding rather than a dependency: it produces a starting point, and
+// from then on the code is ours.
+//
+// Every option below is chosen against the platform that already exists.
+// Where JHipster's default would fight it, the reason is recorded, because a
+// default that quietly disagrees with the cluster is exactly the kind of thing
+// that surfaces three weeks later as a mystery.
+// ============================================================================
+
+application {
+  config {
+    baseName gateway
+    applicationType gateway
+    packageName com.xenopsoftware.gateway
+    serverPort 8080
+
+    // OIDC against the Keycloak realm already running in the cluster (T-2.5).
+    // The realm, its clients and its roles are imported from git, so this side
+    // has something real to authenticate against from the first run rather
+    // than needing a console visit.
+    authenticationType oauth2
+
+    // The gateway holds no domain data. It gets a database anyway because
+    // JHipster wires session/rate-limit persistence through one; whether that
+    // is kept is part of what this spike is meant to answer.
+    databaseType sql
+    prodDatabaseType postgresql
+    devDatabaseType postgresql
+
+    // NO service discovery. JHipster defaults to Eureka or Consul, which means
+    // running a registry, keeping it available, and having services register
+    // into it. Kubernetes already provides exactly this through Services and
+    // DNS. Adding Eureka would be a second, weaker discovery mechanism that
+    // duplicates the platform and can disagree with it.
+    serviceDiscoveryType no
+
+    // Backend only. The stemcell's job is the API and the plumbing under it;
+    // a generated Angular/React app would be a large amount of code nobody
+    // asked for, and every fork would begin by deleting it. The Keycloak realm
+    // already carries a public `frontend` client with PKCE for whenever a real
+    // UI arrives.
+    clientFramework no
+
+    // No caching layer yet. Redis/Valkey is tracked as T-2.11 and deliberately
+    // scheduled alongside this work rather than before it, so the first thing
+    // it does is something real (distributed rate limiting) rather than
+    // caching that has never been measured.
+    cacheProvider no
+    enableHibernateCache false
+
+    buildTool maven
+
+    // NOTE: JHipster 9.2.0 supports Liquibase ONLY -- 'flyway' is rejected by
+    // the parser and the string does not appear anywhere in the library. T-3.6
+    // asks for Flyway, so this is a real conflict, recorded in the go/no-go.
+
+    // Off. Metrics come from Micrometer into the Prometheus already running
+    // (T-2.6); logs go to Loki through Alloy (T-2.7). JHipster's own console
+    // would be a third path to the same information.
+    enableSwaggerCodegen true
+    testFrameworks [cucumber]
+
+  }
+}
+
+application {
+  config {
+    baseName core
+    applicationType microservice
+    packageName com.xenopsoftware.core
+    serverPort 8081
+
+    authenticationType oauth2
+
+    databaseType sql
+    prodDatabaseType postgresql
+    devDatabaseType postgresql
+
+    serviceDiscoveryType no
+    clientFramework no
+    cacheProvider no
+    enableHibernateCache false
+
+    buildTool maven
+    enableSwaggerCodegen true
+    testFrameworks [cucumber]
+  }
+}
+
+// ============================================================================
+// NO ENTITIES.
+//
+// Deliberate, and the whole point of a stemcell: T-3.3 says "core service on
+// Postgres, with no domain entities". Generating even a sample entity would
+// put a table, a repository, a service, a REST resource and a Liquibase
+// changelog into every project forked from this — all of which the first real
+// commit would have to delete, and some of which would survive by accident.
+//
+// The extension seams (audit, soft delete, tenancy, outbox) are T-3.10, and
+// they are written deliberately rather than inherited from a generated
+// example.
+// ============================================================================

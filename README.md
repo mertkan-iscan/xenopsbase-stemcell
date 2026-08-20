@@ -75,6 +75,8 @@ reproduces from nothing.
   - [ADR-0004](docs/adr/0004-gitops-engine.md) — Argo CD, app-of-apps
   - [ADR-0005](docs/adr/0005-terraform-state-backend.md) — Terraform state in Cloudflare R2
   - [ADR-0006](docs/adr/0006-tailscale-node-transport.md) — Tailscale transport, no public API endpoint
+- Spikes
+  - [T-3.1 JHipster](docs/spikes/t-3.1-jhipster.md) — what it generates, what gets deleted, and why
 - [CONTRIBUTING.md](CONTRIBUTING.md) — branching, commits, and the no-manual-configuration rule
 - Runbooks
   - [Secrets](docs/runbooks/secrets.md) — SOPS, age, the one bootstrap key, rotation
