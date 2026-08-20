@@ -153,31 +153,73 @@ That is deliberate — `bootstrap` only applies at creation, and a manifest that
 could not create a database the first time. But it means restoring after a rebuild is a **conscious
 act**: apply a recovery Cluster as above.
 
-### Archiving breaks on rebuild unless the generation is bumped
+### Rebuilds restore the database; they do not start it empty
 
-A fresh cluster archiving under a `serverName` that already holds another cluster's history is
-refused:
+`bootstrap` runs only when a Cluster is **created**, so it is what happens on every rebuild. This
+platform bootstraps by **recovering from the archive**, which is what makes ADR-0002's promise real:
+the cluster is disposable because the data is not.
 
-```
-WAL archive check failed for server postgres: Expected empty archive
-```
-
-The refusal is correct — interleaving WAL from two timelines under one path corrupts the archive for
-both. But the cluster still starts, reports `Cluster in healthy state`, and Argo reports `Healthy`,
-so **the only symptom is that backups silently stop**.
-
-`serverName` is therefore pinned rather than defaulted. It lives in the **Cluster's plugin
-parameters**, not on the ObjectStore — the API refuses it there. **Bump it on
-any rebuild whose database is not being recovered from the previous generation:**
+Two settings make that work, and they are a **matched pair**:
 
 ```yaml
-    serverName: postgres-g3      # was postgres-g2
+metadata:
+  annotations:
+    cnpg.io/skipEmptyWalArchiveCheck: "enabled"
+spec:
+  bootstrap:
+    recovery:
+      source: archive
 ```
 
-Every previous generation stays in the bucket and stays restorable — point `externalClusters[].plugin.parameters.serverName`
-at whichever one you want.
+barman refuses by default to archive into a path that already holds history — a check that exists to
+stop two *different* databases interleaving timelines into one archive and destroying recovery for
+both. That default is right, and **recovery alone does not exempt you from it**: a recovered cluster
+runs the same check and fails with
 
-This is interim; #113 decides whether rebuilds should recover from the archive instead.
+```
+WAL archive check failed for server postgres-g3: Expected empty archive
+```
+
+The annotation disables it, and is safe *only* in this combination: the cluster restores from the
+exact path it archives to, so it is one lineage continuing on a new timeline — which is precisely
+what barman's timeline handling is for.
+
+> **Never set the annotation while bootstrapping with `initdb`.** A brand-new empty database would
+> begin writing into the previous one's archive and silently destroy its recoverability. Change one,
+> change the other.
+
+Because the lineage continues, `serverName` never changes and there is no generation to bump. That
+matters: the previous design required a human to increment it on every rebuild, and it failed both
+times it was needed — once for five hours, across the creation of an entire database, while the
+cluster reported `Healthy`.
+
+Verified on 2026-08-20 by deleting the Cluster and its PVCs outright:
+
+```
+core migrations   2          restored
+keycloak tables   100        restored
+example_item      dr-test-marker, written 15:14 -- AFTER the 14:22 base backup,
+                             so it could only arrive by WAL replay
+ContinuousArchiving  True    same path, no bump
+```
+
+### First install in a new environment
+
+There is nothing to recover from, so the recovery bootstrap **fails, loudly**. That is the intended
+default for a system that holds data: creating an empty database is the exceptional act, not the
+routine one.
+
+To bootstrap a genuinely new environment, temporarily swap the `bootstrap` block for:
+
+```yaml
+  bootstrap:
+    initdb:
+      database: app
+      owner: app
+```
+
+**and remove the `skipEmptyWalArchiveCheck` annotation** while doing so. Take a base backup, confirm
+it lands in the bucket, then restore both settings in the same commit.
 
 ## Connecting
 
