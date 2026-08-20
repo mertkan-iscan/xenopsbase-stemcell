@@ -88,4 +88,25 @@ extra_firewall_rules = [
     port            = "7844"
     destination_ips = ["0.0.0.0/0", "::/0"]
   },
+
+  # SMTP submission, so Alertmanager can actually deliver.
+  #
+  # Same trap as the QUIC rules above. Alerts were generated, grouped and routed
+  # correctly, then failed at the final hop:
+  #
+  #   dial tcp 172.246.243.66:587: connect: connection timed out
+  #
+  # Alertmanager records that in its own log and nowhere else, so the pipeline
+  # looked healthy end to end while delivering nothing -- which is precisely the
+  # class of failure the pipeline exists to catch.
+  #
+  # 587 (submission with STARTTLS), not 25: Hetzner blocks outbound 25 outright
+  # as an anti-spam measure, and transactional relays expect 587 regardless.
+  {
+    description     = "SMTP submission for alert delivery"
+    direction       = "out"
+    protocol        = "tcp"
+    port            = "587"
+    destination_ips = ["0.0.0.0/0", "::/0"]
+  },
 ]
