@@ -17,29 +17,6 @@ spec:
     targetRevision: 7.3.0
     helm:
       values: |
-        global:
-          # S3 credentials, injected as environment variables.
-          #
-          # MUST be here (or under singleBinary), NOT under `loki:`. There is no
-          # loki.extraEnvFrom -- the templates read singleBinary.extraEnvFrom and
-          # global.extraEnvFrom, and an unknown key under `loki:` is silently
-          # dropped by Helm rather than rejected. The symptom is not a config
-          # error, it is Loki falling back to instance-metadata credentials and
-          # dying with:
-          #
-          #   get identity: get credentials: no EC2 IMDS role found
-          #
-          # which reads like a cloud-provider problem rather than a typo.
-          #
-          # Under global so it survives a change of deployment mode; the
-          # distributed topology would otherwise need this repeated per component.
-          #
-          # The observability access key, scoped by bucket policy to loki-chunks
-          # alone. Verified: 200 on loki-chunks, 403 on pg-backups and documents.
-          extraEnvFrom:
-            - secretRef:
-                name: loki-s3
-
         # SingleBinary, not the default distributed topology.
         #
         # The chart's default splits Loki into read, write and backend
@@ -54,6 +31,34 @@ spec:
           resources:
             requests: {cpu: 100m, memory: 256Mi}
             limits:   {memory: 512Mi}
+          # S3 credentials, injected as environment variables.
+          #
+          # MUST be singleBinary.extraEnvFrom. Not loki.extraEnvFrom, which does
+          # not exist, and not global.extraEnvFrom, which does exist and is read
+          # by EVERY OTHER component in this chart:
+          #
+          #   backend/statefulset-backend.yaml:
+          #     {{- with (concat .Values.global.extraEnvFrom .Values.backend.extraEnvFrom) }}
+          #
+          #   single-binary/statefulset.yaml:
+          #     {{- with .Values.singleBinary.extraEnvFrom }}
+          #
+          # The SingleBinary template simply does not concat the global list. So
+          # the obvious place to put a value shared by all components is the one
+          # place it is ignored in this deployment mode.
+          #
+          # Helm drops unknown keys silently, so neither wrong placement is an
+          # error. The symptom is Loki falling back to instance-metadata
+          # credentials and dying with an EC2 error on a Hetzner cluster:
+          #
+          #   get identity: get credentials: no EC2 IMDS role found
+          #
+          # The observability access key, scoped by bucket policy to loki-chunks
+          # alone. Verified: 200 on loki-chunks, 403 on pg-backups and documents.
+          extraEnvFrom:
+            - secretRef:
+                name: loki-s3
+
           persistence:
             # No PVC. Hetzner's 10Gi minimum makes a volume disproportionate for
             # dev, and the durable copy is the bucket -- this path holds only the
