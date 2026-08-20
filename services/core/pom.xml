@@ -344,6 +344,17 @@
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-circuitbreaker-resilience4j</artifactId>
         </dependency>
+        <!--
+            The sync transport, declared explicitly rather than inherited as a runtime
+            transitive. Two reasons: StorageConfiguration configures its connect and socket
+            timeouts by name (T-3.9), which needs it at compile scope; and leaving the transport
+            implicit means an SDK upgrade can swap it without anything in this project changing,
+            taking the timeout configuration with it.
+        -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>apache5-client</artifactId>
+        </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>s3</artifactId>

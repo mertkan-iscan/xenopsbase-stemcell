@@ -34,6 +34,63 @@ reactive:
   #     default:
   #       connectTimeout: 5000
   #       readTimeout: 5000
+# ===================================================================
+# Resilience (T-3.9)
+#
+# Numbers here are a DEFAULT POSTURE, not tuning. Tuning needs the latency
+# distribution of a real downstream, which a template does not have. What matters
+# is that every value is stated: an unset timeout is not "the default", it is
+# usually no timeout at all.
+# ===================================================================
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        # Percentage-based, over a rolling window of calls rather than of time:
+        # a low-traffic service would never accumulate enough calls in a time
+        # window to make a decision, and would stay closed while entirely broken.
+        slidingWindowType: COUNT_BASED
+        slidingWindowSize: 20
+        # Below this, the failure rate is noise. Three failures out of three is
+        # not evidence that a downstream is down.
+        minimumNumberOfCalls: 10
+        failureRateThreshold: 50
+        # Long enough that a restarting downstream is not hammered, short enough
+        # that recovery is not gated on a human noticing.
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 5
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        # A slow downstream is a failure too. Without this, calls that time out
+        # individually never trip the breaker and the gateway keeps queueing.
+        slowCallRateThreshold: 50
+        slowCallDurationThreshold: 5s
+        registerHealthIndicator: true
+    instances:
+      core:
+        baseConfig: default
+  timelimiter:
+    configs:
+      default:
+        # Must be >= the httpclient response-timeout above, or this cancels the
+        # call before the transport has had its stated chance and every slow
+        # response is attributed to the wrong layer.
+        timeoutDuration: 12s
+        cancelRunningFuture: true
+    instances:
+      core:
+        baseConfig: default
+  bulkhead:
+    configs:
+      default:
+        # Caps how much of the gateway one downstream can consume. Without it a
+        # single slow service occupies every worker and takes the others down
+        # with it -- the failure this whole card exists to prevent.
+        maxConcurrentCalls: 50
+        maxWaitDuration: 0
+    instances:
+      core:
+        baseConfig: default
+
 management:
   endpoints:
     web:
@@ -117,6 +174,15 @@ spring:
           httpclient:
             pool:
               max-connections: 1000
+            # No outbound call may wait forever (T-3.9). Reactor Netty's defaults
+            # are effectively unbounded, which is the worst possible behaviour under
+            # load: a downstream that has stopped answering holds every connection
+            # that reached it, and the gateway stops serving requests that have
+            # nothing to do with it.
+            #
+            # connect-timeout is milliseconds; response-timeout is a Duration.
+            connect-timeout: 2000
+            response-timeout: 10s
           routes:
             # Kubernetes Service DNS, not lb://. There is no service registry
             # (JDL: serviceDiscoveryType no) because Kubernetes already provides
@@ -132,6 +198,32 @@ spring:
               filters:
                 # /services/core/api/x  ->  /api/x
                 - StripPrefix=2
+                # Trips before a failing downstream can exhaust the gateway (T-3.9).
+                # The fallback turns an open circuit into a 503 problem document
+                # rather than the generic error page Spring would otherwise return.
+                - name: CircuitBreaker
+                  args:
+                    name: core
+                    fallbackUri: forward:/fallback/core
+                # Retries GET only. A POST is not safe to replay from here: the
+                # gateway cannot know whether the first attempt reached core and
+                # committed, and it cannot see whether the client supplied an
+                # Idempotency-Key (T-3.8) -- so a retry could duplicate the work
+                # the key exists to prevent.
+                #
+                # 5xx and connect failures only. Retrying a 4xx re-sends a request
+                # the downstream has already judged invalid.
+                - name: Retry
+                  args:
+                    retries: 2
+                    methods: GET
+                    series: SERVER_ERROR
+                    exceptions: java.io.IOException, java.util.concurrent.TimeoutException
+                    backoff:
+                      firstBackoff: 50ms
+                      maxBackoff: 500ms
+                      factor: 2
+                      basedOnPreviousValue: false
           # See alternatives in https://github.com/spring-cloud/spring-cloud-gateway/issues/3818
           trusted-proxies: '.*'
   docker:

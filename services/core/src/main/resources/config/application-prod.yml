@@ -43,6 +43,39 @@ spring:
     hikari:
       poolName: Hikari
       auto-commit: false
+      # Every wait bounded (T-3.9). Hikari's own defaults are mostly sane; they
+      # are restated because an unset value here is invisible, and the one that
+      # matters most has no default at all -- see the statement timeout below.
+      #
+      # How long a thread waits for a connection from the pool before failing.
+      # Failing fast is the point: a request that cannot get a connection within
+      # a few seconds has already lost, and waiting only adds another stuck
+      # thread to the pile.
+      connection-timeout: 5000
+      validation-timeout: 3000
+      # Below the typical 15-minute idle timeout of a cloud load balancer or NAT,
+      # so the pool discards a connection before the network silently does.
+      # Otherwise the first query on a reused connection hangs until the socket
+      # timeout, long after the request that owned it gave up.
+      max-lifetime: 600000
+      idle-timeout: 300000
+      maximum-pool-size: 20
+      minimum-idle: 5
+      data-source-properties:
+        # THE important one. Postgres will run a query until it finishes or the
+        # client disconnects -- there is no default limit. A single pathological
+        # query with no timeout holds its connection indefinitely, and enough of
+        # them exhaust the pool while every health check still passes.
+        #
+        # Applied as a server-side setting so it binds the DATABASE's work, not
+        # merely the driver's patience. A JDBC socket timeout abandons the client
+        # side and leaves the query running.
+        options: "-c statement_timeout=30000 -c idle_in_transaction_session_timeout=60000"
+        # Client-side backstop for a connection that has gone away entirely, where
+        # the server-side timeout can never fire because nothing is listening.
+        socketTimeout: 45
+        connectTimeout: 5
+        tcpKeepAlive: true
   # Replace by 'prod, faker' to add the faker context and have sample data loaded in production
   flyway:
     enabled: true

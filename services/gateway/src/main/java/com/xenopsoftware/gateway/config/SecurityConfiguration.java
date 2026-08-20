@@ -122,6 +122,10 @@ public class SecurityConfiguration {
                 authz
                     .pathMatchers("/api/authenticate").permitAll()
                     .pathMatchers("/api/auth-info").permitAll()
+                    // Reached only by an internal forward from the CircuitBreaker filter, after
+                    // the original request has already been authorised. Requiring auth again here
+                    // would turn "downstream is down" into "you are not logged in" (T-3.9).
+                    .pathMatchers("/fallback/**").permitAll()
                     .pathMatchers("/api/admin/**").hasAuthority(AuthoritiesConstants.ADMIN)
                     .pathMatchers("/api/**").authenticated()
                     .pathMatchers("/services/*/management/health/readiness").permitAll()

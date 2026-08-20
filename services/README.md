@@ -73,6 +73,10 @@ Rules that are not obvious from the tree:
   [docs/runbooks/http-contract.md](../docs/runbooks/http-contract.md) before adding an endpoint --
   it is what every new one inherits for free, and re-deciding any of it per controller is how a
   consistent API stops being one.
+- **No outbound call may wait forever.** Timeouts, circuit breakers, retries and bulkheads are a
+  default posture rather than a per-call decision. See
+  [docs/runbooks/resilience.md](../docs/runbooks/resilience.md) -- particularly before adding a
+  call to anything over the network, and before assuming an unset timeout means a sensible one.
 - **File bytes never pass through a service.** Uploads and downloads go straight between the client
   and object storage over presigned URLs; the API only issues them and tracks metadata. See
   [docs/runbooks/document-storage.md](../docs/runbooks/document-storage.md), which also covers why
