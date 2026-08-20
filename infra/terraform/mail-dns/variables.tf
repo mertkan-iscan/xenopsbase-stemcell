@@ -114,16 +114,3 @@ variable "google_site_verification" {
   description = "The google-site-verification TXT value for the apex. Ownership proof for Search Console."
   type        = string
 }
-
-variable "import_record_ids" {
-  description = <<-EOT
-    Cloudflare record IDs for the one-time adoption of records created in the
-    console. See imports.tf, which is deleted once the import has landed.
-
-    Keys: brevo_verification, brevo_sending, brevo_tracking_redirect,
-    brevo_tracking_image, brevo_dkim_1, brevo_dkim_2, dmarc, site,
-    google_verification.
-  EOT
-  type        = map(string)
-  default     = {}
-}

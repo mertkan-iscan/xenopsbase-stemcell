@@ -1,9 +1,24 @@
 # ------------------------------------------------------------------------------
 # Every record in the mail zone, with what breaks in its absence.
 #
-# All of them existed as console edits before this file. They were imported
-# rather than recreated -- see imports.tf -- because recreating a DKIM CNAME
-# means a window in which signatures fail.
+# All nine existed only as console edits before this file, and were adopted by
+# `import` blocks on 2026-08-21 rather than recreated. Recreating a DKIM CNAME
+# opens a window in which signed mail fails verification, and recreating the
+# apex takes the personal site down for a propagation.
+#
+# Those import blocks are deleted now the adoption has landed: they are no-ops
+# after the first apply, and leaving them implies the records are still
+# unmanaged. To adopt a record someone adds in the console later, declare the
+# resource here and put a temporary import block beside it:
+#
+#   import {
+#     to = cloudflare_dns_record.<name>
+#     id = "<zone_id>/<record_id>"
+#   }
+#
+# Record IDs come from the zone itself, via
+# GET /client/v4/zones/<zone>/dns_records — each result carries `name` and `id`.
+# Delete the block again once `terraform plan` reports no changes.
 #
 # The comment field is set on each record so the reason survives in the console
 # too, where the next person to look is more likely to be.
