@@ -2,7 +2,6 @@ package com.xenopsoftware.gateway.web.rest.errors;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
-import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -12,10 +11,6 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/exception-translator-test")
 public class ExceptionTranslatorTestController {
 
-    @GetMapping("/concurrency-failure")
-    public void concurrencyFailure() {
-        throw new ConcurrencyFailureException("test concurrency failure");
-    }
 
     @PostMapping("/method-argument")
     public void methodArgument(@Valid @RequestBody TestDTO testDTO) {
