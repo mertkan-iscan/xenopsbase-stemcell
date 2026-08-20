@@ -41,24 +41,50 @@ data "cloudflare_zero_trust_tunnel_cloudflared_token" "this" {
   tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.this.id
 }
 
+resource "cloudflare_dns_record" "extra" {
+  for_each = { for h in var.extra_hostnames : h.hostname => h }
+
+  zone_id = var.zone_id
+  name    = each.value.hostname
+  type    = "CNAME"
+  content = local.tunnel_target
+  proxied = true
+  ttl     = 1
+
+  comment = "Managed by xenopsbase-stemcell (${var.environment}). Do not edit in the console."
+}
+
 resource "cloudflare_zero_trust_tunnel_cloudflared_config" "this" {
   account_id = var.account_id
   tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.this.id
   source     = "cloudflare"
 
   config = {
-    ingress = [
-      {
-        hostname = var.hostname
-        service  = var.tunnel_service
-      },
+    ingress = concat(
+      [
+        {
+          hostname = var.hostname
+          service  = var.tunnel_service
+        },
+      ],
+      # Additional hostnames, each to its own in-cluster service. Placed BEFORE
+      # the catch-all: Cloudflare evaluates these top to bottom and the
+      # catch-all matches everything, so a rule after it is unreachable.
+      [
+        for h in var.extra_hostnames : {
+          hostname = h.hostname
+          service  = h.service
+        }
+      ],
       # Cloudflare requires a final catch-all with no hostname. Anything that
       # reaches the tunnel without matching a rule above gets a 404 rather than
       # being forwarded somewhere unintended.
-      {
-        service = "http_status:404"
-      },
-    ]
+      [
+        {
+          service = "http_status:404"
+        },
+      ],
+    )
   }
 }
 

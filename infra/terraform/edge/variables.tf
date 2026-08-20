@@ -125,3 +125,34 @@ variable "manage_waf" {
   type        = bool
   default     = false
 }
+
+variable "extra_hostnames" {
+  description = <<-EOT
+    Additional hostnames this tunnel serves, each mapped to an in-cluster
+    service.
+
+    Exists because identity cannot live behind the application's hostname.
+    The OIDC login flow redirects the user's BROWSER to Keycloak, so Keycloak
+    has to be publicly resolvable in its own right -- an in-cluster Service name
+    is not something a browser can reach.
+
+    It also has to match Keycloak's configured hostname exactly. Keycloak
+    advertises that value as the token issuer regardless of which host the
+    request arrived on (hostname.strict only relaxes which Host headers are
+    ACCEPTED). A mismatch rejects every token with an issuer error while
+    Keycloak, the realm and the network all look healthy.
+
+    Same one-label-below-apex rule as `hostname`: Universal SSL covers the apex
+    and *.example.com only.
+  EOT
+  type = list(object({
+    hostname = string
+    service  = string
+  }))
+  default = []
+
+  validation {
+    condition     = alltrue([for h in var.extra_hostnames : length(regexall("\\.", h.hostname)) == 2])
+    error_message = "Every extra hostname must be exactly one label below the apex (two dots total); deeper names are not covered by Cloudflare's Universal SSL certificate."
+  }
+}
