@@ -13,6 +13,7 @@ import org.springframework.core.convert.converter.Converter;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import com.xenopsoftware.core.web.rest.errors.SecurityProblemSupport;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
@@ -28,11 +29,14 @@ public class SecurityConfiguration {
 
     private final JHipsterProperties jHipsterProperties;
 
+    private final SecurityProblemSupport problemSupport;
+
     @Value("${spring.security.oauth2.client.provider.oidc.issuer-uri}")
     private String issuerUri;
 
-    public SecurityConfiguration(JHipsterProperties jHipsterProperties) {
+    public SecurityConfiguration(JHipsterProperties jHipsterProperties, SecurityProblemSupport problemSupport) {
         this.jHipsterProperties = jHipsterProperties;
+        this.problemSupport = problemSupport;
     }
 
     @Bean
@@ -65,7 +69,20 @@ public class SecurityConfiguration {
             //
             // If the core ever needs to call another service as itself, add a
             // client-credentials registration on purpose, and put this back.
-            .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(authenticationConverter())));
+            // 401 and 403 as RFC 9457 problem documents (T-3.8). Security runs as a filter,
+            // before any controller exists, so ExceptionTranslator -- a @RestControllerAdvice --
+            // never sees these. Without this, every error carries a problem document except the
+            // two most common ones, which return an empty body.
+            //
+            // Set on the resource server too: it installs its own BearerToken handlers, which
+            // would otherwise win for any request carrying an Authorization header.
+            .exceptionHandling(e -> e.authenticationEntryPoint(problemSupport).accessDeniedHandler(problemSupport))
+            .oauth2ResourceServer(oauth2 ->
+                oauth2
+                    .authenticationEntryPoint(problemSupport)
+                    .accessDeniedHandler(problemSupport)
+                    .jwt(jwt -> jwt.jwtAuthenticationConverter(authenticationConverter()))
+            );
         return http.build();
     }
 

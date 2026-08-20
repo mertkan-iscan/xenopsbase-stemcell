@@ -12,6 +12,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -132,8 +134,8 @@ public class DocumentService {
     }
 
     @Transactional(readOnly = true)
-    public List<Document> listAvailable(String owner) {
-        return repository.findByOwnerAndStatusOrderByCreatedAtDesc(owner, Document.Status.AVAILABLE);
+    public Page<Document> listAvailable(String owner, Pageable pageable) {
+        return repository.findByOwnerAndStatus(owner, Document.Status.AVAILABLE, pageable);
     }
 
     /**

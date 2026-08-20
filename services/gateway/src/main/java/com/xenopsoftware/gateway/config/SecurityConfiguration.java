@@ -9,6 +9,7 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import com.xenopsoftware.gateway.security.AuthoritiesConstants;
 import com.xenopsoftware.gateway.security.SecurityUtils;
 import com.xenopsoftware.gateway.security.oauth2.AudienceValidator;
+import com.xenopsoftware.gateway.web.filter.ProblemDetailAuthenticationEntryPoint;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -41,7 +42,12 @@ import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.security.oauth2.core.oidc.user.OidcUserAuthority;
 import org.springframework.security.oauth2.jwt.*;
 import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtAuthenticationConverter;
+import org.springframework.http.MediaType;
 import org.springframework.security.web.server.SecurityWebFilterChain;
+import org.springframework.security.web.server.ServerAuthenticationEntryPoint;
+import org.springframework.security.web.server.DelegatingServerAuthenticationEntryPoint;
+import org.springframework.security.web.server.authentication.RedirectServerAuthenticationEntryPoint;
+import org.springframework.security.web.server.util.matcher.MediaTypeServerWebExchangeMatcher;
 import org.springframework.security.web.server.csrf.CookieServerCsrfTokenRepository;
 import org.springframework.security.web.server.csrf.ServerCsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.server.header.ReferrerPolicyServerHttpHeadersWriter;
@@ -128,10 +134,40 @@ public class SecurityConfiguration {
                     .pathMatchers("/management/prometheus").permitAll()
                     .pathMatchers("/management/**").hasAuthority(AuthoritiesConstants.ADMIN)
             )
+            // An unauthenticated API request must fail visibly (T-3.8). Without this,
+            // oauth2Login's redirecting entry point sends a 302 to the Keycloak login page, the
+            // client follows it, and receives 200 OK with a body of HTML -- an exchange that
+            // contains no error status and no error body, so a client checking the status code
+            // concludes it worked.
+            //
+            // Browser navigation still redirects: it is matched by Accept: text/html rather than
+            // by path, because the frontend and the API share the /api prefix and it is the
+            // CALLER's expectation that decides which answer is useful.
+            .exceptionHandling(e -> e.authenticationEntryPoint(authenticationEntryPoint()))
             .oauth2Login(oauth2 -> oauth2.authorizationRequestResolver(authorizationRequestResolver(this.clientRegistrationRepository)))
             .oauth2Client(withDefaults())
             .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())));
         return http.build();
+    }
+
+    /**
+     * 401 with a problem detail for API clients, redirect to login for browser navigation.
+     *
+     * <p>The discriminator is {@code Accept: text/html}, which a browser navigating to a page
+     * sends and an API client does not. Matching on the path instead would be wrong in both
+     * directions here: the SPA is served from the same origin as the API, and a user typing an
+     * {@code /api} URL into the address bar is a browser that deserves a login page.
+     */
+    private ServerAuthenticationEntryPoint authenticationEntryPoint() {
+        DelegatingServerAuthenticationEntryPoint.DelegateEntry browserNavigation = new DelegatingServerAuthenticationEntryPoint.DelegateEntry(
+            new MediaTypeServerWebExchangeMatcher(MediaType.TEXT_HTML),
+            new RedirectServerAuthenticationEntryPoint("/oauth2/authorization/oidc")
+        );
+
+        DelegatingServerAuthenticationEntryPoint entryPoint = new DelegatingServerAuthenticationEntryPoint(browserNavigation);
+        // Anything that did not ask for HTML -- fetch, curl, a service account -- gets the 401.
+        entryPoint.setDefaultEntryPoint(new ProblemDetailAuthenticationEntryPoint());
+        return entryPoint;
     }
 
     private ServerOAuth2AuthorizationRequestResolver authorizationRequestResolver(

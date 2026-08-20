@@ -100,6 +100,12 @@ management:
       application: ${spring.application.name}
 
 spring:
+  # Carries the correlation id from the Reactor context into MDC around each operator, so
+  # %X{requestId} in the log pattern is populated on log lines written from any scheduler.
+  # Without it the field renders empty and every log line simply lacks the id -- which looks
+  # like normal logs rather than like a broken feature (T-3.8).
+  reactor:
+    context-propagation: auto
   application:
     name: gateway
   cloud:

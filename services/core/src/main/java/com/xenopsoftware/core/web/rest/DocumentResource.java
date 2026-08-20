@@ -12,9 +12,17 @@ import java.net.URI;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
+import tech.jhipster.web.util.PaginationUtil;
 
 /**
  * Document upload and download (T-3.7).
@@ -46,6 +54,9 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/documents")
 @ConditionalOnDocumentStorage
 public class DocumentResource {
+
+    /** The largest page this API will serve, whatever the client asks for. */
+    static final int MAX_PAGE_SIZE = 100;
 
     private final DocumentService documentService;
 
@@ -98,9 +109,44 @@ public class DocumentResource {
             );
     }
 
+    /**
+     * Paged listing. The contract every collection endpoint in this template inherits (T-3.8):
+     *
+     * <pre>
+     *   ?page=0&amp;size=20&amp;sort=createdAt,desc
+     *
+     *   X-Total-Count: 137
+     *   Link: &lt;...page=1&gt;; rel="next", &lt;...page=6&gt;; rel="last", ...
+     * </pre>
+     *
+     * <p>The total goes in a header rather than wrapping the body in an envelope, so the body
+     * stays a plain JSON array. An envelope forces every client to unwrap before it can read
+     * anything, including clients that never paginate.
+     *
+     * <p>{@code @PageableDefault} caps the page size. Without a cap, {@code ?size=1000000} is an
+     * unauthenticated-shaped denial of service against the database: one request, one enormous
+     * result set, and nothing in the code path that objects.
+     */
     @GetMapping
-    public List<DocumentView> list() {
-        return documentService.listAvailable(currentOwner()).stream().map(DocumentView::of).toList();
+    public ResponseEntity<List<DocumentView>> list(
+        @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
+    ) {
+        Page<Document> page = documentService.listAvailable(currentOwner(), capped(pageable));
+        HttpHeaders headers = PaginationUtil.generatePaginationHttpHeaders(
+            ServletUriComponentsBuilder.fromCurrentRequest(),
+            page
+        );
+        return ResponseEntity.ok().headers(headers).body(page.getContent().stream().map(DocumentView::of).toList());
+    }
+
+    /**
+     * {@code @PageableDefault} sets the default size, not a maximum — a client asking for
+     * {@code size=100000} still gets it. This is the enforced ceiling.
+     */
+    private static Pageable capped(Pageable pageable) {
+        return pageable.getPageSize() > MAX_PAGE_SIZE
+            ? PageRequest.of(pageable.getPageNumber(), MAX_PAGE_SIZE, pageable.getSort())
+            : pageable;
     }
 
     /**

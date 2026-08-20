@@ -69,6 +69,10 @@ Rules that are not obvious from the tree:
   `ddl-auto: validate` enforces this: an entity that disagrees with its migration refuses to start.
   Naming, review conventions and the forward-only rollback strategy are in
   [docs/runbooks/schema-migrations.md](../docs/runbooks/schema-migrations.md).
+- **Errors, pagination, idempotency and correlation are decided once**, not per endpoint. See
+  [docs/runbooks/http-contract.md](../docs/runbooks/http-contract.md) before adding an endpoint --
+  it is what every new one inherits for free, and re-deciding any of it per controller is how a
+  consistent API stops being one.
 - **File bytes never pass through a service.** Uploads and downloads go straight between the client
   and object storage over presigned URLs; the API only issues them and tracks metadata. See
   [docs/runbooks/document-storage.md](../docs/runbooks/document-storage.md), which also covers why
