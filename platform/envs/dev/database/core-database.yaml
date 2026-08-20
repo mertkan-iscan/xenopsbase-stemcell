@@ -1,0 +1,23 @@
+# The core service's database.
+#
+# Its own database inside the shared cluster, like Keycloak's. The isolation
+# that matters -- one service unable to read or rewrite the other's tables --
+# comes from separate roles and databases, not from separate Postgres clusters.
+#
+# It also means the core service's data is covered by the SAME WAL archive as
+# everything else, so ADR-0002's durable-state boundary gains no new exception.
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: core
+  namespace: database
+spec:
+  cluster:
+    name: postgres
+  name: core
+  owner: core
+
+  # retain, not delete. Deleting this manifest -- or mistyping a path in git --
+  # must not DROP DATABASE. Everything else here is recreated by reconciliation;
+  # a dropped database is only recovered from backup.
+  databaseReclaimPolicy: retain

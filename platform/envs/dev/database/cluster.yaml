@@ -99,6 +99,22 @@ spec:
       # Declared here rather than created by hand, so a rebuilt cluster has it
       # without anyone remembering to run SQL -- which is the whole point of
       # T-2.5's "reproduces exactly on a rebuilt cluster".
+      # The core service owns its own role and database, exactly as Keycloak
+      # does. Same reasoning: a shared role means a compromised service can read
+      # and rewrite the other's tables, and a migration in one can lock the
+      # other.
+      - name: core
+        ensure: present
+        login: true
+        superuser: false
+        createdb: false
+        createrole: false
+        passwordSecret:
+          name: core-db
+        comment: "Owner of the core database. Managed by CNPG, password from SOPS."
+        inherit: true
+        connectionLimit: -1
+
       - name: keycloak
         ensure: present
         login: true

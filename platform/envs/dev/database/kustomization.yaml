@@ -7,4 +7,5 @@ resources:
   - objectstore.yaml
   - cluster.yaml
   - keycloak-database.yaml
+  - core-database.yaml
   - scheduledbackup.yaml
