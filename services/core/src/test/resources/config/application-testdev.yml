@@ -14,18 +14,27 @@ spring:
     hikari:
       auto-commit: false
       poolName: Hikari
-      maximum-pool-size: 1
+      # Two, not one. Flyway takes a connection for the duration of the migration
+      # run, and entityManagerFactory declares flywayInitializer as a dependency,
+      # so a single-connection pool deadlocks: Flyway waits 30s for a connection
+      # that the context it is blocking will not release. The generator set 1 in
+      # the Liquibase era, where nothing else held a connection at startup.
+      maximum-pool-size: 2
   jpa:
     open-in-view: false
     hibernate:
-      ddl-auto: none
+      # validate, like every deployed profile. The test-only schema for
+      # DateTimeWrapper lives in db/testmigration (V900), so Hibernate has
+      # something to validate against and entity drift fails here rather than at
+      # a deployment. Guarded by SchemaOwnershipTest.
+      ddl-auto: validate
     properties:
       hibernate.id.new_generator_mappings: true
       hibernate.connection.provider_disables_autocommit: true
       hibernate.cache.use_second_level_cache: false
       hibernate.cache.use_query_cache: false
       hibernate.generate_statistics: false
-      hibernate.hbm2ddl.auto: none #TODO: temp relief for integration tests, revisit required
+      hibernate.hbm2ddl.auto: validate
       hibernate.type.preferred_instant_jdbc_type: TIMESTAMP
       hibernate.jdbc.time_zone: UTC
       hibernate.timezone.default_storage: NORMALIZE

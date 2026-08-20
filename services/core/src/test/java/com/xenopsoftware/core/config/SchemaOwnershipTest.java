@@ -36,14 +36,18 @@ class SchemaOwnershipTest {
         "spring.jpa.properties.hibernate.hbm2ddl.auto"
     );
 
-    /** {@code validate} checks the schema; {@code none} skips the check. Neither writes. */
-    private static final Set<String> READ_ONLY_VALUES = Set.of("validate", "none");
+    /**
+     * Only {@code validate}. {@code none} does not write either, but it does not check, and a
+     * profile that skips the check is a profile where an entity can drift from its migration
+     * unnoticed — which is the whole failure this rule exists to prevent.
+     */
+    private static final String REQUIRED = "validate";
 
     private static final Path MAIN_CONFIG = Path.of("src/main/resources/config");
     private static final Path TEST_CONFIG = Path.of("src/test/resources/config");
 
     @Test
-    void noConfigurationFileLetsHibernateWriteToTheSchema() {
+    void everyConfigurationFileValidatesRatherThanWritingOrSkipping() {
         List<Path> files = configFiles();
         assertThat(files).as("configuration files to scan — an empty scan would pass vacuously").isNotEmpty();
 
@@ -53,8 +57,8 @@ class SchemaOwnershipTest {
                 String value = properties.getProperty(key);
                 if (value != null) {
                     assertThat(value.trim())
-                        .as("%s sets %s — Flyway owns the schema, so Hibernate must not write to it", file, key)
-                        .isIn(READ_ONLY_VALUES);
+                        .as("%s sets %s — Flyway owns the schema, so Hibernate must validate it and never write to it", file, key)
+                        .isEqualTo(REQUIRED);
                 }
             }
         }
