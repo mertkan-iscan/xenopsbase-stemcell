@@ -113,9 +113,25 @@ spec:
         # `openid` is deliberately absent: it is implicit in OIDC and is not a
         # client-scope object in Keycloak, so listing it here names something
         # that does not exist.
+        # MUST list Keycloak's built-ins explicitly, not just the ones we add.
+        #
+        # Declaring defaultClientScopes REPLACES the realm defaults rather than
+        # extending them. Omitting `roles` drops realm_access from the token, so
+        # app-user and app-admin never reach the application and every
+        # method-level authorization check silently fails open or closed with no
+        # error anywhere. Omitting `profile` drops preferred_username, which the
+        # gateway uses as the principal name.
+        #
+        # acr / basic / web-origins are Keycloak internals that other things
+        # assume are present; leaving them out breaks CORS and step-up auth in
+        # ways that look unrelated.
         defaultClientScopes:
-          - profile
+          - acr
+          - basic
           - email
+          - profile
+          - roles
+          - web-origins
           - api
 
       # DEV ONLY. A client that can exchange a username and password directly
@@ -136,16 +152,25 @@ spec:
         publicClient: true
         standardFlowEnabled: false
         directAccessGrantsEnabled: true
-        # NO defaultClientScopes override. Declaring the list replaces
-        # Keycloak's built-ins rather than adding to them, so `profile` and
-        # `email` fell off and tokens arrived with no preferred_username. The
-        # gateway uses that claim as the principal name and threw
-        # NullPointerException: "key" is null -- an error that says nothing
-        # about scopes.
+        # MUST list Keycloak's built-ins explicitly, not just the ones we add.
         #
-        # `api` is attached as an optional scope instead, requested explicitly
-        # when a caller wants it.
-        optionalClientScopes:
+        # Declaring defaultClientScopes REPLACES the realm defaults rather than
+        # extending them. Omitting `roles` drops realm_access from the token, so
+        # app-user and app-admin never reach the application and every
+        # method-level authorization check silently fails open or closed with no
+        # error anywhere. Omitting `profile` drops preferred_username, which the
+        # gateway uses as the principal name.
+        #
+        # acr / basic / web-origins are Keycloak internals that other things
+        # assume are present; leaving them out breaks CORS and step-up auth in
+        # ways that look unrelated.
+        defaultClientScopes:
+          - acr
+          - basic
+          - email
+          - profile
+          - roles
+          - web-origins
           - api
         protocolMappers:
           # Same reason as the gateway client: without this the token has no
@@ -177,9 +202,25 @@ spec:
         # `openid` is deliberately absent: it is implicit in OIDC and is not a
         # client-scope object in Keycloak, so listing it here names something
         # that does not exist.
+        # MUST list Keycloak's built-ins explicitly, not just the ones we add.
+        #
+        # Declaring defaultClientScopes REPLACES the realm defaults rather than
+        # extending them. Omitting `roles` drops realm_access from the token, so
+        # app-user and app-admin never reach the application and every
+        # method-level authorization check silently fails open or closed with no
+        # error anywhere. Omitting `profile` drops preferred_username, which the
+        # gateway uses as the principal name.
+        #
+        # acr / basic / web-origins are Keycloak internals that other things
+        # assume are present; leaving them out breaks CORS and step-up auth in
+        # ways that look unrelated.
         defaultClientScopes:
-          - profile
+          - acr
+          - basic
           - email
+          - profile
+          - roles
+          - web-origins
           - api
 
     # DEV ONLY, and deliberately the only user this realm contains.
@@ -206,3 +247,21 @@ spec:
             temporary: false
         realmRoles:
           - app-user
+
+      # A second dev user, with the admin role, so authorization can be proved
+      # in BOTH directions. A 403 for an unprivileged user only shows the check
+      # fires; it does not show a privileged user gets through, and a check that
+      # denies everyone looks identical to one that works.
+      - username: smoke-admin
+        enabled: true
+        emailVerified: true
+        email: smoke-admin@example.invalid
+        firstName: Smoke
+        lastName: Admin
+        credentials:
+          - type: password
+            value: smoke-dev-only
+            temporary: false
+        realmRoles:
+          - app-user
+          - app-admin

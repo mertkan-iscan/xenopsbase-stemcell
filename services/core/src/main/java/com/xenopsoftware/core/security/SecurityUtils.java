@@ -2,6 +2,8 @@ package com.xenopsoftware.core.security;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -106,18 +108,73 @@ public final class SecurityUtils {
         return mapRolesToGrantedAuthorities(getRolesFromClaims(claims));
     }
 
+    /**
+     * Pulls roles out of a Keycloak token.
+     *
+     * KEYCLOAK PUTS REALM ROLES IN realm_access.roles -- a nested object, not a
+     * top-level claim. The generated code read only "groups", "roles" and a
+     * JHipster namespace, none of which Keycloak populates, so every realm role
+     * was silently discarded: tokens carried app-user and app-admin, the
+     * application saw neither, and every authorization check evaluated against
+     * an empty authority list.
+     *
+     * The other claim names are kept as fallbacks so this still works against a
+     * provider that flattens roles differently.
+     */
     @SuppressWarnings("unchecked")
     private static Collection<String> getRolesFromClaims(Map<String, Object> claims) {
-        return (Collection<String>) claims.getOrDefault(
-            "groups",
-            claims.getOrDefault("roles", claims.getOrDefault(CLAIMS_NAMESPACE + "roles", new ArrayList<>()))
-        );
+        Collection<String> roles = new LinkedHashSet<>();
+
+        Object realmAccess = claims.get("realm_access");
+        if (realmAccess instanceof Map<?, ?> realmAccessMap) {
+            Object realmRoles = realmAccessMap.get("roles");
+            if (realmRoles instanceof Collection<?> collection) {
+                collection.forEach(r -> roles.add(String.valueOf(r)));
+            }
+        }
+
+        // Client roles, for the resource_access.<client>.roles shape. Only used
+        // when a project needs per-client roles; realm roles are the default.
+        Object resourceAccess = claims.get("resource_access");
+        if (resourceAccess instanceof Map<?, ?> resourceAccessMap) {
+            for (Object client : resourceAccessMap.values()) {
+                if (client instanceof Map<?, ?> clientMap && clientMap.get("roles") instanceof Collection<?> collection) {
+                    collection.forEach(r -> roles.add(String.valueOf(r)));
+                }
+            }
+        }
+
+        for (String fallback : List.of("groups", "roles", CLAIMS_NAMESPACE + "roles")) {
+            Object value = claims.get(fallback);
+            if (value instanceof Collection<?> collection) {
+                collection.forEach(r -> roles.add(String.valueOf(r)));
+            }
+        }
+        return roles;
     }
 
+    /**
+     * Each role becomes TWO authorities, deliberately.
+     *
+     * Keycloak names roles the way humans write them (app-admin). Spring's
+     * hasRole() silently prepends ROLE_ and upper-cases nothing, so
+     * hasRole("app-admin") looks for ROLE_app-admin and never matches -- a
+     * check that compiles, runs, and quietly denies everyone.
+     *
+     * Emitting both the raw name and ROLE_APP_ADMIN means hasAuthority("app-admin")
+     * and hasRole("APP_ADMIN") both work, and neither reading of the code is
+     * wrong. The previous filter kept only names already starting with ROLE_,
+     * which discarded every Keycloak role there has ever been.
+     */
     private static List<GrantedAuthority> mapRolesToGrantedAuthorities(Collection<String> roles) {
         return roles
             .stream()
-            .filter(role -> role.startsWith("ROLE_"))
+            .filter(role -> role != null && !role.isBlank())
+            .flatMap(role -> {
+                String springRole = "ROLE_" + role.replace('-', '_').replace('.', '_').toUpperCase(Locale.ROOT);
+                return role.startsWith("ROLE_") ? Stream.of(role) : Stream.of(role, springRole);
+            })
+            .distinct()
             .map(SimpleGrantedAuthority::new)
             .collect(Collectors.toList());
     }

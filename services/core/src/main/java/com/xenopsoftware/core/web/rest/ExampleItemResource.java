@@ -2,11 +2,13 @@ package com.xenopsoftware.core.web.rest;
 
 import com.xenopsoftware.core.domain.ExampleItem;
 import com.xenopsoftware.core.repository.ExampleItemRepository;
+import com.xenopsoftware.core.security.AuthoritiesConstants;
 import jakarta.validation.Valid;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
@@ -56,6 +58,29 @@ public class ExampleItemResource {
             out.put("sub", jwt.getClaimAsString("sub"));
         }
         return out;
+    }
+
+    /**
+     * Method-level authorization, and the seam projects extend.
+     *
+     * The realm defines app-user and app-admin; SecurityUtils maps each to both
+     * the raw name and a ROLE_ form, so either spelling works:
+     *
+     *   @PreAuthorize("hasAuthority('app-admin')")   // Keycloak's name
+     *   @PreAuthorize("hasRole('APP_ADMIN')")        // Spring's convention
+     *
+     * TO ADD A ROLE: add it to roles.realm in the realm import, add a constant
+     * to AuthoritiesConstants, then reference it here. Nothing else changes --
+     * that is the point of putting the translation in one place.
+     *
+     * This endpoint exists to prove the chain works end to end. A token without
+     * app-admin gets 403 here while still being accepted everywhere else, which
+     * is the distinction that matters: authenticated is not authorized.
+     */
+    @GetMapping("/admin/example-items")
+    @PreAuthorize("hasAuthority('" + AuthoritiesConstants.ADMIN + "')")
+    public List<ExampleItem> listAsAdmin() {
+        return repository.findAll();
     }
 
     /** Proves JPA, Flyway and ddl-auto=validate agree about the schema. */
