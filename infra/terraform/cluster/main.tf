@@ -49,7 +49,57 @@ locals {
         value: "true"
   EOT
 
-  hetzner_ccm_values = var.ccm_disable_network_attached_check ? local.ccm_disable_attached_check_values : ""
+  # ----------------------------------------------------------------------------
+  # Restores the CCM's network awareness under tailscale (T-1.5, ADR-0006).
+  #
+  # UNVERIFIED against a live cluster. Reasoning and evidence below; the apply
+  # that would settle it has not been run. Treat as a hypothesis with a citation,
+  # not as a fix.
+  #
+  # kube-hetzner v3.1.0 gates two things on two DIFFERENT conditions:
+  #
+  #   node-ip           multinetwork_overlay_enabled      agents.tf:146, 172
+  #                                                       control_planes.tf:382, 441
+  #                                                       init.tf:112, 281
+  #   CCM networking    cross_network_transport_enabled   locals.tf:2220
+  #
+  # and cross_network_transport_enabled = multinetwork_overlay_enabled
+  #                                       || node_transport_tailscale_enabled.
+  #
+  # With tailscale alone the two disagree. k3s keeps advertising the PRIVATE
+  # address, because the overlay flag is false -- while the CCM is rendered with
+  # networking.enabled: false, so the chart omits HCLOUD_NETWORK entirely and the
+  # CCM knows only public addresses for that server. It cannot match the node,
+  # so it never removes the uninitialized taint. Nothing schedules, and the
+  # agents' k3s install never runs.
+  #
+  # In the multinetwork case the module is consistent: node-ip switches to the
+  # public address, which a network-less CCM can match. Tailscale gets the
+  # networking half of that change without the addressing half.
+  #
+  # Re-enabling networking is safe HERE specifically because this cluster has one
+  # primary network and no external nodepools -- autoscaler_nodepools is empty --
+  # which is the case the module disabled it to protect. The `network` key the
+  # chart reads is written to the hcloud secret unconditionally, regardless of
+  # transport (locals.tf:252), so HCLOUD_NETWORK resolves.
+  #
+  # Routes stay off: the module sets HCLOUD_NETWORK_ROUTES_ENABLED=false under
+  # cross-network transport and that is correct here. flannel's vxlan backend
+  # carries pod traffic itself, so Hetzner network routes are redundant. The aim
+  # is "know the network, do not manage routes" -- knowing it is what clears the
+  # taint.
+  # ----------------------------------------------------------------------------
+  ccm_tailscale_networking_values = <<-EOT
+    networking:
+      enabled: true
+      clusterCIDR: "${var.cluster_ipv4_cidr}"
+  EOT
+
+  hetzner_ccm_values = format(
+    "%s%s",
+    var.ccm_disable_network_attached_check ? local.ccm_disable_attached_check_values : "",
+    var.node_transport_mode == "tailscale" && var.ccm_restore_networking_under_tailscale ? local.ccm_tailscale_networking_values : "",
+  )
 
   # Pre-creates the directory the module uploads its per-set apply options into.
   #

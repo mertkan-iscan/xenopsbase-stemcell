@@ -36,6 +36,14 @@ agent_nodepools = [
     server_type = "cx33"
     location    = "fsn1"
     count       = 2
+
+    # Required once node_transport_mode is "tailscale", and rejected at plan time
+    # if absent. "primary" means this pool sits on the cluster's own Hetzner
+    # network rather than an external one -- which is also what makes restoring
+    # the CCM's network awareness sound (see main.tf).
+    #
+    # Harmless under the hetzner_private escape hatch: the module ignores it.
+    network_scope = "primary"
   }
 ]
 

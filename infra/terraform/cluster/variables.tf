@@ -409,3 +409,48 @@ variable "pin_metadata_route_to_public_nic" {
   type        = bool
   default     = true
 }
+
+variable "cluster_ipv4_cidr" {
+  description = <<-EOT
+    Pod CIDR. Must match what the module passes to k3s -- it is the module's own
+    default, restated here only because the CCM values need it by name when
+    networking is re-enabled under tailscale.
+  EOT
+  type        = string
+  default     = "10.42.0.0/16"
+}
+
+variable "ccm_restore_networking_under_tailscale" {
+  description = <<-EOT
+    Re-enable the Hetzner CCM's network awareness when node_transport_mode is
+    "tailscale".
+
+    kube-hetzner v3.1.0 turns it off for any cross-network transport, but only
+    switches node-ip to the public address for the multinetwork overlay. Under
+    tailscale alone the node keeps advertising its private address while the CCM
+    is given no network to resolve it against, so the node is never initialised
+    and the cluster does not converge. See the reasoning in main.tf.
+
+    Safe only for a single-primary-network cluster with no external-network
+    nodepools, which is the case the module disabled this to protect. The
+    validation below refuses the combination it is not safe for.
+
+    UNVERIFIED against a live cluster.
+  EOT
+  type        = bool
+  default     = true
+}
+
+# The escape hatch this fix depends on: it is only sound while every node is on
+# the one primary network. An external-network autoscaler pool breaks that, and
+# the module's own reason for disabling CCM networking becomes real.
+check "ccm_networking_override_is_safe" {
+  assert {
+    condition = !(
+      var.node_transport_mode == "tailscale" &&
+      var.ccm_restore_networking_under_tailscale &&
+      length([for p in var.autoscaler_nodepools : p if try(p.network_id, null) != null]) > 0
+    )
+    error_message = "ccm_restore_networking_under_tailscale is unsafe with external-network autoscaler nodepools: nodes outside the primary network cannot be resolved against a single HCLOUD_NETWORK. Set it to false and expect the uninitialized-taint failure instead."
+  }
+}
