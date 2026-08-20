@@ -6,7 +6,13 @@ variable "cloudflare_api_token" {
     Needs, scoped to this zone only:
       Zone / DNS / Edit
       Zone / Zone Settings / Edit   (only if manage_zone_settings = true)
+      Zone / Zone WAF / Edit        (only if manage_waf = true)
       Account / Cloudflare Tunnel / Edit
+
+    Zone Settings and Zone WAF are SEPARATE permissions. Holding one does not
+    imply the other, and the apply that discovers this has already created
+    whatever came before the ruleset. `make edge-plan` runs a preflight that
+    names any missing one up front — see infra/scripts/preflight.sh.
   EOT
   type        = string
   sensitive   = true

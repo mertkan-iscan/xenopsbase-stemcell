@@ -76,6 +76,15 @@ define check_env
 		exit 1; }
 endef
 
+# Verifies the token can actually REACH every API a module will use, before
+# Terraform starts changing anything. check_creds catches a missing or swapped
+# credential; this catches one whose SCOPE is too narrow -- which has stopped
+# four applies in this project, always mid-flight and always as a generic
+# "Authentication error" with no indication of the missing permission.
+define preflight
+	@bash $(SCRIPTS)/preflight.sh $(1) $(ENV)
+endef
+
 # Credentials must come from the environment, never from ~/.aws/credentials.
 #
 # The AWS SDK falls back to that file when the env vars are unset, so forgetting
@@ -172,11 +181,13 @@ edge-init: ## terraform init for the Cloudflare edge module
 .PHONY: edge-plan
 edge-plan: ## Plan Cloudflare DNS, tunnel and optional zone settings
 	$(call check_env,$(EDGE_DIR))
+	$(call preflight,edge)
 	@cd $(EDGE_DIR) && terraform plan -input=false -var-file=$(TFVARS) $$(test -f $(SECRETS) && echo -var-file=$(SECRETS))
 
 .PHONY: edge-apply
 edge-apply: ## Apply Cloudflare edge configuration
 	$(call check_env,$(EDGE_DIR))
+	$(call preflight,edge)
 	@cd $(EDGE_DIR) && terraform apply $(APPROVE) -var-file=$(TFVARS) $$(test -f $(SECRETS) && echo -var-file=$(SECRETS))
 
 # ------------------------------------------------------------------------------
@@ -198,10 +209,12 @@ mail-dns-init: ## terraform init for the mail DNS module
 
 .PHONY: mail-dns-plan
 mail-dns-plan: ## Plan the mail deliverability records
+	$(call preflight,mail-dns)
 	@cd $(MAIL_DIR) && terraform plan -input=false $(MAIL_VARS)
 
 .PHONY: mail-dns-apply
 mail-dns-apply: ## Apply the mail deliverability records
+	$(call preflight,mail-dns)
 	@cd $(MAIL_DIR) && terraform apply $(APPROVE) $(MAIL_VARS)
 
 .PHONY: mail-dns-verify
@@ -228,11 +241,13 @@ cluster-init: ## terraform init for the cluster module
 .PHONY: cluster-plan
 cluster-plan: ## Plan cluster changes
 	$(call check_env,$(CLUSTER_DIR))
+	$(call preflight,cluster)
 	@cd $(CLUSTER_DIR) && terraform plan -input=false -var-file=$(TFVARS)
 
 .PHONY: cluster-apply
 cluster-apply: ## Build or update the cluster
 	$(call check_env,$(CLUSTER_DIR))
+	$(call preflight,cluster)
 	@cd $(CLUSTER_DIR) && terraform apply $(APPROVE) -var-file=$(TFVARS)
 
 .PHONY: cluster-destroy
