@@ -52,7 +52,118 @@ spec:
 
     # `clientScopes`, not `scope`. The realm representation rejects the latter:
     #   .spec.realm.scope: field not declared in schema
+    # DECLARING clientScopes REPLACES KEYCLOAK'S BUILT-IN SET.
+    #
+    # It does not add to it. Declaring only `api` left the realm with `api` and
+    # `offline_access` and nothing else -- no profile, no roles, no email -- so
+    # every client's defaultClientScopes referenced scopes that did not exist,
+    # the assignment failed silently, and tokens arrived with no
+    # preferred_username and no realm_access.roles.
+    #
+    # That cost three rounds of fixing the REFERENCES while the TARGETS were
+    # missing. The built-ins are therefore declared here in full, with the
+    # protocol mappers that make them do anything.
     clientScopes:
+      # Carries realm_access.roles, which is where Keycloak puts realm roles and
+      # therefore where all authorization ultimately comes from.
+      - name: roles
+        description: Realm and client roles.
+        protocol: openid-connect
+        attributes:
+          include.in.token.scope: "false"
+          display.on.consent.screen: "false"
+        protocolMappers:
+          - name: realm roles
+            protocol: openid-connect
+            protocolMapper: oidc-usermodel-realm-role-mapper
+            config:
+              multivalued: "true"
+              claim.name: realm_access.roles
+              access.token.claim: "true"
+              introspection.token.claim: "true"
+              jsonType.label: String
+          - name: client roles
+            protocol: openid-connect
+            protocolMapper: oidc-usermodel-client-role-mapper
+            config:
+              multivalued: "true"
+              claim.name: resource_access.${client_id}.roles
+              access.token.claim: "true"
+              introspection.token.claim: "true"
+              jsonType.label: String
+
+      # Carries preferred_username, which the gateway uses as the principal.
+      - name: profile
+        description: User profile.
+        protocol: openid-connect
+        attributes:
+          include.in.token.scope: "true"
+          display.on.consent.screen: "true"
+        protocolMappers:
+          - name: username
+            protocol: openid-connect
+            protocolMapper: oidc-usermodel-attribute-mapper
+            config:
+              user.attribute: username
+              claim.name: preferred_username
+              id.token.claim: "true"
+              access.token.claim: "true"
+              introspection.token.claim: "true"
+              jsonType.label: String
+          - name: full name
+            protocol: openid-connect
+            protocolMapper: oidc-full-name-mapper
+            config:
+              id.token.claim: "true"
+              access.token.claim: "true"
+              introspection.token.claim: "true"
+
+      - name: email
+        description: Email address.
+        protocol: openid-connect
+        attributes:
+          include.in.token.scope: "true"
+          display.on.consent.screen: "true"
+        protocolMappers:
+          - name: email
+            protocol: openid-connect
+            protocolMapper: oidc-usermodel-attribute-mapper
+            config:
+              user.attribute: email
+              claim.name: email
+              id.token.claim: "true"
+              access.token.claim: "true"
+              introspection.token.claim: "true"
+              jsonType.label: String
+
+      # Keycloak internals other things assume exist. Omitting web-origins
+      # breaks CORS in a way that looks like an application bug.
+      - name: web-origins
+        description: CORS origins.
+        protocol: openid-connect
+        attributes:
+          include.in.token.scope: "false"
+          display.on.consent.screen: "false"
+        protocolMappers:
+          - name: allowed web origins
+            protocol: openid-connect
+            protocolMapper: oidc-allowed-origins-mapper
+            config: {}
+
+      - name: acr
+        description: Authentication context class reference.
+        protocol: openid-connect
+        attributes:
+          include.in.token.scope: "false"
+          display.on.consent.screen: "false"
+
+      - name: basic
+        description: Baseline claims.
+        protocol: openid-connect
+        attributes:
+          include.in.token.scope: "false"
+          display.on.consent.screen: "false"
+
       # A scope the gateway can request so the core service can distinguish a
       # user-initiated call from a service-to-service one (T-3.5).
       - name: api
