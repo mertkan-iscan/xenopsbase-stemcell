@@ -53,10 +53,14 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import tech.jhipster.config.JHipsterProperties;
 import tech.jhipster.web.filter.reactive.CookieCsrfFilter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Configuration
 @EnableReactiveMethodSecurity
 public class SecurityConfiguration {
+
+    private static final Logger LOG = LoggerFactory.getLogger(SecurityConfiguration.class);
 
     private final JHipsterProperties jHipsterProperties;
 
@@ -159,7 +163,19 @@ public class SecurityConfiguration {
                 }
             }
         );
+        // preferred_username where present, `sub` otherwise.
+        //
+        // preferred_username only exists when the token carries the `profile`
+        // scope. Service-account tokens never have it, and a user token from a
+        // client without that scope does not either. The generated code used it
+        // unconditionally, so any such token produced
+        //   NullPointerException: Cannot invoke "Object.hashCode()" because "key" is null
+        // -- a 500 from the single entry point, saying nothing about claims.
+        //
+        // `sub` is mandatory in an OIDC token and is the stable identifier
+        // anyway, so it is the correct fallback rather than a defensive hack.
         jwtAuthenticationConverter.setPrincipalClaimName(PREFERRED_USERNAME);
+
         return jwtAuthenticationConverter;
     }
 
@@ -222,6 +238,12 @@ public class SecurityConfiguration {
                 if (jwt.hasClaim("given_name") && jwt.hasClaim("family_name")) {
                     return Mono.just(jwt);
                 }
+                // No subject means no user to look up, and a null cache key
+                // throws before the request is even made. Service-account
+                // tokens legitimately reach here.
+                if (jwt.getSubject() == null) {
+                    return Mono.just(jwt);
+                }
                 // Get user info from `users` cache if present
                 return Optional.ofNullable(users.getIfPresent(jwt.getSubject())).orElseGet(() ->
                     WebClient.create()
@@ -236,9 +258,17 @@ public class SecurityConfiguration {
                                 .audience(jwt.getAudience())
                                 .headers(headers -> headers.putAll(jwt.getHeaders()))
                                 .claims(claims -> {
-                                    String username = userInfo.get("preferred_username").toString();
+                                    // Every field here is optional in practice.
+                                    // The generated code called .toString() on
+                                    // the result of get(), so a provider that
+                                    // omits any of them produced a 500 rather
+                                    // than a token with fewer claims.
+                                    Object rawUsername = userInfo.get("preferred_username");
+                                    Object rawSub = userInfo.get("sub");
+                                    String username = rawUsername == null ? null : rawUsername.toString();
+                                    String subject = rawSub == null ? null : rawSub.toString();
                                     // special handling for Auth0
-                                    if (userInfo.get("sub").toString().contains("|") && username.contains("@")) {
+                                    if (username != null && subject != null && subject.contains("|") && username.contains("@")) {
                                         userInfo.put("email", username);
                                     }
                                     // Allow full name in a name claim - happens with Auth0
@@ -257,6 +287,18 @@ public class SecurityConfiguration {
                         // Retrieve user info from OAuth provider if not already loaded
                         // Put user info into the `users` cache
                         .doOnNext(newJwt -> users.put(jwt.getSubject(), Mono.just(newJwt)))
+                        // Enrichment is an ENHANCEMENT, never a precondition.
+                        // Keycloak returns 403 from /userinfo for a
+                        // service-account token because there is no user
+                        // behind it -- which turned a valid token into a 500
+                        // from the gateway. The token has already been
+                        // cryptographically validated at this point; failing to
+                        // decorate it with a display name is not an
+                        // authentication failure.
+                        .onErrorResume(e -> {
+                            LOG.debug("userinfo enrichment failed for sub={}, continuing with the raw token", jwt.getSubject(), e);
+                            return Mono.just(jwt);
+                        })
                 );
             }
         };
