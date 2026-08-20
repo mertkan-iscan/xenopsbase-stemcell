@@ -156,6 +156,23 @@ spec:
             reject_old_samples: true
             reject_old_samples_max_age: 168h
 
+          ingester:
+            # Flush idle chunks after 5 minutes rather than the 30 minute
+            # default.
+            #
+            # This is about data loss, not speed. The write-ahead log is on
+            # emptyDir (see singleBinary.persistence above), so anything not yet
+            # flushed to the bucket dies with the pod. At the default that is up
+            # to 30 minutes of logs -- and the pod most likely to restart is one
+            # on a node under memory pressure, which is exactly when the logs
+            # are worth having.
+            #
+            # The cost is more, smaller objects in the bucket. At this volume
+            # that is measured in fractions of a cent.
+            chunk_idle_period: 5m
+            chunk_target_size: 1572864
+            max_chunk_age: 1h
+
           compactor:
             # Retention is only ENFORCED if the compactor is told to do it.
             # Setting retention_period alone makes Loki refuse queries beyond the
