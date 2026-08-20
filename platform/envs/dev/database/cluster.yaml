@@ -8,6 +8,24 @@ kind: Cluster
 metadata:
   name: postgres
   namespace: database
+  annotations:
+    # Lets this cluster archive into a path that already has history.
+    #
+    # The check exists to stop two DIFFERENT databases writing to one archive,
+    # which would interleave unrelated timelines and corrupt recovery for both.
+    # That is a real hazard and the default is right.
+    #
+    # It is safe HERE, and only because of the line directly below it in this
+    # file: this cluster bootstraps by RECOVERING from the very path it archives
+    # to. It is the same lineage continuing on a new timeline, which is exactly
+    # what barman's timeline handling is for -- not a second database colliding
+    # with the first.
+    #
+    # DANGER: this annotation and `bootstrap.recovery` are a matched pair. If
+    # anyone ever changes bootstrap back to initdb while leaving this set, a
+    # brand-new empty database will start writing into the old one's archive and
+    # silently destroy its recoverability. Change one, change the other.
+    cnpg.io/skipEmptyWalArchiveCheck: "enabled"
 spec:
   # Two, on a cluster with two schedulable workers. One instance cannot fail
   # over, so the failover criterion of T-2.4 would be untestable and, worse,
