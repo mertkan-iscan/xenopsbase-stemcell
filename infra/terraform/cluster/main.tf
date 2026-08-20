@@ -50,6 +50,24 @@ locals {
   EOT
 
   hetzner_ccm_values = var.ccm_disable_network_attached_check ? local.ccm_disable_attached_check_values : ""
+
+  # Pre-creates the directory the module uploads its per-set apply options into.
+  #
+  # The module runs its user_kustomization_set instances in PARALLEL (for_each),
+  # and each one does `mkdir -p` then uploads a file into that directory. When
+  # the upload wins the race, scp creates the PARENT PATH AS A FILE, and the
+  # deploy step then dies with:
+  #
+  #   /var/user_kustomize/.kube-hetzner-apply-options/1.sh: Not a directory
+  #
+  # Hit on both rebuilds so far, so it is frequent rather than unlucky. It is
+  # also unrecoverable in place: the file has to be removed and the uploads
+  # re-run with -replace, because Terraform believes it already sent them.
+  #
+  # Creating the directory before any upload happens removes the race entirely.
+  # Harmless if the module gets fixed upstream -- mkdir -p on an existing
+  # directory is a no-op.
+  kustomize_options_dir = "mkdir -p /var/user_kustomize/.kube-hetzner-apply-options"
 }
 
 module "kube_hetzner" {
@@ -98,7 +116,10 @@ module "kube_hetzner" {
   # Runs on every node before k3s installs, so the metadata service is reachable
   # by the time the CCM and CSI driver start. See the variable for why this is
   # not optional in practice.
-  preinstall_exec = var.pin_metadata_route_to_public_nic ? [local.metadata_route_unit] : []
+  preinstall_exec = concat(
+    [local.kustomize_options_dir],
+    var.pin_metadata_route_to_public_nic ? [local.metadata_route_unit] : [],
+  )
 
   # MERGE, not replace. The module offers both:
   #
