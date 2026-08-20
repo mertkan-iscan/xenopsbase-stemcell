@@ -109,3 +109,12 @@ jhipster:
 # ===================================================================
 
 # application:
+
+application:
+  storage:
+    # Hetzner Object Storage. Bucket and endpoint come from the environment so the
+    # same image runs in staging and prod without a rebuild; there is deliberately
+    # no default, because a wrong default here writes documents to another
+    # environment's bucket and nothing would report an error.
+    bucket: ${DOCUMENTS_BUCKET}
+    endpoint: ${DOCUMENTS_ENDPOINT}

@@ -31,8 +31,14 @@ class TechnicalStructureTest {
         .whereLayer("Domain").mayOnlyBeAccessedByLayers("Persistence", "Service", "Security", "Web", "Config")
 
         .ignoreDependency(belongToAnyOf(CoreApp.class), alwaysTrue())
+        // Types in `config` that every layer is allowed to reference. The rule says the Config
+        // layer may not be accessed by any layer, which is right for configuration CLASSES --
+        // a service reaching into a @Configuration is the coupling worth preventing. These three
+        // are not that: two are settings holders and one is an annotation, and referencing an
+        // annotation is not a dependency on the layer that declares it.
         .ignoreDependency(alwaysTrue(), belongToAnyOf(
             com.xenopsoftware.core.config.Constants.class,
-            com.xenopsoftware.core.config.ApplicationProperties.class
+            com.xenopsoftware.core.config.ApplicationProperties.class,
+            com.xenopsoftware.core.config.ConditionalOnDocumentStorage.class
         ));
 }

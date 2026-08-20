@@ -35,6 +35,7 @@
         <run.addResources>false</run.addResources>
         <spring-boot.version>${project.parent.version}</spring-boot.version>
         <archunit-junit5.version>1.4.2</archunit-junit5.version>
+        <awssdk.version>2.46.7</awssdk.version>
         <checkstyle.version>13.7.0</checkstyle.version>
         <cucumber-bom.version>7.34.4</cucumber-bom.version>
         <jackson-databind-nullable.version>0.2.10</jackson-databind-nullable.version>
@@ -64,6 +65,19 @@
 
     <dependencyManagement>
         <dependencies>
+            <!--
+                Document storage (T-3.7). The AWS SDK is used as an S3 CLIENT, not as
+                an AWS integration: every call is plain S3 API, so the same code runs
+                against Hetzner Object Storage, MinIO or R2. Nothing here may reach for
+                an AWS-only service.
+            -->
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${awssdk.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <dependency>
                 <groupId>org.springframework.cloud</groupId>
                 <artifactId>spring-cloud-dependencies</artifactId>
@@ -329,6 +343,32 @@
         <dependency>
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-circuitbreaker-resilience4j</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <exclusions>
+                <!--
+                    The sync client uses apache-client; netty comes in only for the
+                    async one, which this service does not use. Excluding it keeps a
+                    second HTTP stack and its native transports out of the image.
+                -->
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>netty-nio-client</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-minio</artifactId>
+            <!--
+                Not managed by the Spring Boot BOM, which covers only some
+                Testcontainers modules. Pinned to the same version the BOM manages for
+                the core artifact so the two cannot drift apart.
+            -->
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>

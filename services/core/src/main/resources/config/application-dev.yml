@@ -95,3 +95,11 @@ jhipster:
 # ===================================================================
 
 # application:
+
+application:
+  storage:
+    # MinIO locally. Same S3 API, so nothing in the service knows the difference --
+    # which is the point of the abstraction and the reason dev and prod can share
+    # one code path.
+    bucket: ${DOCUMENTS_BUCKET:xenopsbase-dev-documents}
+    endpoint: ${DOCUMENTS_ENDPOINT:http://localhost:9000}

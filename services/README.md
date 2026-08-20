@@ -69,6 +69,10 @@ Rules that are not obvious from the tree:
   `ddl-auto: validate` enforces this: an entity that disagrees with its migration refuses to start.
   Naming, review conventions and the forward-only rollback strategy are in
   [docs/runbooks/schema-migrations.md](../docs/runbooks/schema-migrations.md).
+- **File bytes never pass through a service.** Uploads and downloads go straight between the client
+  and object storage over presigned URLs; the API only issues them and tracks metadata. See
+  [docs/runbooks/document-storage.md](../docs/runbooks/document-storage.md), which also covers why
+  ownership is keyed on the OIDC `sub` and never on `preferred_username`.
 
 ## Building
 

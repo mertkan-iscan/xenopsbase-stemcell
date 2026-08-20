@@ -245,3 +245,27 @@ jhipster:
 # ===================================================================
 
 # application:
+
+# ===================================================================
+# Application-specific properties
+# ===================================================================
+application:
+  # Document storage over the S3 API (T-3.7).
+  #
+  # bucket and endpoint are intentionally UNSET here. Without them the storage
+  # beans are not created at all (see StorageConfiguration), so a fork that does
+  # not need documents carries no S3 client and no dead configuration. Set them
+  # per profile.
+  #
+  # Credentials are NOT here and must not be: the SDK reads AWS_ACCESS_KEY_ID and
+  # AWS_SECRET_ACCESS_KEY from the environment, which is how the platform already
+  # delivers them, and keeps them out of anything that gets logged or committed.
+  storage:
+    region: us-east-1
+    path-style-access: true
+    # A presigned URL is a bearer credential -- whoever holds it can read or write
+    # that object with no further authentication. It ends up in browser history,
+    # proxy logs and pasted links, so its blast radius is bounded by how soon it
+    # expires and by nothing else.
+    presign-ttl: 15m
+    max-upload-bytes: 52428800

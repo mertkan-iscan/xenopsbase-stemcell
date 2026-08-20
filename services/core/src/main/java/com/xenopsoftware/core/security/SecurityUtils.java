@@ -37,6 +37,29 @@ public final class SecurityUtils {
         return Optional.ofNullable(extractPrincipal(securityContext.getAuthentication()));
     }
 
+    /**
+     * The stable, immutable identifier for the authenticated user: the OIDC {@code sub} claim.
+     *
+     * <p>Use this, not {@link #getCurrentUserLogin()}, whenever a user identity is being STORED.
+     * {@code preferred_username} is display-oriented and can be changed in Keycloak at any time;
+     * anything persisted under the old value silently becomes unreachable, with no error and no
+     * migration path back. {@code sub} never changes for the life of the account.
+     *
+     * <p>The reverse also holds: {@code sub} is a UUID and means nothing to a human, so it is the
+     * wrong thing to show in a UI or write into a log line meant to be read.
+     */
+    public static Optional<String> getCurrentUserId() {
+        SecurityContext securityContext = SecurityContextHolder.getContext();
+        Authentication authentication = securityContext.getAuthentication();
+        if (authentication instanceof JwtAuthenticationToken jwtToken) {
+            return Optional.ofNullable(jwtToken.getToken().getSubject());
+        }
+        if (authentication != null && authentication.getPrincipal() instanceof DefaultOidcUser oidcUser) {
+            return Optional.ofNullable(oidcUser.getSubject());
+        }
+        return Optional.empty();
+    }
+
     private static String extractPrincipal(Authentication authentication) {
         if (authentication == null) {
             return null;
