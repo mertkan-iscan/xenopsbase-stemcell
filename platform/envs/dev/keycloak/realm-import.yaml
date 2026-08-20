@@ -136,9 +136,16 @@ spec:
         publicClient: true
         standardFlowEnabled: false
         directAccessGrantsEnabled: true
-        defaultClientScopes:
-          - profile
-          - email
+        # NO defaultClientScopes override. Declaring the list replaces
+        # Keycloak's built-ins rather than adding to them, so `profile` and
+        # `email` fell off and tokens arrived with no preferred_username. The
+        # gateway uses that claim as the principal name and threw
+        # NullPointerException: "key" is null -- an error that says nothing
+        # about scopes.
+        #
+        # `api` is attached as an optional scope instead, requested explicitly
+        # when a caller wants it.
+        optionalClientScopes:
           - api
         protocolMappers:
           # Same reason as the gateway client: without this the token has no
