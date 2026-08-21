@@ -156,6 +156,29 @@ spec:
           - roles
           - web-origins
 
+        # MUST be declared too, even though offline_access is one of Keycloak's
+        # own built-ins and nothing here wants to change it.
+        #
+        # Declaring defaultClientScopes above unassigns the OPTIONAL scopes as
+        # well, not only the default ones. Keycloak's import strips every scope
+        # of BOTH kinds from the client as soon as EITHER list is present, then
+        # re-adds only what is named. offline_access is an optional built-in, so
+        # listing the defaults quietly took it away.
+        #
+        # Same trap as the paragraph above, one level down, and with no warning
+        # in the import log this time -- the scope exists in the realm, it is
+        # just no longer attached to this client. The gateway asks for
+        # offline_access (application.yml) and Keycloak answers invalid_scope,
+        # which comes back as a redirect to the application rather than an
+        # error, so the login simply does not complete.
+        #
+        # Not padded out with the other optional built-ins (address, phone,
+        # microprofile-jwt): naming a scope this Keycloak does not create is
+        # what produced "Referenced client scope doesn't exist. Ignoring"
+        # before. Assign what is used.
+        optionalClientScopes:
+          - offline_access
+
       # DEV ONLY. A client that can exchange a username and password directly
       # for a token, so automated tests can authenticate without driving a
       # browser (T-5.5).
@@ -248,6 +271,14 @@ spec:
           - profile
           - roles
           - web-origins
+
+        # Same reason as the gateway client: naming defaultClientScopes above
+        # unassigns the optional built-ins too, and offline_access is one.
+        # Assigned here so the browser client can hold a refresh token when
+        # T-3.13 needs one, rather than discovering the omission from a
+        # redirect carrying invalid_scope.
+        optionalClientScopes:
+          - offline_access
 
     # DEV ONLY, and deliberately the only user this realm contains.
     #

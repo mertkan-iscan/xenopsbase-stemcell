@@ -282,10 +282,25 @@ spring:
             # Never defaulted. A gateway that starts with a placeholder secret
             # is a gateway that authenticates against nothing and looks fine.
             client-secret: ${OIDC_CLIENT_SECRET}
-            # offline_access is what makes the refresh-token filter useful; the
-            # `api` scope is the one the realm defines for reaching the core
-            # service (T-2.5).
-            scope: openid, profile, email, offline_access, api
+            # offline_access is what makes the refresh-token filter useful.
+            # It is an OPTIONAL client scope, so the realm has to ASSIGN it --
+            # see optionalClientScopes on the gateway client in the realm
+            # import. Requesting it is only half of it.
+            #
+            # `api` is gone. The comment here said the realm defines it for
+            # reaching the core service; the realm does not define it at all,
+            # and deliberately carries no clientScopes block (see the note above
+            # `clients:` in the realm import). Keycloak rejects an authorization
+            # request naming a scope the client does not have, with
+            # invalid_scope -- delivered as a redirect BACK to the application
+            # rather than an error page, so it reads as a login that silently
+            # refused rather than as a configuration fault.
+            #
+            # Nothing consumed it. Authorization is carried by
+            # realm_access.roles (app-user / app-admin) and the audience by the
+            # client's own protocol mapper, which was moved off this scope
+            # precisely because the import dropped the scope's mappers.
+            scope: openid, profile, email, offline_access
   task:
     execution:
       thread-name-prefix: gateway-task-
