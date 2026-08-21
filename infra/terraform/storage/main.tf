@@ -32,6 +32,20 @@ locals {
       versioned = false
       purpose   = "Loki log chunks. Immutable once written."
     }
+    tempo_traces = {
+      name  = "${var.prefix}-${var.environment}-tempo-traces"
+      owner = var.access_keys.observability
+      # Same reasoning as loki_chunks: blocks are written once and never
+      # rewritten, so versioning would double the cost and protect nothing.
+      versioned = false
+      # Seven days, against Loki's thirty. Traces are the highest-volume and
+      # shortest-useful telemetry here -- they answer "what did this request do"
+      # while someone is still asking, and a trace nobody looked at inside a week
+      # is not going to be looked at. The bucket itself is free; Hetzner bills
+      # stored volume and egress, so retention is the only cost lever and this is
+      # it. See infra/lifecycle/tempo-traces.json.
+      purpose = "Tempo trace blocks. Immutable once written, expired after 7 days."
+    }
   }
 }
 

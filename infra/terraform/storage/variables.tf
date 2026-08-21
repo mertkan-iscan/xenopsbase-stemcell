@@ -99,7 +99,7 @@ variable "access_keys" {
       infra         - Terraform and CI. Retains access to every bucket.
       app           - The core service. Documents only.
       db            - CloudNativePG. Database backups only.
-      observability - Loki. Log chunks only.
+      observability - Loki and Tempo. Log chunks and trace blocks only.
   EOT
   type = object({
     infra         = optional(string, "")
