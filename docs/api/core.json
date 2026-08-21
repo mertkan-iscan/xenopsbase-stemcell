@@ -25,6 +25,9 @@
           "namespace" : {
             "type" : "string"
           },
+          "node" : {
+            "type" : "string"
+          },
           "pod" : {
             "type" : "string"
           }
