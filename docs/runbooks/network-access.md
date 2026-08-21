@@ -130,8 +130,17 @@ works. T-7.3 runs it from CI for exactly that reason.
 
 ## The escape hatch
 
+Not in use. `dev` moved to tailscale transport on 2026-08-21; the hatch is kept for the outage it
+was written for, not as the working configuration.
+
 If Tailscale is unreachable and a cluster must be rebuilt, `node_transport_mode` can be switched
 back to `hetzner_private`, which restores public API and SSH restricted to `firewall_source_cidrs`.
+
+> **Only on a cluster you are building from nothing.** Changing `node_transport_mode` on a
+> **running** cluster does not work and cannot be undone in place. Terraform replaces the firewall
+> rules immediately but does **not** replace the servers, so 22 and 6443 close while no node has
+> joined the tailnet — and there is no longer any path to the machines that are still running. The
+> apply appears to succeed. Destroy and rebuild instead.
 
 ```hcl
 node_transport_mode   = "hetzner_private"
