@@ -99,6 +99,7 @@ public class InfraUsageService {
         String namespace,
         String pod,
         String container,
+        String node,
         Double cpuCores,
         Long memoryBytes,
         Double cpuLimitCores,
@@ -166,6 +167,24 @@ public class InfraUsageService {
             }
         }
 
+        // Which node each pod is on. kube_pod_info is the only series here that
+        // carries the node NAME; the cAdvisor and node-exporter series identify a
+        // node by scrape target (10.0.0.101:9100), which is not what anyone reads
+        // a placement column to find out.
+        Map<String, Double> podNodePresence = scalarsBy(
+            "pod-node",
+            "sum by (namespace, pod, node) (kube_pod_info)",
+            metric -> label(metric, "namespace") + "/" + label(metric, "pod") + "/" + label(metric, "node"),
+            empty
+        );
+        Map<String, String> podNode = new LinkedHashMap<>();
+        for (String triple : podNodePresence.keySet()) {
+            String[] parts = triple.split("/", 3);
+            if (parts.length == 3) {
+                podNode.put(parts[0] + "/" + parts[1], parts[2]);
+            }
+        }
+
         Map<String, ContainerUsage> containers = new LinkedHashMap<>();
         for (String key : keys) {
             String[] parts = key.split("/", 3);
@@ -178,6 +197,10 @@ public class InfraUsageService {
                     parts[0],
                     parts[1],
                     parts[2],
+                    // Empty rather than null when unknown: a pod that has just been
+                    // scheduled can have cAdvisor series before kube-state-metrics
+                    // has caught up, and that is a gap in the join, not an error.
+                    podNode.getOrDefault(parts[0] + "/" + parts[1], ""),
                     cpu.get(key),
                     asLong(memory.get(key)),
                     cpuLimit.get(key),
@@ -229,12 +252,32 @@ public class InfraUsageService {
             empty
         );
 
+        // node-exporter identifies a node by scrape target. kube_node_info maps that
+        // address to the name Kubernetes uses, which is the one that matches the
+        // placement column above and the one an operator would type into kubectl.
+        Map<String, Double> nodeNamePresence = scalarsBy(
+            "node-names",
+            "sum by (node, internal_ip) (kube_node_info)",
+            metric -> label(metric, "internal_ip") + "/" + label(metric, "node"),
+            empty
+        );
+        Map<String, String> nodeNameByIp = new LinkedHashMap<>();
+        for (String pair : nodeNamePresence.keySet()) {
+            String[] parts = pair.split("/", 2);
+            if (parts.length == 2) {
+                nodeNameByIp.put(parts[0], parts[1]);
+            }
+        }
+
         List<NodeUsage> nodes = new ArrayList<>();
         nodeMemTotal.forEach((instance, total) -> {
             Double available = nodeMemAvailable.get(instance);
+            String ip = instance.contains(":") ? instance.substring(0, instance.indexOf(':')) : instance;
             nodes.add(
                 new NodeUsage(
-                    instance,
+                    // Falls back to the scrape target rather than to blank. An
+                    // unresolvable name is worth seeing; an unnamed card is not.
+                    nodeNameByIp.getOrDefault(ip, instance),
                     nodeCpu.get(instance),
                     nodeCpuUsed.get(instance),
                     asLong(total),

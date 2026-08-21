@@ -8,10 +8,15 @@
     <!--
       Stylesheet and script are separate files rather than inline blocks.
 
-      The CSP still allows 'unsafe-inline' for both, because JHipster's default did
-      and removing it was not this task. Nothing here relies on it, so that
-      allowance can be dropped from application.yml without touching this page --
-      which is the point of not writing inline blocks in the first place.
+      That is now load-bearing. This comment used to say the CSP still allowed
+      'unsafe-inline' and that dropping it would need no change here; T-3.14 did
+      drop it, so the policy is script-src 'self'; style-src 'self' and an inline
+      block added to this page would simply not run.
+
+      Widths on the usage meters are set through the CSSOM from app.js, which CSP
+      does not govern -- it restricts inline <style> elements and style
+      attributes parsed from markup, not property assignment by script that has
+      already satisfied script-src.
     -->
     <link rel="stylesheet" href="/app.css" />
   </head>
@@ -94,6 +99,7 @@
             <table>
               <thead>
                 <tr>
+                  <th>Node</th>
                   <th>Namespace</th>
                   <th>Container</th>
                   <th class="num">CPU</th>

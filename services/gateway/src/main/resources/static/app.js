@@ -468,12 +468,27 @@ function renderContainers(containers) {
   const body = el("infra-containers");
   body.replaceChildren();
 
-  // Heaviest first. A dashboard sorted by name makes you hunt for the thing
-  // that is actually consuming the cluster.
-  const sorted = [...containers].sort((a, b) => (b.memoryBytes || 0) - (a.memoryBytes || 0));
+  // Grouped by node, then heaviest first within each. Sorting purely by size
+  // answers "what is consuming the cluster"; grouping by node also answers
+  // "which machine do I look at", which is the question a placement column is
+  // there for. The node name repeats down the column on purpose -- collapsing
+  // it to the first row of each group looks tidier and makes a sorted table
+  // impossible to read from the middle.
+  const sorted = [...containers].sort(
+    (a, b) => (a.node || "").localeCompare(b.node || "") || (b.memoryBytes || 0) - (a.memoryBytes || 0)
+  );
 
   for (const c of sorted) {
     const row = document.createElement("tr");
+
+    const node = document.createElement("td");
+    node.textContent = c.node || "—";
+    if (!c.node) {
+      // A pod can have cAdvisor series before kube-state-metrics has reported
+      // where it is. That is a gap in the join, not a container running nowhere.
+      node.title = "placement not reported yet";
+      node.className = "muted";
+    }
 
     const ns = document.createElement("td");
     ns.textContent = c.namespace;
@@ -495,7 +510,7 @@ function renderContainers(containers) {
     const limit = document.createElement("td");
     limit.appendChild(meterCell(c.memoryBytes, c.memoryLimitBytes));
 
-    row.append(ns, name, cpu, mem, limit);
+    row.append(node, ns, name, cpu, mem, limit);
     body.appendChild(row);
   }
 }
