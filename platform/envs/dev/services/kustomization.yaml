@@ -31,15 +31,14 @@ resources:
 # two no longer move together.
 images:
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/core
-    # Commit f586e748b3977ee3d3c9714d163bb9fa3a0019bc. Unchanged: 065d2560 did
-    # not touch core, and the rebuild produced this same digest, which is the
-    # reproducibility claim in T-6.1 holding up rather than a coincidence.
-    digest: sha256:cd28b14ca2839066e4dbdb283aaff66a4e081e36e3f94031905eb0f9cbcee07f
+    # Commit 2381ff1 -- terminal .anyRequest() rule. No behaviour change today,
+    # since every path core serves is named explicitly above it.
+    digest: sha256:51572fef4bc4f06cdd8225c782156c3b2a98e639eb1d8d0d320fe17a402d4dee
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway
-    # Commit 491c6e6 -- drops offline_access from the OIDC authorization
-    # request, after 065d2560 dropped `api` from it. The scope lives in
-    # application.yml, so it is baked into the image and a digest bump is what
-    # deploys it; the realm half of those commits reaches the cluster by a
-    # different route again (see docs/runbooks/authorization.md, "Applying a
-    # realm change in dev").
-    digest: sha256:aaaaaffa56a33af18190a364b5c2e6856dd3777de3c3d8840e733ece72ad273e
+    # Commit 2381ff1 -- terminal .anyExchange() rule, so a logged-in browser
+    # reaching "/" is not denied by default. Follows 491c6e6 (drop
+    # offline_access) and 065d2560 (drop `api`) from the same authorization
+    # path. All three live in the image, so a digest bump is what deploys them;
+    # the realm halves reach the cluster by a different route again (see
+    # docs/runbooks/authorization.md, "Applying a realm change in dev").
+    digest: sha256:5628433f03e2cb58da52f6b34fbe55c4951ade9e2133b59ed3a4f31f102a122d
