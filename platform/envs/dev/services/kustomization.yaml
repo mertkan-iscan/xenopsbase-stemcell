@@ -31,13 +31,15 @@ resources:
 # two no longer move together.
 images:
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/core
-    # Commit 2381ff1 -- terminal .anyRequest() rule. No behaviour change today,
-    # since every path core serves is named explicitly above it.
-    digest: sha256:51572fef4bc4f06cdd8225c782156c3b2a98e639eb1d8d0d320fe17a402d4dee
+    # Commit 5b4d627 -- forward-headers-strategy: framework, in every profile.
+    # Core builds absolute URLs (pagination Link headers) and is only ever
+    # reached through the gateway, so those have to come from the forwarded
+    # headers or they name the in-cluster Service.
+    digest: sha256:b435a3cdad73f32e686c4372da79473c1b5b88b48f3440b2b98133ffbf561c15
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway
-    # Commit 4b0c1f3 -- CSP gains a connect-src, so the browser is allowed to
-    # PUT to object storage at all; the bucket's CORS policy is the other half
-    # and lives in infra/terraform/storage. Follows 1f1758f and 16618a6
-    # (problem-detail hygiene), 2381ff1 (terminal .anyExchange() rule), 491c6e6
-    # (drop offline_access) and 065d2560 (drop `api`).
-    digest: sha256:dda82d5fbbf67ca691818e138881e3bf097ec9c811af9adac9ea7c67250eaa46
+    # Commit 5b4d627 -- the T-3.13 frontend, plus the X-Forwarded-Prefix that
+    # makes core's pagination links usable from a browser. Follows 4b0c1f3
+    # (CSP connect-src), 1f1758f and 16618a6 (problem-detail hygiene), 2381ff1
+    # (terminal .anyExchange() rule), 491c6e6 (drop offline_access) and
+    # 065d2560 (drop `api`).
+    digest: sha256:cf593304cbd1931ad5c6cc37074aa4ace9d2fcb01fdaf2a3dd8fa7fe69551782
