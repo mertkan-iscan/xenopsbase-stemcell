@@ -31,13 +31,13 @@ resources:
 # two no longer move together.
 images:
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/core
-    # Commit 0e4ff88 -- exports traces over OTLP (T-2.7). Replaces the
+    # Commit f50edb7 -- infrastructure usage endpoint (T-3.16). Carries
     # generator's Zipkin config, which pointed at localhost:9411 behind an
     # inactive Maven profile, so the service emitted no spans at all while
     # Tempo and Alloy sat healthy and empty.
-    digest: sha256:6907176effd82d40a9e6b9eeb3a5cf43f7d5c3a8ce8b791b37b7e797d23e115c
+    digest: sha256:92af59c6e2bc9d228ac2c6b4f6eff7b41033ff0ebcb9606d369f36ec03d393c7
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway
-    # Commit 0e4ff88 -- exports traces over OTLP (T-2.7). Carries forward
+    # Commit f50edb7 -- the infrastructure dashboard (T-3.16). Carries
     # 6d965b8 (CSP without 'unsafe-inline'/'unsafe-eval'), 806e8be (logout
     # origin from the request) and f430d36.
-    digest: sha256:9c23add7d8c2ba9f6fa4920874215323fbf30c416319d2411c02267e4d729629
+    digest: sha256:2e0ac0a3947d4d2342e325300496d35e86445aeb7bf06567851aeb987e88efb1
