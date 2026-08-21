@@ -31,6 +31,7 @@ import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.support.WebExchangeBindException;
+import org.springframework.web.reactive.resource.NoResourceFoundException;
 import org.springframework.web.reactive.result.method.annotation.ResponseEntityExceptionHandler;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
@@ -203,6 +204,20 @@ public class ExceptionTranslator extends ResponseEntityExceptionHandler implemen
     }
 
     private String getCustomizedErrorDetails(Throwable err) {
+        // Before the profile check, so the answer does not change between dev and prod.
+        //
+        // This exception puts the request URI in its own reason, and in WebFlux that URI is
+        // absolute, so `detail` read
+        //   404 NOT_FOUND "No static resource  for request 'https://app-dev.example.com/'."
+        // and carried the public hostname in every 404 the gateway returns -- into logs and
+        // aggregators as much as to the caller.
+        //
+        // Nothing is lost by dropping it: `path` and `instance` already state which path was
+        // requested, so the URI here was only ever a third copy, and the only one with an origin
+        // attached. Fixing getPathValue did not reach this, because the string is Spring's, not
+        // one this translator composes.
+        if (err instanceof NoResourceFoundException) return "No static resource for this path.";
+
         Collection<String> activeProfiles = List.of(env.getActiveProfiles());
         if (activeProfiles.contains(JHipsterConstants.SPRING_PROFILE_PRODUCTION)) {
             if (err instanceof HttpMessageConversionException) return "Unable to convert http message";
