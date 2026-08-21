@@ -79,3 +79,8 @@ services/gen.log
 services/.yo-rc.json
 services/*/.yo-rc.json
 services/*/.jhipster/
+
+# Generated client sources. The SPEC is committed (docs/api), the generated code is not:
+# it is reproducible from the spec by `make api-client`, and committing it would mean
+# reviewing thousands of generated lines on every API change.
+/clients/java/target/

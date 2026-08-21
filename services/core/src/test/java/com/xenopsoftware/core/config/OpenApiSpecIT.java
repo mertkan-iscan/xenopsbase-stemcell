@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.xenopsoftware.core.IntegrationTest;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -47,6 +48,11 @@ class OpenApiSpecIT {
         // activating a profile, so this test does not also inherit whatever else that profile
         // changes.
         registry.add("springdoc.api-docs.enabled", () -> true);
+        // Also set here, not only in the main config: src/test/resources/config/application.yml
+        // REPLACES the main file on the test classpath rather than merging with it, so a property
+        // set only in production config is absent from every test. The spec would be captured as
+        // 3.1 while deployments serve 3.0 -- the published artifact would not match what runs.
+        registry.add("springdoc.api-docs.version", () -> "openapi_3_0");
         // Object storage is unrelated to the spec, but the document endpoints must be present in
         // it -- and they only exist when the storage feature is on (T-3.7).
         ObjectStorageTestcontainer.registerTo(registry);
@@ -86,9 +92,20 @@ class OpenApiSpecIT {
             .as("both operations on the collection")
             .contains("get", "post");
 
+        // The spec is captured from a TEST context, so anything mapped in the test source set is
+        // a candidate for leaking into the published contract. It did: eight
+        // /api/exception-translator-test/* paths and two CORS fixtures were being documented, and
+        // a generated client would have had typed methods for endpoints no deployment serves.
+        //
+        // The fixtures now carry @Hidden. This is what stops that regressing silently.
+        assertThat(paths.fieldNames())
+            .toIterable()
+            .as("test fixtures must not appear in the published contract")
+            .noneMatch(path -> path.contains("test") || path.contains("Test"));
+
         // Written for CI to publish and for the client generator to consume.
         Files.createDirectories(OUTPUT.getParent());
-        Files.writeString(OUTPUT, objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(spec), StandardCharsets.UTF_8);
+        Files.writeString(OUTPUT, canonical(objectMapper, spec), StandardCharsets.UTF_8);
 
         assertThat(OUTPUT).isRegularFile();
         assertThat(Files.size(OUTPUT)).as("an empty spec would still be a valid file").isGreaterThan(500);
@@ -105,5 +122,22 @@ class OpenApiSpecIT {
 
         assertThat(responses.isMissingNode()).as("operations must declare their responses").isFalse();
         assertThat(responses.fieldNames()).toIterable().isNotEmpty();
+    }
+
+    /**
+     * Serialises with map keys sorted, so the file is byte-identical for the same API.
+     *
+     * <p>springdoc builds the document by reflection and does not guarantee a stable property
+     * order: two runs against unchanged code produced specs differing only in where
+     * {@code maxIdleTime} appeared. That is invisible in review and fatal to the CI check that
+     * fails when the committed spec drifts, which would flap on runs that changed nothing.
+     *
+     * <p>Reading into a {@code Map} and re-serialising with {@code ORDER_MAP_ENTRIES_BY_KEYS} is
+     * what makes it canonical; {@code writerWithDefaultPrettyPrinter} alone does not sort.
+     */
+    private static String canonical(ObjectMapper mapper, JsonNode spec) throws Exception {
+        ObjectMapper sorted = mapper.copy().configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
+        Object asMap = sorted.treeToValue(spec, Object.class);
+        return sorted.writerWithDefaultPrettyPrinter().writeValueAsString(asMap);
     }
 }

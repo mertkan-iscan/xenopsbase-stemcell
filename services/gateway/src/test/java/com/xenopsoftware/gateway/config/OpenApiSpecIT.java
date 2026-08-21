@@ -7,6 +7,7 @@ import static org.springframework.security.test.web.reactive.server.SecurityMock
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.xenopsoftware.gateway.IntegrationTest;
 import com.xenopsoftware.gateway.security.AuthoritiesConstants;
 import java.nio.charset.StandardCharsets;
@@ -35,6 +36,10 @@ import org.springframework.test.web.reactive.server.WebTestClient;
         // springdoc is off unless the api-docs profile is active. Enabled directly so the test
         // does not inherit everything else that profile changes.
         "springdoc.api-docs.enabled=true",
+        // Set here too: the test config replaces the main file rather than merging, so a property
+        // set only in production config never reaches a test. Without it the captured spec is 3.1
+        // while deployments serve 3.0.
+        "springdoc.api-docs.version=openapi_3_0",
     }
 )
 class OpenApiSpecIT {
@@ -80,7 +85,7 @@ class OpenApiSpecIT {
         assertThat(spec.path("paths").isMissingNode()).isFalse();
 
         Files.createDirectories(OUTPUT.getParent());
-        Files.writeString(OUTPUT, objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(spec), StandardCharsets.UTF_8);
+        Files.writeString(OUTPUT, canonical(objectMapper, spec), StandardCharsets.UTF_8);
     }
 
     @Test
@@ -88,5 +93,22 @@ class OpenApiSpecIT {
         // The document lists every route, parameter and schema. Serving it unauthenticated hands
         // an attacker the map before they have to look for it.
         webTestClient.mutateWith(mockUser()).get().uri("/v3/api-docs").exchange().expectStatus().isForbidden();
+    }
+
+    /**
+     * Serialises with map keys sorted, so the file is byte-identical for the same API.
+     *
+     * <p>springdoc builds the document by reflection and does not guarantee a stable property
+     * order: two runs against unchanged code produced specs differing only in where
+     * {@code maxIdleTime} appeared. That is invisible in review and fatal to the CI check that
+     * fails when the committed spec drifts, which would flap on runs that changed nothing.
+     *
+     * <p>Reading into a {@code Map} and re-serialising with {@code ORDER_MAP_ENTRIES_BY_KEYS} is
+     * what makes it canonical; {@code writerWithDefaultPrettyPrinter} alone does not sort.
+     */
+    private static String canonical(ObjectMapper mapper, JsonNode spec) throws Exception {
+        ObjectMapper sorted = mapper.copy().configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
+        Object asMap = sorted.treeToValue(spec, Object.class);
+        return sorted.writerWithDefaultPrettyPrinter().writeValueAsString(asMap);
     }
 }

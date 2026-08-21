@@ -310,6 +310,14 @@ server:
         http-only: true
 
 springdoc:
+  api-docs:
+    # 3.0, not the 3.1 springdoc emits by default (T-3.11).
+    #
+    # A spec nothing can consume is not a published contract. openapi-generator 7.x still has
+    # incomplete OpenAPI 3.1 support: against a 3.1 document it fails to resolve every component
+    # schema and generates nothing, with errors that name the schemas rather than the version.
+    # 3.0.1 is what the generator ecosystem actually handles.
+    version: openapi_3_0
   show-actuator: true
 
 # Properties to be exposed on the /info management endpoint

@@ -226,6 +226,28 @@ mail-dns-verify: ## Resolve every mail record and report what is actually publis
 # notice. The apex record carries prevent_destroy for the same reason.
 
 # ------------------------------------------------------------------------------
+# API contract (T-3.11)
+#
+# The spec is GENERATED from the running services, never hand-edited. Editing
+# docs/api/*.json directly makes it disagree with what the services serve, and CI
+# fails the next build rather than the discrepancy being noticed by a consumer.
+# ------------------------------------------------------------------------------
+
+.PHONY: api-spec
+api-spec: ## Regenerate docs/api/*.json from the services
+	@cd services/core && ./mvnw --batch-mode verify -DskipITs=false -Dit.test=OpenApiSpecIT -DfailIfNoTests=false -Dtest=SchemaOwnershipTest
+	@cd services/gateway && ./mvnw --batch-mode verify -DskipITs=false -Dit.test=OpenApiSpecIT -DfailIfNoTests=false -Dtest=SecurityUtilsUnitTest
+	@mkdir -p docs/api
+	@cp services/core/target/openapi/core.json docs/api/core.json
+	@cp services/gateway/target/openapi/gateway.json docs/api/gateway.json
+	@echo "docs/api updated. Commit the diff -- an API change should be visible in review."
+
+.PHONY: api-client
+api-client: ## Generate the typed Java client from the committed spec and compile it
+	@cd clients/java && mvn --batch-mode clean compile
+	@echo "client compiled from docs/api/core.json"
+
+# ------------------------------------------------------------------------------
 # Cluster (ephemeral, per environment)
 # ------------------------------------------------------------------------------
 

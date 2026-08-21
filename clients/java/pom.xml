@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.xenopsoftware</groupId>
+    <artifactId>core-api-client</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>Core API client</name>
+    <description>
+        A typed Java client generated from the core service's published OpenAPI document (T-3.11).
+
+        Deliberately a separate module with no dependency on the services. It consumes
+        docs/api/core.json exactly as an external consumer would, so if the spec is not usable by a
+        generator, this module fails to build rather than someone discovering it later.
+
+        Nothing here is written by hand. The whole point is that a consumer never hand-writes a
+        client and then discovers, months later, that it drifted from the API.
+    </description>
+
+    <properties>
+        <maven.compiler.release>25</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <openapi-generator.version>7.23.0</openapi-generator.version>
+        <jackson.version>2.20.1</jackson.version>
+        <jakarta.annotation.version>3.0.0</jakarta.annotation.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openapitools</groupId>
+            <artifactId>jackson-databind-nullable</artifactId>
+            <version>0.2.10</version>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.annotation</groupId>
+            <artifactId>jakarta.annotation-api</artifactId>
+            <version>${jakarta.annotation.version}</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.openapitools</groupId>
+                <artifactId>openapi-generator-maven-plugin</artifactId>
+                <version>${openapi-generator.version}</version>
+                <executions>
+                    <execution>
+                        <id>generate-core-client</id>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <!--
+                                The committed spec, not a live endpoint. A generator pointed at a
+                                running service can only be run when one is running, which makes
+                                the client unbuildable in CI and on a fresh clone.
+                            -->
+                            <inputSpec>${project.basedir}/../../docs/api/core.json</inputSpec>
+                            <generatorName>java</generatorName>
+                            <!--
+                                native = java.net.http.HttpClient, in the JDK since 11. Avoids
+                                pulling a second HTTP stack into every consumer just to call this
+                                API.
+                            -->
+                            <library>native</library>
+                            <apiPackage>com.xenopsoftware.core.client.api</apiPackage>
+                            <modelPackage>com.xenopsoftware.core.client.model</modelPackage>
+                            <invokerPackage>com.xenopsoftware.core.client</invokerPackage>
+                            <generateApiTests>false</generateApiTests>
+                            <generateModelTests>false</generateModelTests>
+                            <generateApiDocumentation>false</generateApiDocumentation>
+                            <generateModelDocumentation>false</generateModelDocumentation>
+                            <configOptions>
+                                <useJakartaEe>true</useJakartaEe>
+                                <hideGenerationTimestamp>true</hideGenerationTimestamp>
+                            </configOptions>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -1,0 +1,249 @@
+{
+  "components" : {
+    "schemas" : {
+      "AuthInfoVM" : {
+        "properties" : {
+          "clientId" : {
+            "type" : "string"
+          },
+          "issuer" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "ProblemDetail" : {
+        "properties" : {
+          "detail" : {
+            "type" : "string"
+          },
+          "instance" : {
+            "format" : "uri",
+            "type" : "string"
+          },
+          "properties" : {
+            "additionalProperties" : {
+              "type" : "object"
+            },
+            "type" : "object"
+          },
+          "status" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "type" : {
+            "format" : "uri",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "WebSession" : {
+        "properties" : {
+          "attributes" : {
+            "additionalProperties" : {
+              "type" : "object"
+            },
+            "type" : "object"
+          },
+          "creationTime" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "expired" : {
+            "type" : "boolean"
+          },
+          "id" : {
+            "type" : "string"
+          },
+          "lastAccessTime" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "maxIdleTime" : {
+            "type" : "string"
+          },
+          "started" : {
+            "type" : "boolean"
+          }
+        },
+        "type" : "object"
+      }
+    }
+  },
+  "info" : {
+    "title" : "OpenAPI definition",
+    "version" : "v0"
+  },
+  "openapi" : "3.0.1",
+  "paths" : {
+    "/api/auth-info" : {
+      "get" : {
+        "operationId" : "getAuthInfo",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AuthInfoVM"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "auth-info-resource" ]
+      }
+    },
+    "/api/logout" : {
+      "post" : {
+        "operationId" : "logout",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "session",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/WebSession"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "additionalProperties" : {
+                    "type" : "string"
+                  },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "logout-resource" ]
+      }
+    },
+    "/fallback/core" : {
+      "delete" : {
+        "operationId" : "core_3",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "fallback-resource" ]
+      },
+      "get" : {
+        "operationId" : "core",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "fallback-resource" ]
+      },
+      "head" : {
+        "operationId" : "core_5",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "fallback-resource" ]
+      },
+      "options" : {
+        "operationId" : "core_6",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "fallback-resource" ]
+      },
+      "patch" : {
+        "operationId" : "core_4",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "fallback-resource" ]
+      },
+      "post" : {
+        "operationId" : "core_1",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "fallback-resource" ]
+      },
+      "put" : {
+        "operationId" : "core_2",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [ "fallback-resource" ]
+      }
+    }
+  },
+  "servers" : [ {
+    "description" : "Generated server url",
+    "url" : ""
+  } ]
+}

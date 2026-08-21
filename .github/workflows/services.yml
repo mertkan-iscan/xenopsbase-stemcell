@@ -1,0 +1,106 @@
+name: Services
+
+# Publishes the API contract and proves it is consumable.
+#
+# The build and test half is ordinary. The part that earns its place is the spec: it is generated
+# from the running application, compared against what is committed, and fed to a real generator.
+# Each of those catches something the others cannot.
+on:
+  pull_request:
+    paths:
+      - 'services/**'
+      - 'clients/**'
+      - 'docs/api/**'
+      - '.github/workflows/services.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'services/**'
+      - 'clients/**'
+      - 'docs/api/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      # Both services are reported even when one fails. Stopping at the first turns "the gateway is
+      # broken" into "something is broken", and the two are on the same Spring Boot line now, so a
+      # failure in one is frequently a failure in both.
+      fail-fast: false
+      matrix:
+        service: [core, gateway]
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          java-version: '25'
+          distribution: corretto
+          cache: maven
+
+      # Integration tests use Testcontainers, which needs a working Docker daemon. Ubuntu runners
+      # have one; this fails loudly if that ever stops being true, rather than every IT erroring
+      # with "Could not find a valid Docker environment".
+      - name: Check Docker is available
+        run: docker info > /dev/null
+
+      - name: Build and test
+        working-directory: services/${{ matrix.service }}
+        run: ./mvnw --batch-mode clean verify -DskipITs=false
+
+      # The contract, as an artifact anyone can download without building the project.
+      - name: Upload OpenAPI document
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: openapi-${{ matrix.service }}
+          path: services/${{ matrix.service }}/target/openapi/*.json
+          if-no-files-found: error
+
+      # The committed spec is what the client generator and code review both read. If it drifts
+      # from what the service actually serves, every consumer is working from a document that
+      # describes an API that no longer exists -- and nothing else would notice.
+      - name: Fail if the committed spec is stale
+        run: |
+          generated="services/${{ matrix.service }}/target/openapi/${{ matrix.service }}.json"
+          committed="docs/api/${{ matrix.service }}.json"
+          if ! diff -u "$committed" "$generated"; then
+            echo ""
+            echo "::error::docs/api/${{ matrix.service }}.json is out of date."
+            echo "Regenerate it with: make api-spec"
+            exit 1
+          fi
+
+  client:
+    name: generated client
+    runs-on: ubuntu-latest
+    # Runs regardless of the services job. A client that cannot be generated is a broken contract
+    # whether or not the services happen to be green.
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          java-version: '25'
+          distribution: corretto
+          cache: maven
+
+      # Generating is not enough -- openapi-generator will happily emit code that does not compile
+      # from a spec it only partly understands. Compiling is the assertion.
+      - name: Generate and compile the typed client
+        working-directory: clients/java
+        run: mvn --batch-mode clean compile
+
+      - name: Upload the generated client sources
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: core-api-client-sources
+          path: clients/java/target/generated-sources/openapi/src/main/java/**/*.java
+          if-no-files-found: error
