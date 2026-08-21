@@ -55,6 +55,12 @@ public class SecurityConfiguration {
                     .requestMatchers("/management/info").permitAll()
                     .requestMatchers("/management/prometheus").permitAll()
                     .requestMatchers("/management/**").hasAuthority(AuthoritiesConstants.ADMIN)
+                    // Terminal rule, for the reason spelled out in the gateway's copy of this
+                    // configuration: an unmatched request is denied, not permitted. Every path
+                    // this service currently serves is named above, so nothing changes today --
+                    // it is here so that the first path added outside those prefixes does not
+                    // come back as an unexplained 403.
+                    .anyRequest().authenticated()
             )
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             // Resource server ONLY. The core service validates the token the

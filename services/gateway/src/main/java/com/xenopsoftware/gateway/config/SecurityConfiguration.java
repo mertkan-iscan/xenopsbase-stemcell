@@ -137,6 +137,22 @@ public class SecurityConfiguration {
                     .pathMatchers("/management/info").permitAll()
                     .pathMatchers("/management/prometheus").permitAll()
                     .pathMatchers("/management/**").hasAuthority(AuthoritiesConstants.ADMIN)
+                    // The terminal rule, and NOT redundant.
+                    //
+                    // An exchange matching none of the rules above is DENIED, not permitted:
+                    // DelegatingReactiveAuthorizationManager ends its chain with
+                    // defaultIfEmpty(new AuthorizationDecision(false)). Everything outside
+                    // /api, /services, /management and /v3/api-docs fell into that gap --
+                    // including "/", which is where oauth2Login sends the browser after a
+                    // successful login.
+                    //
+                    // The two halves of that looked nothing alike. Anonymous, the denial
+                    // reaches authenticationEntryPoint and comes back as a redirect to
+                    // Keycloak, so an unauthenticated visit behaved perfectly. Authenticated,
+                    // the same denial is a real AccessDeniedException and comes back as a bare
+                    // 403 with an empty body. So logging in was what broke the page, and only
+                    // for people who had done it.
+                    .anyExchange().authenticated()
             )
             // An unauthenticated API request must fail visibly (T-3.8). Without this,
             // oauth2Login's redirecting entry point sends a 302 to the Keycloak login page, the
