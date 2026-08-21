@@ -58,7 +58,17 @@ load_balancer_type  = "lb11"
 # Terraform and kubectl reach the cluster over the tailnet.
 #
 # TF_VAR_tailscale_auth_key must be set, and must be a REUSABLE key.
-node_transport_mode       = "hetzner_private"
+#
+# This was pinned to "hetzner_private" as an escape hatch while the CCM failure
+# under tailscale was unexplained (#11). The cause is now identified and the fix
+# is in main.tf, so the hatch is closed.
+#
+# It can only be changed on a cluster that is being built from nothing. Flipping
+# it on a RUNNING cluster does not work and is not recoverable in place: the
+# firewall rules are replaced immediately -- closing 22 and 6443 -- while the
+# servers are not, so no node ever joins the tailnet and there is no longer any
+# path to the ones that are running.
+node_transport_mode       = "tailscale"
 tailscale_magicdns_domain = "tail894b71.ts.net"
 
 # firewall_source_cidrs is deliberately NOT set here. It is a home IP address

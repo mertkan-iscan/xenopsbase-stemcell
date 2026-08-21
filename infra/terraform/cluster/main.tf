@@ -52,9 +52,14 @@ locals {
   # ----------------------------------------------------------------------------
   # Restores the CCM's network awareness under tailscale (T-1.5, ADR-0006).
   #
-  # UNVERIFIED against a live cluster. Reasoning and evidence below; the apply
-  # that would settle it has not been run. Treat as a hypothesis with a citation,
-  # not as a fix.
+  # VERIFIED on a live cluster, 2026-08-21, by building dev from nothing with
+  # node_transport_mode = "tailscale". The control plane cleared
+  # node.cloudprovider.kubernetes.io/uninitialized within ~90s of the CCM
+  # starting, and the CCM assigned providerID hcloud://163008021 and an
+  # ExternalIP -- which it can only do for a node it has matched. Confirmed the
+  # mechanism rather than the outcome: HCLOUD_NETWORK was present on the
+  # deployment, sourced from the hcloud secret's `network` key, and
+  # HCLOUD_NETWORK_ROUTES_ENABLED stayed false.
   #
   # kube-hetzner v3.1.0 gates two things on two DIFFERENT conditions:
   #

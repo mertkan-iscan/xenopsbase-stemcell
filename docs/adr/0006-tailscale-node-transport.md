@@ -1,35 +1,61 @@
 # ADR-0006: Tailscale is the node transport, and the public API is closed
 
-- **Status:** Accepted — **not yet in effect**, blocked by a module limitation (see below)
+- **Status:** Accepted — **in effect** in `dev` since 2026-08-21
 - **Date:** 2026-08-19
 - **Task:** T-1.5
 
-## Implementation status, 2026-08-19
+## Implementation status, 2026-08-21
 
-The decision stands. It does not work yet.
+**In effect.** `dev` was rebuilt from nothing with `node_transport_mode = "tailscale"` and
+converged: one control plane and two agents, all `Ready`, all reachable only over the tailnet.
 
-Tailscale itself did exactly what this ADR describes: all nodes joined the tailnet with direct
-WireGuard paths, Terraform reached them by MagicDNS name, and `verify-exposure` confirmed nodes
-answered nothing on 22, 6443, 2379 or 10250 while being provisioned.
+### What blocked it, and what fixed it
 
-The cluster still failed to converge, because enabling Tailscale disables the Hetzner CCM's network
-awareness:
+Tailscale itself always did what this ADR describes. What failed was the Hetzner CCM, because
+kube-hetzner v3.1.0 gates two related things on two *different* conditions:
 
 ```
-hetzner_ccm_networking_enabled  = cluster_has_ipv4 && !cross_network_transport_enabled
-cross_network_transport_enabled = multinetwork_overlay_enabled || node_transport_tailscale_enabled
+node-ip         multinetwork_overlay_enabled
+CCM networking  cross_network_transport_enabled
+                  = multinetwork_overlay_enabled || node_transport_tailscale_enabled
 ```
 
-The CCM then cannot match the private node IP k3s advertises, so the node keeps its
-`uninitialized` taint, nothing schedules, and the agents' k3s install never runs.
+Under tailscale alone the two disagree. k3s keeps advertising the **private** address, while the
+CCM is rendered with `networking.enabled: false` and so is given no network to resolve that
+address against. It cannot match the node, never removes the `uninitialized` taint, nothing
+schedules, and the agents' k3s install never runs.
 
-`dev` therefore runs on the **escape hatch** below — `hetzner_private` with an IP allowlist — which
-is precisely the situation the hatch was written for. Tracked as a follow-up; this ADR is not
-superseded, and the escape hatch is not the decision.
+The fix is to re-enable CCM networking under tailscale
+(`ccm_restore_networking_under_tailscale`, default `true`). It is sound **only** for a cluster
+whose nodes are all on the one primary network — which is the case the module disabled it to
+protect — and a `check` block refuses the combination it is not safe for. Routes stay off;
+flannel's vxlan backend carries pod traffic.
 
-Two things this does not change: the reasoning for preferring Tailscale over an IP allowlist stands
-unaltered, and the allowlist's known weaknesses — a dynamic home IP, and CI ranges too broad to
-allowlist — are now live problems rather than hypothetical ones.
+### Evidence, not inference
+
+The taint clearing is the outcome, and an outcome can be right for the wrong reason. What was
+checked:
+
+| Claim | Evidence |
+| --- | --- |
+| The CCM has the network | `HCLOUD_NETWORK` present on the deployment, from the `hcloud` secret's `network` key |
+| Routes remained off | `HCLOUD_NETWORK_ROUTES_ENABLED=false` |
+| The CCM matched the node | `providerID: hcloud://163008021` and an `ExternalIP` — neither is set for an unmatched node |
+| Agents could then join | both workers `Ready`, which never happened under the failure |
+| Nothing is publicly exposed | `verify-exposure`: 22, 6443, 2379, 10250 all `closed` on all three nodes |
+| The firewall has no inbound path | the only inbound rule is UDP 41641, Tailscale WireGuard |
+| The jump path is real | `kubectl` reaches `https://…​.tail894b71.ts.net:6443`, and there is no public endpoint to fall back to |
+
+### The escape hatch is no longer in use
+
+`dev` ran on `hetzner_private` from 2026-08-19 to 2026-08-21. It is now on tailscale, and the
+allowlist's known weaknesses — a dynamic home IP, CI ranges too broad to allowlist — stop being
+live problems.
+
+The hatch itself stays. It was used once, for a real blocker, and removing the only recovery path
+for "Tailscale is down and the cluster must be rebuilt" would trade a fixed problem for an
+unfixable one. See *Revisit if* below: it is the *repeated* use of the hatch that would be the
+signal, and that has not happened.
 
 ## Context
 
