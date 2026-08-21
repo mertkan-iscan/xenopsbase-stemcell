@@ -222,7 +222,21 @@ public class ExceptionTranslator extends ResponseEntityExceptionHandler implemen
 
     private URI getPathValue(ServerWebExchange request) {
         if (request == null) return URI.create("about:blank");
-        return request.getRequest().getURI();
+        // The PATH, not the full request URI.
+        //
+        // getURI() is absolute in production -- "https://app-dev.example.com/thing" -- which
+        // disagreed with `instance` in the same document, where Spring puts the path, and leaked
+        // the public hostname into every error body. It also disagreed with the core service,
+        // whose servlet equivalent is getRequestURI() and was already relative.
+        //
+        // ExceptionTranslatorIT has asserted the relative form all along and still passed:
+        // WebTestClient binds straight to the application context, so the exchange it builds has
+        // no host and getURI() returns a bare path there. The assertion was right and the test
+        // could not fail on this -- it takes a real origin to tell the two apart.
+        //
+        // Query string deliberately dropped, as on the core side: it would put whatever the
+        // caller sent into an error body that gets logged and returned.
+        return URI.create(request.getRequest().getPath().value());
     }
 
     private HttpHeaders buildHeaders(Throwable err) {
