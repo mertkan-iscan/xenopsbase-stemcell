@@ -1,6 +1,36 @@
 {
   "components" : {
     "schemas" : {
+      "ContainerUsage" : {
+        "properties" : {
+          "container" : {
+            "type" : "string"
+          },
+          "cpuCores" : {
+            "format" : "double",
+            "type" : "number"
+          },
+          "cpuLimitCores" : {
+            "format" : "double",
+            "type" : "number"
+          },
+          "memoryBytes" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "memoryLimitBytes" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "namespace" : {
+            "type" : "string"
+          },
+          "pod" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "DocumentView" : {
         "properties" : {
           "contentType" : {
@@ -88,6 +118,30 @@
         ],
         "type" : "object"
       },
+      "NodeUsage" : {
+        "properties" : {
+          "cpuCores" : {
+            "format" : "double",
+            "type" : "number"
+          },
+          "cpuUsedCores" : {
+            "format" : "double",
+            "type" : "number"
+          },
+          "memoryTotalBytes" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "memoryUsedBytes" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "node" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "Pageable" : {
         "properties" : {
           "page" : {
@@ -132,6 +186,58 @@
           }
         },
         "type" : "object"
+      },
+      "Usage" : {
+        "properties" : {
+          "collectedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "containers" : {
+            "items" : {
+              "$ref" : "#/components/schemas/ContainerUsage"
+            },
+            "type" : "array"
+          },
+          "emptyQueries" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "nodes" : {
+            "items" : {
+              "$ref" : "#/components/schemas/NodeUsage"
+            },
+            "type" : "array"
+          },
+          "volumes" : {
+            "items" : {
+              "$ref" : "#/components/schemas/VolumeUsage"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "VolumeUsage" : {
+        "properties" : {
+          "capacityBytes" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "claim" : {
+            "type" : "string"
+          },
+          "namespace" : {
+            "type" : "string"
+          },
+          "usedBytes" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
       }
     }
   },
@@ -161,6 +267,26 @@
         },
         "tags" : [
           "example-item-resource"
+        ]
+      }
+    },
+    "/api/admin/infra/usage" : {
+      "get" : {
+        "operationId" : "usage",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Usage"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "infra-usage-resource"
         ]
       }
     },
