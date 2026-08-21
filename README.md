@@ -42,6 +42,31 @@ a pet**: nothing that matters may live inside it, and no state may be created by
 The payoff: **cold rebuild from nothing is the everyday path, not a rare fire drill.** The DR test
 and the deploy pipeline are the same code, exercised every time work starts.
 
+### The lifecycle is two commands
+
+```bash
+make up ENV=dev      # apply, then wait until the stack is SERVING
+make down ENV=dev    # destroy everything billable, then prove it
+```
+
+`up` does not finish when Terraform does. It waits on three gates — every node `Ready`, every Argo
+Application `Healthy`, then the public hostname answering — because the gap between "the apply
+succeeded" and "the stack works" is where the interesting failures live.
+
+`down` releases CSI volumes while the cluster can still do it, destroys, and then runs
+`verify-teardown`, which asserts both halves of the table above: the durable column survived, and
+nothing billable was orphaned.
+
+| | measured | notes |
+|---|---|---|
+| `make up`, already serving | **15s** | Idempotent. Terraform reports no changes; the gates pass in 2s. |
+| `make down` | *see T-7.2* | |
+| `make up`, from nothing | *see T-7.2* | |
+
+The two cold figures are deliberately **not** filled in from memory. [T-7.2](../../issues/54) owns
+the measured cold rebuild, and a number recorded here from a run nobody timed is worse than an
+empty cell — it would be quoted back as a capacity fact.
+
 ## Critical path
 
 ```
