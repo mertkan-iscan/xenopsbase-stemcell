@@ -35,10 +35,10 @@ images:
     # since every path core serves is named explicitly above it.
     digest: sha256:51572fef4bc4f06cdd8225c782156c3b2a98e639eb1d8d0d320fe17a402d4dee
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway
-    # Commit 16618a6 -- problem-detail `path` relative instead of an absolute
-    # URL. Follows 2381ff1 (terminal .anyExchange() rule), 491c6e6 (drop
-    # offline_access) and 065d2560 (drop `api`). All of it lives in the image,
-    # so a digest bump is what deploys it; the realm halves reach the cluster by
-    # a different route again (see docs/runbooks/authorization.md, "Applying a
-    # realm change in dev").
-    digest: sha256:9c0940005853cdf871cd9dbb60e546204182a9a19705980eed65a21e9d467300
+    # Commit 1f1758f -- keeps the public hostname out of the 404 `detail`, after
+    # 16618a6 made `path` relative. Follows 2381ff1 (terminal .anyExchange()
+    # rule), 491c6e6 (drop offline_access) and 065d2560 (drop `api`). All of it
+    # lives in the image, so a digest bump is what deploys it; the realm halves
+    # reach the cluster by a different route again (see
+    # docs/runbooks/authorization.md, "Applying a realm change in dev").
+    digest: sha256:c84836d9779f6fa5b90474df056b53c3e17acda040dcb6dc60309c14af09e04d
