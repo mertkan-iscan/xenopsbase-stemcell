@@ -73,6 +73,10 @@ Rules that are not obvious from the tree:
   [docs/runbooks/http-contract.md](../docs/runbooks/http-contract.md) before adding an endpoint --
   it is what every new one inherits for free, and re-deciding any of it per controller is how a
   consistent API stops being one.
+- **Audit, soft delete, tenancy and the outbox already have seams.** Do not invent a second way to
+  do any of them. See [docs/runbooks/extension-seams.md](../docs/runbooks/extension-seams.md) --
+  it also explains why `Document` is audited but deliberately NOT soft-deleted, which is the kind
+  of per-entity decision the seams exist to make cheap.
 - **No outbound call may wait forever.** Timeouts, circuit breakers, retries and bulkheads are a
   default posture rather than a per-call decision. See
   [docs/runbooks/resilience.md](../docs/runbooks/resilience.md) -- particularly before adding a

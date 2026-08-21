@@ -1,6 +1,8 @@
 package com.xenopsoftware.core.domain;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.SoftDelete;
+import org.hibernate.annotations.TenantId;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import java.time.Instant;
@@ -30,7 +32,14 @@ import java.time.Instant;
  */
 @Entity
 @Table(name = "example_item")
-public class ExampleItem {
+// Soft delete (T-3.10). Hibernate rewrites DELETE into UPDATE ... SET deleted = true and adds the
+// predicate to every query, so ordinary repository code needs no changes and cannot forget it --
+// which is the reason to use the mapping rather than a hand-written @Where plus @SQLDelete.
+//
+// The cost, and it is a real one: deleted rows become invisible to JPA ENTIRELY. There is no
+// "include deleted" switch. Reading them back is a native query -- see ExampleItemRepository.
+@SoftDelete(columnName = "deleted")
+public class ExampleItem extends AbstractAuditingEntity<Long> {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -43,6 +52,21 @@ public class ExampleItem {
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
+
+    /**
+     * The tenancy seam (T-3.10). Present and inert: with the default resolver every row is written
+     * as {@code default} and every query filters to {@code default}, so behaviour is unchanged.
+     *
+     * <p>Hibernate sets this on insert and adds it to every query automatically. That is the whole
+     * point of using {@code @TenantId} rather than an ordinary column: a column the application
+     * has to remember to filter by is a column that will eventually not be filtered by, and the
+     * failure mode of forgetting is one tenant reading another's data.
+     *
+     * <p>Not settable from outside. A tenant a caller can choose is not a tenant boundary.
+     */
+    @TenantId
+    @Column(name = "tenant_id", nullable = false, length = 64, updatable = false)
+    private String tenantId;
 
     public Long getId() {
         return id;
@@ -66,5 +90,10 @@ public class ExampleItem {
 
     public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
+    }
+
+    /** Read-only. Hibernate populates it from the current tenant resolver. */
+    public String getTenantId() {
+        return tenantId;
     }
 }

@@ -15,7 +15,11 @@ import java.time.Instant;
  */
 @Entity
 @Table(name = "document")
-public class Document {
+// Audited, but deliberately NOT soft-deleted. A document's bytes live in object storage, so a row
+// marked deleted while the object still exists is a leak wearing a tombstone -- it still costs
+// storage and is still readable by anyone holding a presigned URL. Deletion here has to be real.
+// See docs/runbooks/extension-seams.md.
+public class Document extends AbstractAuditingEntity<Long> {
 
     public enum Status {
         /** Row exists, object may not. The client holds a presigned URL it may never use. */
