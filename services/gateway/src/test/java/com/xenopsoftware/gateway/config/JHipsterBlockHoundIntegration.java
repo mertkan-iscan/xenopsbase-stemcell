@@ -16,38 +16,16 @@ public class JHipsterBlockHoundIntegration implements BlockHoundIntegration {
         builder.allowBlockingCallsInside("org.springdoc.core.service.OpenAPIService", "getWebhooksClasses");
         builder.allowBlockingCallsInside("org.springdoc.core.service.AbstractRequestService", "build");
 
-        // Netty's DNS resolver, reached when Lettuce opens its first connection to
-        // Valkey (T-2.11).
+        // NOTHING is allowlisted for Valkey, deliberately.
         //
-        // The blocking part is a lock inside Netty's own query-id bookkeeping
-        // (DnsQueryIdSpace.pushId parks), not I/O. It happens during CONNECTION
-        // ESTABLISHMENT, which is lazy and therefore lands on whichever request
-        // touches a session first; afterwards the connection is pooled and this is
-        // not on the path again.
+        // Two entries were tried here first -- Netty's DNS resolver and
+        // ReactiveRedisTemplate.doInConnection -- to permit the block Lettuce
+        // performs while connecting lazily inside a request. That is the wrong
+        // shape: BlockHound runs only in tests, so an allowlist entry turns the
+        // test green and leaves the same event-loop stall in production, where
+        // nothing is watching for it.
         //
-        // Allowed rather than avoided. The alternative was to hand the tests an IP
-        // instead of a hostname, which would have removed the symptom from CI while
-        // leaving it in production -- where the host genuinely is a DNS name
-        // (valkey.cache.svc.cluster.local) and BlockHound is not running to notice.
-        // An allowlist entry that says so is more honest than a green test that
-        // proves less than it appears to.
-        builder.allowBlockingCallsInside("io.netty.resolver.dns.DnsNameResolver", "doResolveAllNow");
-
-        // The same story one layer up, and the frame that actually parks.
-        //
-        // ReactiveRedisSessionRepository.saveDelta writes through
-        // ReactiveRedisTemplate.doInConnection, which blocks while Lettuce
-        // establishes the connection. Lettuce connects LAZILY, so this lands on
-        // whichever request first writes a session -- during the response commit,
-        // which is why it surfaced as a 500 from the logout endpoint and an error
-        // from a redirect rather than as anything mentioning Redis.
-        //
-        // The real fix is eager initialisation, so the connection is built at
-        // startup instead of inside a request. LettuceConnectionFactory supports
-        // it and Spring Boot exposes no property for it, so it needs a bean here
-        // rather than a line of YAML. Worth doing if this ever shows up as
-        // first-request latency in production; until then this entry keeps the
-        // detector honest about what it is permitting.
-        builder.allowBlockingCallsInside("org.springframework.data.redis.core.ReactiveRedisTemplate", "doInConnection");
+        // RedisEagerConnectionConfiguration moves the connection to startup
+        // instead, so there is no blocking call on the request path to permit.
     }
 }
