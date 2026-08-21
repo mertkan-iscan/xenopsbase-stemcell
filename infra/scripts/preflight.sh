@@ -139,6 +139,20 @@ case "$MODULE" in
       # specific than "request is not authorized".
       cf_probe_auth "https://api.cloudflare.com/client/v4/zones/$ZONE/rulesets/phases/http_request_late_transform/entrypoint" \
         "Request header transform (X-Forwarded-Port)" "Zone / Transform Rules / Edit"
+
+      # Access is ACCOUNT-scoped, not zone-scoped, so it is a different
+      # permission again from everything above. Probed only when the module
+      # will actually create an application.
+      if [ "$(tfbool "$VARS" manage_access)" = "true" ]; then
+        cf_probe "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/access/apps?per_page=1" \
+          "Access applications (manage_access = true)" "Account / Access: Apps and Policies / Edit"
+        cf_probe "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/access/service_tokens?per_page=1" \
+          "Access service tokens (manage_access = true)" "Account / Access: Service Tokens / Edit"
+        # No probe for access/organizations, deliberately. Terraform does not
+        # manage the organisation, so failing a preflight over a permission the
+        # apply never uses is the cry-wolf case cf_probe_auth exists to avoid.
+        # Listing apps and service tokens is already evidence Zero Trust works.
+      fi
     fi
     ;;
 

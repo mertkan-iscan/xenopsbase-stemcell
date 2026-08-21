@@ -289,3 +289,100 @@ resource "cloudflare_ruleset" "request_headers" {
     },
   ]
 }
+
+# ------------------------------------------------------------------------------
+# Cloudflare Access in front of the application (T-8.6, #149).
+#
+# dev is reachable from the internet, and the credentials that get past its
+# login are in this repository, which is public. That was acceptable while the
+# realm was empty and login did not work; T-3.13 made login work and put a
+# document upload behind it, and nothing announced that the premise had changed.
+#
+# Access is chosen over moving the passwords into SOPS because it touches the
+# realm not at all. Editing the realm means a KeycloakRealmImport delete and
+# re-import, which issues every user a new `sub` and orphans every document
+# owned under the old one (#147). Hiding the key would have cost the data.
+#
+# The application login page is what becomes unreachable, not Keycloak. Identity
+# stays public on its own hostname, because the OIDC flow redirects the user's
+# browser there and a challenge in that path breaks the back-channel code
+# exchange (the same reasoning as the WAF rules above).
+# ------------------------------------------------------------------------------
+
+resource "cloudflare_zero_trust_access_service_token" "automation" {
+  count = var.manage_access ? 1 : 0
+
+  account_id = var.account_id
+  name       = var.access_service_token_name
+}
+
+resource "cloudflare_zero_trust_access_application" "app" {
+  count = var.manage_access ? 1 : 0
+
+  account_id = var.account_id
+  name       = "xenopsbase-${var.environment}"
+  domain     = var.hostname
+  type       = "self_hosted"
+
+  # A day, so the team is not re-authenticating through the working session
+  # that a dev environment exists to support.
+  session_duration = "24h"
+
+  policies = [
+    {
+      id         = cloudflare_zero_trust_access_policy.team[0].id
+      precedence = 1
+    },
+    {
+      id         = cloudflare_zero_trust_access_policy.automation[0].id
+      precedence = 2
+    },
+  ]
+}
+
+resource "cloudflare_zero_trust_access_policy" "team" {
+  count = var.manage_access ? 1 : 0
+
+  account_id = var.account_id
+  name       = "xenopsbase-${var.environment} team"
+  decision   = "allow"
+
+  include = [
+    for address in var.access_allowed_emails : {
+      email = {
+        email = address
+      }
+    }
+  ]
+}
+
+resource "cloudflare_zero_trust_access_policy" "automation" {
+  count = var.manage_access ? 1 : 0
+
+  account_id = var.account_id
+  name       = "xenopsbase-${var.environment} automation"
+  decision   = "non_identity"
+
+  # Service token rather than an IP allowlist or a bypass. A bypass policy
+  # would make the endpoint public again for anyone who found the path, and CI
+  # egress addresses are far too broad to allowlist -- which is one of the
+  # reasons this project moved off an IP allowlist in ADR-0006.
+  include = [
+    {
+      service_token = {
+        token_id = cloudflare_zero_trust_access_service_token.automation[0].id
+      }
+    }
+  ]
+}
+
+# Refuses the combination that looks configured and locks everyone out: Access
+# enabled with nobody permitted. The service-token policy would still pass, so
+# CI would go on working and the failure would present as "the site asks me to
+# log in and then refuses me".
+check "access_has_someone_to_admit" {
+  assert {
+    condition     = !var.manage_access || length(var.access_allowed_emails) > 0
+    error_message = "manage_access = true with an empty access_allowed_emails admits no human. Set it in env/<environment>.secrets.tfvars."
+  }
+}

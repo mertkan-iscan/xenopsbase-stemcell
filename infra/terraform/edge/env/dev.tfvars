@@ -38,3 +38,14 @@ extra_hostnames = [
     service  = "http://ingress-nginx-controller.ingress-nginx.svc.cluster.local:80"
   },
 ]
+
+# Cloudflare Access in front of app-dev (T-8.6, #149).
+#
+# dev is internet-reachable and the credentials that get past its login are
+# published in this public repository. Access makes the login unreachable
+# without the team, and does it without editing the realm, which matters: a
+# realm edit forces a re-import that orphans every existing document (#147).
+#
+# access_allowed_emails is deliberately NOT here. It is a personal identifier
+# and this file is public; it lives in dev.secrets.tfvars.
+manage_access = true

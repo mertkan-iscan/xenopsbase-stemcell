@@ -166,3 +166,50 @@ variable "extra_hostnames" {
     error_message = "Every extra hostname must be exactly one label below the apex (two dots total); deeper names are not covered by Cloudflare's Universal SSL certificate."
   }
 }
+
+variable "manage_access" {
+  description = <<-EOT
+    Put Cloudflare Access in front of the application hostname (T-8.6, #149).
+
+    Default false. Access requires a Zero Trust organisation on the account,
+    which is a one-time dashboard step, and an application created against an
+    account that has not been onboarded fails at apply rather than at plan.
+
+    dev turns it on because dev is internet-reachable and the credentials that
+    get past its login are published in this repository. Access closes that by
+    requiring the team before the login is reachable at all, and it does so
+    without touching the realm -- which matters, because a realm edit forces a
+    delete-and-re-import that gives every user a new `sub` and orphans every
+    document owned under the old one (#147).
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "access_allowed_emails" {
+  description = <<-EOT
+    Email addresses permitted through Cloudflare Access.
+
+    Supplied from env/<environment>.secrets.tfvars, which is gitignored: this
+    is a personal identifier and this repository is public, the same reasoning
+    that keeps firewall_source_cidrs out of it.
+
+    Access authenticates these with Cloudflare's built-in one-time PIN, so no
+    identity provider has to be configured to make it work.
+  EOT
+  type        = list(string)
+  default     = []
+}
+
+variable "access_service_token_name" {
+  description = <<-EOT
+    Name of the Access service token issued for automated callers.
+
+    Exists so the smoke suite (T-5.5) can still reach dev once a human login is
+    required -- which is the acceptance criterion that stops this control from
+    quietly breaking CI. The token's client secret is written to Terraform
+    state and never to this repository.
+  EOT
+  type        = string
+  default     = "smoke-tests"
+}

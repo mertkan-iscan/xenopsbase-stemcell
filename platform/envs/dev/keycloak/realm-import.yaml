@@ -314,9 +314,32 @@ spec:
     # 403 for a client-credentials token because a service account has no user
     # profile. A relay that works for one does not prove the other.
     #
-    # The password is not a secret in any meaningful sense -- it grants access
-    # to an empty dev realm -- but it is still the kind of thing that should
-    # never appear in a staging or prod realm file.
+    # THESE CREDENTIALS ARE PUBLISHED. This repository is public, and these
+    # passwords work.
+    #
+    # That was written when it read "not a secret in any meaningful sense, it
+    # grants access to an empty dev realm". Both halves stopped being true on
+    # 2026-08-21, and nothing announced it:
+    #
+    #   - login started working. It had not, because redirect_uri, scopes and
+    #     the authorization rules were each broken in turn, so the published
+    #     passwords opened nothing.
+    #   - T-3.13 put a working document upload behind that login, so the realm
+    #     is no longer empty by design.
+    #
+    # The decision, recorded rather than assumed (#149): dev is fronted by
+    # Cloudflare Access, so reaching this login at all requires the team. The
+    # passwords stay in the clear here deliberately -- moving them into SOPS
+    # would mean editing this file, and a KeycloakRealmImport cannot update a
+    # realm in place. It is deleted and re-imported, every user gets a new
+    # `sub`, and every document owned under the old one becomes unreachable
+    # (#147). Hiding the key would have cost the data it protects.
+    #
+    # If you remove the Access policy, you are republishing working admin
+    # credentials to a system that accepts uploads. Decide that on purpose.
+    #
+    # None of this belongs in a staging or prod realm file under any
+    # circumstances.
     #
     # IMPORTED USERS GET NO DEFAULT ROLES.
     #

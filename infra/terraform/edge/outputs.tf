@@ -37,3 +37,31 @@ output "waf_managed" {
   description = "Whether the baseline WAF ruleset is applied."
   value       = var.manage_waf
 }
+
+output "access_enabled" {
+  description = "Whether Cloudflare Access fronts the application hostname."
+  value       = var.manage_access
+}
+
+output "access_service_token_client_id" {
+  description = <<-EOT
+    Client id for the Access service token, for automated callers (T-5.5).
+
+    Sent as CF-Access-Client-Id alongside CF-Access-Client-Secret. Not
+    sensitive on its own; the secret is the other half.
+  EOT
+  value       = var.manage_access ? cloudflare_zero_trust_access_service_token.automation[0].client_id : null
+}
+
+output "access_service_token_client_secret" {
+  description = <<-EOT
+    Secret half of the Access service token.
+
+    Cloudflare returns this once, at creation, and never again -- so Terraform
+    state is the only copy. Read it with `terraform output -raw`, put it
+    wherever CI keeps secrets, and do not expect to recover it from the
+    dashboard later.
+  EOT
+  value       = var.manage_access ? cloudflare_zero_trust_access_service_token.automation[0].client_secret : null
+  sensitive   = true
+}
