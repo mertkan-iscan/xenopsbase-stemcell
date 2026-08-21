@@ -14,8 +14,23 @@ resources:
 # moving tag with imagePullPolicy: IfNotPresent is the worst combination
 # available -- the node keeps whatever it cached, so two replicas can run
 # different code and nothing reports a difference.
+# Commit f586e748b3977ee3d3c9714d163bb9fa3a0019bc.
+#
+# By digest, not by tag. The paragraph above says the immutable reference is the
+# digest and this file then used `main`, which was wrong twice over:
+#
+#  - `main` moves, and with imagePullPolicy: IfNotPresent a node keeps whatever
+#    it cached, so two replicas can run different code and nothing reports it.
+#  - it did not even exist. Jib logged "Built and pushed image as
+#    .../gateway:f586e748..., .../gateway:main" and the gateway package came out
+#    with only the SHA and `latest` tags, while core got all three from the
+#    identical command. The kubelet's "not found" was the first sign.
+#
+# A digest cannot be absent, cannot move, and cannot disagree with what was
+# tested. The commit SHA is recorded above so a reader does not have to resolve
+# the digest to know which build this is.
 images:
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/core
-    newTag: main
+    digest: sha256:cd28b14ca2839066e4dbdb283aaff66a4e081e36e3f94031905eb0f9cbcee07f
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway
-    newTag: main
+    digest: sha256:fd870063bbfc1322e5ecafb3f8d8c75446dbbfacce9f4759e9ab863ddd7f7e6b
