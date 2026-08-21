@@ -37,7 +37,8 @@ images:
     # Tempo and Alloy sat healthy and empty.
     digest: sha256:f2a01356a447680d7c454308829e95e82378d7e44de85e30025312a8d1c5c9c1
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway
-    # Commit 1c81e0d -- the infrastructure dashboard, with a node column. Carries
+    # Commit 4ccd88f -- sessions in Valkey (T-2.11), so replicas are
+    # interchangeable. Carries
     # 6d965b8 (CSP without 'unsafe-inline'/'unsafe-eval'), 806e8be (logout
     # origin from the request) and f430d36.
-    digest: sha256:4c5bbb1cfdea37a266cfc111410a2cff6519bf1c207f6d049ff8163119188e58
+    digest: sha256:adff2cd919b7b4e07cd96aa4c0faabe2b35e7560dfc38894606cad64ea423556
