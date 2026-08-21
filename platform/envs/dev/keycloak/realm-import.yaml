@@ -116,7 +116,18 @@ spec:
         # code flow into an open redirect and is the single most common way an
         # OIDC setup is broken.
         redirectUris:
-          - https://app-dev.xenopsoftware.com/login/oauth2/code/keycloak
+          # The path segment is Spring's REGISTRATION ID, not the provider name.
+          # This said .../code/keycloak, a JHipster-ism: the gateway registers
+          # the provider as `oidc` (spring.security.oauth2.client.registration.oidc,
+          # and findByRegistrationId("oidc") in SecurityConfiguration), so Spring
+          # builds .../code/oidc from the {registrationId} template.
+          #
+          # Keycloak then rejects the authorization request with "Invalid
+          # parameter: redirect_uri" before any code is issued. Nothing in the
+          # cluster reports a fault -- the gateway is healthy, the realm is
+          # imported, and login simply never completes. It is only reachable
+          # from a browser, which is why it survived until the first deployment.
+          - https://app-dev.xenopsoftware.com/login/oauth2/code/oidc
         webOrigins:
           - https://app-dev.xenopsoftware.com
         # `openid` is deliberately absent: it is implicit in OIDC and is not a
