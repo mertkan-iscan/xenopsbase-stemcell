@@ -60,6 +60,15 @@ spec:
               valueFrom: {secretKeyRef: {name: documents-s3, key: AWS_SECRET_ACCESS_KEY}}
             - {name: AWS_REGION, value: fsn1}
 
+            # Traces to the Alloy collector, which batches and forwards to
+            # Tempo (T-2.7). gRPC on 4317, which is the only receiver Alloy
+            # declares; there is no HTTP receiver on 4318 to fall back to.
+            #
+            # Set here rather than defaulted in application.yml so that a
+            # laptop with no collector exports nothing instead of retrying
+            # against a closed port.
+            - {name: OTLP_TRACING_ENDPOINT, value: "http://alloy.observability.svc.cluster.local:4317"}
+
             # Set explicitly rather than relying on Spring Boot's Kubernetes
             # auto-detection. The detection works by looking for *_SERVICE_HOST
             # environment variables, so it is a heuristic -- and when it misses,

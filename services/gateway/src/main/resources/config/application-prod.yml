@@ -24,12 +24,33 @@ management:
     metrics:
       export:
         enabled: false
-  zipkin: # Use the "zipkin" Maven profile to have the Spring Cloud Zipkin dependencies
+  # Distributed tracing over OTLP (T-2.7).
+  #
+  # This block previously configured Zipkin at http://localhost:9411, paired
+  # with a `zipkin` Maven profile that was never activated. The result was a
+  # service that produced no spans at all, while Tempo and Alloy were deployed,
+  # healthy and receiving nothing -- Tempo's own API answered {"traces":[]}.
+  #
+  # The endpoint has NO default on purpose. Spring only registers an OTLP
+  # exporter when one is set, so a laptop with no collector generates spans and
+  # exports nothing, rather than retrying against a port that is not listening.
+  # The deployment supplies it; see platform/envs/dev/services/.
+  opentelemetry:
     tracing:
-      endpoint: http://localhost:9411/api/v2/spans
+      export:
+        otlp:
+          endpoint: ${OTLP_TRACING_ENDPOINT:}
+          # gRPC, not the `http` default: the Alloy receiver in this platform
+          # listens on 4317 with a grpc block only. Sending protobuf-over-HTTP
+          # to a gRPC port fails per export, in the exporter's own log, while
+          # the application stays healthy.
+          transport: grpc
   tracing:
     sampling:
-      probability: 1.0 # report 100% of traces
+      # Everything, which is right for dev and wrong for a busy production
+      # service -- overridden by TRACING_SAMPLE_PROBABILITY rather than by
+      # editing this. Boot's own default is 0.1.
+      probability: ${TRACING_SAMPLE_PROBABILITY:1.0}
 
 spring:
   devtools:

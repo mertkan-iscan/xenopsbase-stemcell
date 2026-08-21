@@ -68,6 +68,15 @@ spec:
             - name: SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_OIDC_REDIRECT_URI
               value: https://app-dev.xenopsoftware.com/login/oauth2/code/oidc
 
+            # Traces to the Alloy collector, which batches and forwards to
+            # Tempo (T-2.7). gRPC on 4317, which is the only receiver Alloy
+            # declares; there is no HTTP receiver on 4318 to fall back to.
+            #
+            # Set here rather than defaulted in application.yml so that a
+            # laptop with no collector exports nothing instead of retrying
+            # against a closed port.
+            - {name: OTLP_TRACING_ENDPOINT, value: "http://alloy.observability.svc.cluster.local:4317"}
+
             - {name: MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED, value: "true"}
           startupProbe:
             httpGet: {path: /management/health, port: http}
