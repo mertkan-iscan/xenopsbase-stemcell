@@ -175,30 +175,39 @@ spring:
   # A second replica would serve requests that land on the pod without the
   # session, signing users out at random, intermittently, with nothing logged.
   session:
-    # `none` by DEFAULT, meaning the in-memory store.
+    # There is NO spring.session.store-type in Spring Boot 4. It was removed;
+    # the store is chosen by what is on the classpath. This block first carried
+    # `store-type: ${SESSION_STORE_TYPE:none}` intending to make Redis optional,
+    # and that property is simply unknown: it bound to nothing, changed nothing,
+    # and the reactive Redis repository was used anyway.
     #
-    # A laptop has no Valkey, and defaulting to redis there would make the
-    # gateway fail to start rather than simply run single-instance. The
-    # deployment sets this to `redis` explicitly, so what is running in the
-    # cluster is visible in the manifest rather than inherited from a default.
-    store-type: ${SESSION_STORE_TYPE:none}
-    # Matches the OIDC session rather than exceeding it. A session record that
-    # outlives the tokens it holds is a record of an identity that can no longer
-    # be refreshed.
+    # It surfaced as a BlockHound failure in CI rather than as a configuration
+    # error -- ReactiveRedisTemplate resolving an empty hostname on the event
+    # loop -- which names the symptom and not the cause.
+    #
+    # So Valkey is a REQUIRED dependency of this gateway now, not an optional
+    # one. Tests get a real one from Testcontainers; the deployment points at
+    # the cluster's.
     timeout: ${SESSION_TIMEOUT:30m}
-    redis:
-      # Namespaced, so a future consumer of the same Valkey cannot collide with
-      # session keys, and so `KEYS xenopsbase:gateway:session:*` is meaningful
-      # when someone is trying to work out whether sessions are landing at all.
-      namespace: xenopsbase:gateway:session
+    data:
+      redis:
+        # spring.session.data.redis.*, not spring.session.redis.*. The latter
+        # still binds and is deprecated.
+        #
+        # Namespaced so a future consumer of the same Valkey cannot collide with
+        # session keys, and so that `KEYS xenopsbase:gateway:session:*` is a
+        # meaningful question when someone needs to know whether sessions are
+        # landing at all.
+        namespace: xenopsbase:gateway:session
 
   data:
     redis:
-      # No default host. Blank plus store-type `none` is a working laptop; blank
-      # plus store-type `redis` fails at startup, loudly, which is the correct
-      # way round. A localhost default would instead produce a gateway that
-      # starts, appears healthy, and cannot store a session.
-      host: ${VALKEY_HOST:}
+      # No default, deliberately, and no empty-string default either. An unset
+      # VALKEY_HOST fails at startup with "Could not resolve placeholder", which
+      # names the missing variable. An empty default instead produced a gateway
+      # that started, reported healthy, and blocked an event-loop thread trying
+      # to resolve "" on the first request that touched a session.
+      host: ${VALKEY_HOST}
       port: ${VALKEY_PORT:6379}
       password: ${VALKEY_PASSWORD:}
       # Bounded like every other outbound call in this service (T-3.9). An

@@ -422,6 +422,17 @@
             <artifactId>testcontainers-junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
+        <!--
+            For @ImportTestcontainers, so every integration test gets the Valkey
+            that Spring Session now requires (T-2.11). Boot 4 removed
+            spring.session.store-type, so the store is chosen by classpath and
+            there is no property that makes it optional.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
 
         <dependency>
             <groupId>org.testcontainers</groupId>
