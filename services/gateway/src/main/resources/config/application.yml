@@ -419,14 +419,30 @@ jhipster:
     # presence made the policy look as though object storage had been thought
     # about here when it had not.
     #
-    # 'unsafe-eval' is kept, reluctantly and only because T-3.13 has not chosen a
-    # framework yet. Nothing currently served needs it -- there is no frontend at
-    # all -- so drop it the moment there is a build that runs without it.
+    # No 'unsafe-inline' and no 'unsafe-eval' (T-3.14). These were JHipster's
+    # defaults, kept for one day while T-3.13 had not chosen a framework and
+    # dropping them might have broken whatever it picked.
+    #
+    # The frontend that exists needs none of them, and unlike before that is
+    # checkable rather than assumed: no inline <script> and no inline style= in
+    # index.html, no eval( and no new Function in app.js, and no build step or
+    # dependency that could reintroduce either.
+    #
+    # 'unsafe-inline' on script-src is what turns one injection point into
+    # script execution. This page holds a live session cookie and echoes back
+    # filenames chosen by whoever uploaded them. Rows are built with DOM calls
+    # precisely so a filename cannot become markup -- but that is one defence,
+    # in one function, kept correct by hand. This is the one that does not
+    # depend on remembering.
+    #
+    # Nothing else served by this chain is affected: /swagger-ui/** and the
+    # other asset paths are excluded by securityMatcher, so they never receive
+    # this header at all.
     content-security-policy: >-
       default-src 'self';
       frame-src 'self' data:;
-      script-src 'self' 'unsafe-inline' 'unsafe-eval';
-      style-src 'self' 'unsafe-inline';
+      script-src 'self';
+      style-src 'self';
       img-src 'self' data:;
       font-src 'self' data:;
       connect-src 'self' ${DOCUMENTS_PUBLIC_ENDPOINT:https://fsn1.your-objectstorage.com}
