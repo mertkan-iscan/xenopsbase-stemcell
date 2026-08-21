@@ -114,10 +114,15 @@ spec:
         serviceAccountsEnabled: true
         # WHERE KEYCLOAK MAY SEND THE BROWSER AFTER LOGOUT.
         #
-        # Unset, this is not "anywhere" and it is not "unchecked" -- it defaults
-        # to the client's redirectUris, which here is the login callback and
-        # nothing else. LogoutResource builds post_logout_redirect_uri from the
-        # request's Origin header, so it asks for
+        # Left out of this file, the client does not simply lack the setting:
+        # Keycloak creates it with the literal value `+`, which means "the same
+        # list as redirectUris". Not "anywhere", and not unchecked -- read from
+        # the running realm, the attributes were
+        #   {realm_client: 'false', post.logout.redirect.uris: '+'}
+        # so the only permitted landing place was the login callback.
+        #
+        # LogoutResource builds post_logout_redirect_uri from the request's
+        # Origin header, so it asks for
         #   https://app-dev.xenopsoftware.com
         # and Keycloak answers 400, "Invalid redirect uri".
         #
