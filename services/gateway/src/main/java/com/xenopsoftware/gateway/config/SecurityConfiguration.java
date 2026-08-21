@@ -9,6 +9,7 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import com.xenopsoftware.gateway.security.AuthoritiesConstants;
 import com.xenopsoftware.gateway.security.SecurityUtils;
 import com.xenopsoftware.gateway.security.oauth2.AudienceValidator;
+import com.xenopsoftware.gateway.web.filter.OidcAuthenticationFailureHandler;
 import com.xenopsoftware.gateway.web.filter.ProblemDetailAuthenticationEntryPoint;
 import java.time.Duration;
 import java.util.Arrays;
@@ -164,7 +165,16 @@ public class SecurityConfiguration {
             // by path, because the frontend and the API share the /api prefix and it is the
             // CALLER's expectation that decides which answer is useful.
             .exceptionHandling(e -> e.authenticationEntryPoint(authenticationEntryPoint()))
-            .oauth2Login(oauth2 -> oauth2.authorizationRequestResolver(authorizationRequestResolver(this.clientRegistrationRepository)))
+            // The failure handler is explicit because the default is wrong for this application
+            // (T-3.17). Spring sends a failed login to /login?error, and there is no /login here
+            // -- no controller, no route, no static file -- so a stale authorization request came
+            // back as a 404 naming a missing static resource, one hop from the authentication
+            // error that actually caused it.
+            .oauth2Login(oauth2 ->
+                oauth2
+                    .authorizationRequestResolver(authorizationRequestResolver(this.clientRegistrationRepository))
+                    .authenticationFailureHandler(new OidcAuthenticationFailureHandler())
+            )
             .oauth2Client(withDefaults())
             .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())));
         return http.build();
