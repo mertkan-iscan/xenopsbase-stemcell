@@ -153,13 +153,37 @@ line, so an unvalidated value is a log-forging vector — a newline in it writes
 string in XML and a constant in Java; renaming one without the other produces logs that look
 completely normal and are missing the id. That is the failure to watch for.
 
-## Known gaps
+### Reaching traces as well as logs
 
-**Correlation reaches logs, not traces.** The criterion asks for both. Tempo and the OTel
-collector are T-2.7 (#21) and are not deployed, so there are no traces to correlate with yet. When
-they land, the correlation id and the W3C `traceparent` should both appear on a log line — they
+A log line carries `requestId`, `traceId` and `spanId` together, so getting from a log line to its
+trace is one hop. The other direction needs the id on the span itself, and it is there:
+
+```
+request.id                   a high-cardinality span attribute, both services
+```
+
+`CorrelationIdObservationFilter` tags the server observation. It does not call
+`Span.current().setAttribute()`, and the reason matters: the correlation id is assigned at
+`HIGHEST_PRECEDENCE` so that every log line is correlated, which places it *ahead* of the
+observation that creates the server span. An attribute set there lands on an invalid span and is
+discarded without an error.
+
+The value is read from the **response** header, not the request. The response header is set on
+every path, including the two that matter most — a request that arrived with no id, and one whose
+id failed validation and was replaced. The inbound header is absent or wrong in exactly those
+cases, and it is the response value the caller actually receives and would quote.
+
+**High cardinality is not a detail here.** Micrometer sends low-cardinality key values to metrics
+as well as spans. A unique-per-request value as a metric tag mints a Prometheus time series for
+every request the system serves — not a degradation but an outage of the metrics stack, arriving
+hours later and looking like a Prometheus fault. A test asserts the key value is not
+low-cardinality, because nothing else would notice in time.
+
+`request.id` and the W3C `traceparent` both survive rather than one replacing the other. They
 answer different questions and have different lifetimes, and a sampled-out trace still needs a
 correlation id in its logs.
+
+## Known gaps
 
 **Nothing reaps `idempotency_record`.** Rows accumulate. As with the abandoned-upload reaper in
 document storage, scheduling is a deployment decision: a `@Scheduled` baked into the template runs
