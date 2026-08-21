@@ -38,6 +38,18 @@ spec:
           mounts:
             varlog: true
 
+          # Where the services send spans (T-2.7). A list, not a map, so unlike
+          # the Tempo chart's receivers this replaces rather than merges.
+          #
+          # The chart adds these to the container AND to the Service, which is
+          # what makes otelcol.receiver.otlp below reachable at
+          # alloy.observability.svc:4317.
+          extraPorts:
+            - name: otlp-grpc
+              port: 4317
+              targetPort: 4317
+              protocol: TCP
+
           # Clustering off: each instance handles its own node's files, so there
           # is nothing to distribute and the gossip traffic buys nothing.
           clustering:
@@ -93,6 +105,50 @@ spec:
               loki.write "default" {
                 endpoint {
                   url = "http://loki.observability.svc.cluster.local:3100/loki/api/v1/push"
+                }
+              }
+
+              // ---- Traces (T-2.7) ----
+              //
+              // This is the OTel Collector the ticket asks for. Alloy IS one --
+              // it speaks OTLP natively and is the supported successor to the
+              // Grafana Agent -- so a separate collector would be a second
+              // workload doing the same job, on a cluster where one worker is
+              // already at 82% of its memory limits, and a second place a
+              // pipeline can be misconfigured.
+              //
+              // Reached through the Service rather than the node-local pod.
+              // Alloy is a DaemonSet, so the Service round-robins across nodes
+              // and spans of one trace can land on different instances. That is
+              // fine: Tempo assembles a trace from spans by trace ID, not by
+              // who delivered them.
+              otelcol.receiver.otlp "default" {
+                grpc {
+                  endpoint = "0.0.0.0:4317"
+                }
+
+                output {
+                  traces = [otelcol.processor.batch.default.input]
+                }
+              }
+
+              // Batching is not an optimisation here, it is what keeps a burst
+              // of spans from becoming a request per span to Tempo.
+              otelcol.processor.batch "default" {
+                output {
+                  traces = [otelcol.exporter.otlp.tempo.input]
+                }
+              }
+
+              otelcol.exporter.otlp "tempo" {
+                client {
+                  endpoint = "tempo.observability.svc.cluster.local:4317"
+                  // Plaintext inside the cluster. Tempo terminates no TLS and
+                  // this hop does not leave the pod network; `insecure` here
+                  // means "do not attempt TLS", not "skip verification".
+                  tls {
+                    insecure = true
+                  }
                 }
               }
   destination:
