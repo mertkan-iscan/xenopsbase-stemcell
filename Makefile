@@ -68,6 +68,11 @@ AUTO        ?= 0
 # Pass EXPECT_WEB=expect-web to verify-exposure once an ingress controller
 # exists (T-2.2), to require 80/443 to answer rather than merely tolerate them.
 EXPECT_WEB  ?=
+
+# How long `make up` waits for the stack to become SERVING, not merely applied.
+# Generous: a cold build provisions three nodes, converges thirteen Argo
+# applications and recovers Postgres from object storage.
+UP_TIMEOUT  ?= 1200
 ifeq ($(AUTO),1)
 APPROVE := -auto-approve -input=false
 else
@@ -279,6 +284,47 @@ api-client: ## Generate the typed Java client from the committed spec and compil
 # Cluster (ephemeral, per environment)
 # ------------------------------------------------------------------------------
 
+# ------------------------------------------------------------------------------
+# One-command lifecycle (T-1.7)
+#
+# The near-zero-when-idle promise in ADR-0002 only holds if tearing down and
+# rebuilding are each one command. Anything longer is a thing people stop doing,
+# and a cluster nobody destroys is a cluster that bills all month.
+# ------------------------------------------------------------------------------
+
+.PHONY: up
+up: ## Nothing to a serving stack, one command (T-1.7)
+	@start=$$(date +%s); \
+	set -e; \
+	$(MAKE) --no-print-directory cluster-init ENV=$(ENV); \
+	attempt=1; \
+	until $(MAKE) --no-print-directory cluster-apply ENV=$(ENV) AUTO=1; do \
+	  if [ $$attempt -ge 3 ]; then \
+	    echo ""; \
+	    echo "cluster-apply failed $$attempt times. Not a transient fault; read the error above."; \
+	    exit 1; \
+	  fi; \
+	  echo ""; \
+	  echo "cluster-apply failed (attempt $$attempt). Retrying."; \
+	  echo "  Provisioning fetches the k3s installer over the internet, and that"; \
+	  echo "  has returned 504 mid-build. Terraform apply is idempotent, so a"; \
+	  echo "  retry continues rather than restarting. A REAL error fails again"; \
+	  echo "  the same way and stops after three."; \
+	  attempt=$$((attempt + 1)); \
+	  sleep 20; \
+	done; \
+	$(MAKE) --no-print-directory kubeconfig ENV=$(ENV); \
+	bash $(SCRIPTS)/wait-for-stack.sh $(ENV) $(UP_TIMEOUT); \
+	echo ""; \
+	echo "make up ENV=$(ENV) completed in $$(( $$(date +%s) - start ))s"
+
+.PHONY: down
+down: ## Destroy every billable resource, one command, and prove it
+	@start=$$(date +%s); \
+	set -e; \
+	$(MAKE) --no-print-directory cluster-destroy ENV=$(ENV) AUTO=1; \
+	echo ""; \
+	echo "make down ENV=$(ENV) completed in $$(( $$(date +%s) - start ))s"
 .PHONY: snapshot
 snapshot: ## Build the OS snapshot kube-hetzner provisions nodes from (once per project)
 	@bash $(SCRIPTS)/build-snapshot.sh

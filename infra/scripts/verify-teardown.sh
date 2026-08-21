@@ -82,7 +82,14 @@ echo "=================================================================="
 echo " MUST BE GONE  (anything still here bills forever)"
 echo "=================================================================="
 
-for kind in server volume load-balancer placement-group; do
+# primary-ip and floating-ip are in this list for a reason that is easy to miss:
+# Hetzner bills an IPv4 address while it is UNASSIGNED, so the one that outlives
+# its server is the one that costs money silently. A primary IP left behind is
+# cheaper than an orphaned volume and just as permanent.
+#
+# Networks and firewalls are deliberately absent: they are free, and failing a
+# teardown check over something that costs nothing trains people to ignore it.
+for kind in server volume load-balancer placement-group primary-ip floating-ip; do
   n=$(count_hcloud "$kind")
   printf '  %-30s %s\n' "${kind}s" "$n"
   if [ "$n" -ne 0 ]; then
