@@ -198,23 +198,17 @@ spring:
               filters:
                 # /services/core/api/x  ->  /api/x
                 - StripPrefix=2
-                # Because StripPrefix is not visible downstream.
+                # NO X-Forwarded-Prefix filter here, deliberately.
                 #
-                # Core builds its pagination Link headers with
-                # ServletUriComponentsBuilder.fromCurrentRequest(), so they described
-                # the request CORE received: <https://core/api/documents?page=1>. The
-                # in-cluster service name, and core's own path rather than the one the
-                # browser used. Unreachable from a browser, wrong by two segments, and
-                # it published the internal topology to every API client.
+                # Spring Cloud Gateway's XForwardedHeadersFilter already derives the
+                # prefix from StripPrefix and sends it. Setting one as a route filter as
+                # well produced BOTH, and core concatenated them:
+                #   /services/core/services/core/api/documents
+                # A link that 404s is not obviously better than the one it replaced.
                 #
-                # Nothing upstream of a browser could see it. Core's own integration
-                # tests call core directly, where that URL is exactly right.
-                #
-                # SetRequestHeader, NOT AddRequestHeader. AddRequestHeader appends, so a
-                # client sending its own X-Forwarded-Prefix would sit FIRST in the list,
-                # and ForwardedHeaderFilter takes the first value -- letting a caller
-                # choose the host and path in links the server hands out. Set replaces.
-                - SetRequestHeader=X-Forwarded-Prefix, /services/core
+                # What core needs to make use of it is forward-headers-strategy:
+                # framework, which is set in the core service's application.yml. That
+                # was the entire missing half.
                 # Trips before a failing downstream can exhaust the gateway (T-3.9).
                 # The fallback turns an open circuit into a 503 problem document
                 # rather than the generic error page Spring would otherwise return.

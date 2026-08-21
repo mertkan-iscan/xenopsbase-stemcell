@@ -248,6 +248,37 @@ resource "cloudflare_ruleset" "request_headers" {
             operation = "set"
             value     = "443"
           }
+
+          # Overwritten from the real Host, never taken from the caller.
+          #
+          # Nothing in the chain was replacing this, so a client could send
+          # X-Forwarded-Host and choose the origin the application put in the
+          # absolute URLs it hands out. Verified: a request carrying
+          # `X-Forwarded-Host: evil.example.com` came back with pagination Link
+          # headers pointing at https://evil.example.com/... . Whoever follows
+          # those links has been redirected by the caller, using the server's own
+          # response as the vehicle.
+          #
+          # ingress-nginx does not help here. use-forwarded-headers is on, which
+          # is what makes it adopt the X-Forwarded-Port above, and adopting means
+          # trusting the incoming value for this header too.
+          "X-Forwarded-Host" = {
+            operation  = "set"
+            expression = "http.host"
+          }
+
+          # Stripped, not set. Only Spring Cloud Gateway knows what prefix it
+          # removed, and it states it on the internal hop; there is no correct
+          # value to put here, and any value from the caller is wrong.
+          #
+          # Left alone, this reaches the gateway, whose own forwarded-header
+          # handling applies it BEFORE route predicates run -- so
+          # `X-Forwarded-Prefix: /injected` moved every path out from under
+          # `Path=/services/core/**` and the gateway stopped routing to core at
+          # all. A caller could turn routing off from outside.
+          "X-Forwarded-Prefix" = {
+            operation = "remove"
+          }
         }
       }
       # Scoped to this module's hostnames, like the WAF rules above. A zone-wide
