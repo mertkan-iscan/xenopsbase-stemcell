@@ -32,6 +32,17 @@ management:
   # exporter when one is set, so a laptop with no collector generates spans and
   # exports nothing, rather than retrying against a port that is not listening.
   # The deployment supplies it; see platform/envs/dev/services/.
+  # Metrics do NOT go over OTLP here; Prometheus scrapes them.
+  #
+  # spring-boot-starter-opentelemetry brings micrometer-registry-otlp, which
+  # turns OTLP metrics export on by default and aims it at
+  # http://localhost:4318/v1/metrics. Nothing listens there, and Alloy's
+  # pipeline handles traces only, so the effect was a stack trace once a minute
+  # in every pod, for metrics that already reach Prometheus another way.
+  otlp:
+    metrics:
+      export:
+        enabled: false
   opentelemetry:
     tracing:
       export:
