@@ -291,6 +291,28 @@ spec:
     # The password is not a secret in any meaningful sense -- it grants access
     # to an empty dev realm -- but it is still the kind of thing that should
     # never appear in a staging or prod realm file.
+    #
+    # IMPORTED USERS GET NO DEFAULT ROLES.
+    #
+    # Not a consequence of naming realmRoles below -- the importer never grants
+    # them at all. It calls addUser(..., addDefaultRoles = false) so that the
+    # representation is the whole truth, which means default-roles-<realm> is
+    # absent and so is everything it composes: offline_access, uma_authorization
+    # and the account client roles.
+    #
+    # So realmRoles here is not "these in addition to the usual ones", it is
+    # the COMPLETE set. Anything Keycloak would normally hand a user created
+    # through the console or a self-registration is simply missing, and nothing
+    # says so -- the user exists, logs in, and gets a token.
+    #
+    # It surfaces as a capability that fails at the point of use rather than at
+    # login. Asking for an offline token was the first instance: the gateway
+    # requested offline_access, the client had the scope, the authorization
+    # request succeeded, and Keycloak refused at the token endpoint with
+    # "Offline tokens not allowed for the user or client" because the USER had
+    # no offline_access role. The gateway no longer asks (see application.yml),
+    # so nothing here needs that role -- but add it explicitly, or add
+    # default-roles-xenopsbase, before relying on anything that does.
     users:
       - username: smoke
         enabled: true

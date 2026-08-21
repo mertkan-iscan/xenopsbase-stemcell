@@ -282,10 +282,37 @@ spring:
             # Never defaulted. A gateway that starts with a placeholder secret
             # is a gateway that authenticates against nothing and looks fine.
             client-secret: ${OIDC_CLIENT_SECRET}
-            # offline_access is what makes the refresh-token filter useful.
-            # It is an OPTIONAL client scope, so the realm has to ASSIGN it --
-            # see optionalClientScopes on the gateway client in the realm
-            # import. Requesting it is only half of it.
+            # offline_access is NOT requested, and the claim that it "makes
+            # the refresh-token filter useful" was wrong twice over.
+            #
+            # It does not do that. OAuth2ReactiveRefreshTokensWebFilter goes
+            # through ReactiveOAuth2AuthorizedClientManager, which refreshes
+            # with the ORDINARY refresh token the authorization-code flow
+            # already returns. offline_access buys nothing there.
+            #
+            # What it actually asks for is an OFFLINE token: a refresh token
+            # that outlives the SSO session and survives logout, meant for
+            # daemons acting for an absent user. This gateway holds a browser
+            # session, so that is the wrong shape and a real downgrade -- it
+            # would quietly undo accessTokenLifespan and the ssoSession bounds
+            # the realm sets, and blunt the reasoning in T-3.5 that a relayed
+            # access token is only useful for as long as it lives.
+            #
+            # It also could not have worked. Keycloak refuses to mint an
+            # offline token unless the USER holds the offline_access realm
+            # role, and imported users hold no default roles at all: the
+            # importer calls addUser(..., addDefaultRoles = false), so
+            # default-roles-<realm>, which is what normally carries it, is
+            # never granted. The client-scope half was assigned and the
+            # authorization request passed; the token exchange then failed with
+            #   CODE_TO_TOKEN_ERROR ... "Offline tokens not allowed for the
+            #   user or client"
+            # which is a Keycloak event-log line and nothing else -- Spring
+            # reports it to the browser as a bare redirect to /login?error.
+            #
+            # The client keeps offline_access in its optionalClientScopes. That
+            # assignment is correct on its own terms and costs nothing; this is
+            # about not ASKING for it.
             #
             # `api` is gone. The comment here said the realm defines it for
             # reaching the core service; the realm does not define it at all,
@@ -300,7 +327,7 @@ spring:
             # realm_access.roles (app-user / app-admin) and the audience by the
             # client's own protocol mapper, which was moved off this scope
             # precisely because the import dropped the scope's mappers.
-            scope: openid, profile, email, offline_access
+            scope: openid, profile, email
   task:
     execution:
       thread-name-prefix: gateway-task-
