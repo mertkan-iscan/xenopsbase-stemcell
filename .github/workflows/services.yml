@@ -43,6 +43,21 @@ jobs:
           java-version: '25'
           distribution: corretto
           cache: maven
+          # Per-service cache key, and this is a fix rather than tidying.
+          #
+          # setup-java derives the key from the hashed dependency files, which
+          # defaulted to **/pom.xml -- identical for every job in this workflow.
+          # GitHub Actions keeps the FIRST save under a key and rejects the
+          # rest, so the `generated client` job, which finishes about two
+          # minutes earlier and resolves far fewer artifacts, persisted its
+          # ~/.m2 as the cache for all of them.
+          #
+          # Measured: the shared cache was 28 MB, and every core and gateway run
+          # restored it, reported "Cache hit", and then downloaded the whole
+          # Spring Boot dependency tree anyway. Caching that always hits and
+          # rarely helps is worse than none, because the hit is what stops
+          # anyone looking.
+          cache-dependency-path: services/${{ matrix.service }}/pom.xml
 
       # Integration tests use Testcontainers, which needs a working Docker daemon. Ubuntu runners
       # have one; this fails loudly if that ever stops being true, rather than every IT erroring
@@ -103,14 +118,34 @@ jobs:
           java-version: '25'
           distribution: corretto
           cache: maven
+          # Scoped to this service, so the publish job reuses the cache its own
+          # build job populated rather than another job's.
+          cache-dependency-path: services/${{ matrix.service }}/pom.xml
 
       # Jib talks to the registry directly and never builds a local image, so
       # there is no docker build, no daemon, and no Dockerfile to keep in step
       # with the application (T-6.1).
+      # The version comes from the pom, not from the workflow, so the image tag
+      # and the artifact it contains cannot disagree. A version written in two
+      # places is a version that will eventually be wrong in one of them.
+      - name: Read the project version
+        id: version
+        working-directory: services/${{ matrix.service }}
+        run: |
+          version="$(./mvnw --batch-mode --quiet -DforceStdout help:evaluate -Dexpression=project.version | tail -1 | tr -d '[:space:]')"
+          case "$version" in
+            ''|*[!0-9A-Za-z._-]*)
+              echo "::error::project.version is empty or not usable as an image tag: '$version'"
+              exit 1
+              ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "project version: $version"
+
       - name: Build and push to GHCR
         working-directory: services/${{ matrix.service }}
         run: |
-          ./mvnw --batch-mode -DskipTests package jib:build             -Djib.to.image=ghcr.io/${{ github.repository }}/${{ matrix.service }}             -Djib.to.tags=${{ github.sha }},main             -Djib.to.auth.username=${{ github.actor }}             -Djib.to.auth.password=${{ secrets.GITHUB_TOKEN }}
+          ./mvnw --batch-mode -DskipTests package jib:build             -Djib.to.image=ghcr.io/${{ github.repository }}/${{ matrix.service }}             -Djib.to.tags=${{ github.sha }},${{ steps.version.outputs.version }},main             -Djib.to.auth.username=${{ github.actor }}             -Djib.to.auth.password=${{ secrets.GITHUB_TOKEN }}
 
       # Printed so the digest is in the log of the run that produced it. The
       # immutable reference for a deployment is the digest, not either tag:
@@ -120,8 +155,9 @@ jobs:
         run: |
           echo "### ${{ matrix.service }}" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "image:  ghcr.io/${{ github.repository }}/${{ matrix.service }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "tag:    ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "image:   ghcr.io/${{ github.repository }}/${{ matrix.service }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "sha:     ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "version: ${{ steps.version.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
           echo "digest: $(cat target/jib-image.digest)" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
@@ -138,6 +174,11 @@ jobs:
           java-version: '25'
           distribution: corretto
           cache: maven
+          # clients/java only. Same reason as the service jobs below: without a
+          # distinct dependency path this job shares one cache key with them,
+          # and being the fastest it wins the race to save -- persisting its own
+          # small ~/.m2 as "the" cache for everyone.
+          cache-dependency-path: clients/java/pom.xml
 
       # Generating is not enough -- openapi-generator will happily emit code that does not compile
       # from a spec it only partly understands. Compiling is the assertion.
