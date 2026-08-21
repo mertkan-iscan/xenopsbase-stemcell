@@ -68,6 +68,25 @@ tfbool() {
 }
 
 # $1 url, $2 description, $3 permission to name if it fails
+# Fails ONLY on an authorization error, not on "not found".
+#
+# Needed for an endpoint that legitimately 404s before the first apply. A plain
+# cf_probe there would report a missing permission the token already has, and a
+# preflight that cries wolf is one people learn to skip.
+#
+# $1 url, $2 description, $3 permission to name if it fails
+cf_probe_auth() {
+  local url="$1" what="$2" permission="$3"
+  local body
+  body="$(curl -s -H "Authorization: Bearer ${TF_VAR_cloudflare_api_token}" "$url" || true)"
+
+  if printf '%s' "$body" | grep -qiE 'not authorized|Authentication error|Invalid request headers'; then
+    bad "$what" "add to the token: $permission"
+  else
+    pass "$what"
+  fi
+}
+
 cf_probe() {
   local url="$1" what="$2" permission="$3"
   local body
@@ -112,6 +131,14 @@ case "$MODULE" in
         cf_probe "https://api.cloudflare.com/client/v4/zones/$ZONE/rulesets" \
           "WAF rulesets (manage_waf = true)" "Zone / Zone WAF / Edit"
       fi
+
+      # A SEPARATE permission from Zone WAF, despite both being rulesets on the
+      # same zone. Zone WAF covers http_request_firewall_custom; the transform
+      # phases need Transform Rules. The token had the first and not the second,
+      # so `terraform plan` was clean and the apply failed with nothing more
+      # specific than "request is not authorized".
+      cf_probe_auth "https://api.cloudflare.com/client/v4/zones/$ZONE/rulesets/phases/http_request_late_transform/entrypoint" \
+        "Request header transform (X-Forwarded-Port)" "Zone / Transform Rules / Edit"
     fi
     ;;
 

@@ -50,11 +50,6 @@ spec:
             # rate limiting see the actual visitor rather than a pod IP.
             compute-full-forwarded-for: "true"
             proxy-real-ip-cidr: "10.0.0.0/8"
-            # See platform/envs/dev/ingress/forwarded-headers.yaml. nginx
-            # listens on 80 behind the tunnel, so it reports X-Forwarded-Port: 80
-            # alongside X-Forwarded-Proto: https -- a pair describing no real
-            # endpoint, which breaks every absolute URL an upstream builds.
-            proxy-set-headers: "ingress-nginx/custom-forwarded-headers"
   destination:
     server: https://kubernetes.default.svc
     namespace: ingress-nginx

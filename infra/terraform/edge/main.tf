@@ -192,3 +192,69 @@ resource "cloudflare_ruleset" "waf" {
     },
   ]
 }
+
+# ------------------------------------------------------------------------------
+# Request header transform: tell the origin what port the public endpoint is on.
+#
+# TLS terminates here, and the tunnel delivers plain HTTP to ingress-nginx, which
+# therefore listens on 80 and reports X-Forwarded-Port from its own $server_port.
+# The origin was being told:
+#
+#     X-Forwarded-Proto: https
+#     X-Forwarded-Port:  80
+#
+# which describes no endpoint that exists. Spring believes both and builds
+# absolute URLs as https://host:80/..., because 80 is not the default port for
+# https and so gets rendered. Keycloak matches redirect_uri by exact string, so
+# every OIDC login was rejected with "Invalid parameter: redirect_uri" while the
+# gateway, the realm, the ingress and the tunnel all reported healthy.
+#
+# WHY HERE AND NOT AT THE INGRESS
+#
+# Cloudflare is the only component that knows the public port, so this is the
+# only layer that can state it truthfully rather than infer it.
+#
+# The obvious in-cluster fixes were tried and measured against a header echo
+# behind the same ingress:
+#
+#   - ingress-nginx proxy-set-headers APPENDS rather than replaces. Setting
+#     X-Forwarded-Port there produced "80, 443", and every consumer takes the
+#     first value, so it changed nothing.
+#   - a configuration-snippet annotation could replace it, but snippets are
+#     disabled by default in current ingress-nginx precisely because they let
+#     any namespace holding Ingress permission inject arbitrary nginx config.
+#
+# The same echo proved the remaining half: with use-forwarded-headers, nginx
+# DOES adopt an incoming X-Forwarded-Port. Sending 443 from here yields 443 at
+# the origin. That is what this rule does.
+#
+# It also fixes every other absolute URL the origin builds -- logout redirects,
+# links in mail -- not only the OIDC one, which a per-application override would
+# have left broken.
+# ------------------------------------------------------------------------------
+
+resource "cloudflare_ruleset" "request_headers" {
+  zone_id = var.zone_id
+  name    = "xenopsbase-${var.environment} forwarded headers"
+  kind    = "zone"
+  phase   = "http_request_late_transform"
+
+  rules = [
+    {
+      action = "rewrite"
+      action_parameters = {
+        headers = {
+          "X-Forwarded-Port" = {
+            operation = "set"
+            value     = "443"
+          }
+        }
+      }
+      # Scoped to this module's hostnames, like the WAF rules above. A zone-wide
+      # header rewrite would apply to anything else living in the zone.
+      expression  = "(${local.waf_all_hosts})"
+      description = "state the real public port for xenopsbase ${var.environment} origins"
+      enabled     = true
+    },
+  ]
+}
