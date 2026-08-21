@@ -63,6 +63,19 @@
         <spotless-maven-plugin.version>3.8.0</spotless-maven-plugin.version>
         <spring-cloud-dependencies.version>2025.0.0</spring-cloud-dependencies.version>
         <spring.profiles.active>dev</spring.profiles.active>
+        <!--
+            2.x, and NOT 3.x, however much it looks like it should match core.
+
+            This service runs Spring Boot 3.5 / Framework 6.2, because Spring Cloud Gateway has no
+            Boot 4 release yet. core runs Boot 4 / Framework 7. springdoc 3.x is built against
+            Framework 7 and needs org.springframework.web.reactive.accept.ApiVersionStrategy, which
+            does not exist here. The context then fails to start with a NoClassDefFoundError buried
+            under a @ConditionalOnMissingBean deduction failure, which reads as a springdoc bug
+            rather than as a version mismatch.
+
+            Verified by trying it; OpenApiSpecIT is what caught it. Do not align these versions
+            without also moving this service to Boot 4. See issue #144.
+        -->
         <springdoc-openapi-starter-webflux-api.version>2.8.15</springdoc-openapi-starter-webflux-api.version>
     </properties>
 
