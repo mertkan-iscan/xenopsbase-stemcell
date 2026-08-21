@@ -112,6 +112,27 @@ spec:
         standardFlowEnabled: true
         directAccessGrantsEnabled: false
         serviceAccountsEnabled: true
+        # WHERE KEYCLOAK MAY SEND THE BROWSER AFTER LOGOUT.
+        #
+        # Unset, this is not "anywhere" and it is not "unchecked" -- it defaults
+        # to the client's redirectUris, which here is the login callback and
+        # nothing else. LogoutResource builds post_logout_redirect_uri from the
+        # request's Origin header, so it asks for
+        #   https://app-dev.xenopsoftware.com
+        # and Keycloak answers 400, "Invalid redirect uri".
+        #
+        # Every earlier step of the logout works, which is what makes it read as
+        # a Keycloak fault rather than a missing registration: the gateway
+        # session IS invalidated before the browser is sent here, so the user is
+        # locally logged out and then shown an error page. Only the SSO session
+        # survives.
+        #
+        # The origin, exactly, with no path and no wildcard. Landing on "/" with
+        # no session means the gateway redirects to Keycloak, which no longer has
+        # an SSO session either, so the login form is the signed-out state.
+        attributes:
+          post.logout.redirect.uris: https://app-dev.xenopsoftware.com
+
         # Deliberately narrow. A wildcard redirect URI turns the authorization
         # code flow into an open redirect and is the single most common way an
         # OIDC setup is broken.
