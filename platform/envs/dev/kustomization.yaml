@@ -19,7 +19,6 @@ resources:
   - apps/kube-prometheus-stack.yaml
   - apps/observability-config.yaml
   - apps/loki.yaml
-  - apps/tempo.yaml
   - apps/alloy.yaml
   - apps/services.yaml
   - issuers/letsencrypt.yaml

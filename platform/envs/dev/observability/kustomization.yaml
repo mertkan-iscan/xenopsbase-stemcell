@@ -4,3 +4,4 @@ kind: Kustomization
 resources:
   - alerts-backups.yaml
   - dashboard-platform.yaml
+  - tempo.yaml

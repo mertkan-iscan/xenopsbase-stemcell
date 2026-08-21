@@ -1,0 +1,175 @@
+# Tempo: trace storage, with blocks in object storage so traces outlive the
+# cluster.
+#
+# WRITTEN OUT RATHER THAN INSTALLED FROM A CHART.
+#
+# Every Tempo Helm chart Grafana publishes is deprecated -- both `tempo` and
+# `tempo-distributed` carry `deprecated: true` in the index. alloy.yaml already
+# refuses Promtail on exactly that reasoning ("adopting something already
+# scheduled for removal"), and the argument does not change because the chart is
+# convenient.
+#
+# Two things made the chart unusable rather than merely unfashionable:
+#
+#   - Its receiver set cannot be narrowed. _ports.tpl dereferences
+#     .Values.tempo.receivers.jaeger.protocols.thrift_compact with no nil guard,
+#     so removing the Jaeger receivers fails template rendering outright. The
+#     Jaeger, OpenCensus and Zipkin listeners are not optional in that chart.
+#   - Helm deep merges maps, so omitting a receiver key inherits it rather than
+#     dropping it. The first deploy here listed otlp alone and came up still
+#     serving Jaeger on four ports.
+#
+# The result is ~90 lines that this repository owns, against a dependency that
+# will not be updated again. It does break the convention that platform/ holds
+# charts for off-the-shelf infrastructure -- that convention exists because
+# charts are maintained upstream, which this one no longer is.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tempo
+  namespace: observability
+  labels: {app.kubernetes.io/name: tempo, app.kubernetes.io/part-of: xenopsbase}
+data:
+  tempo.yaml: |
+    multitenancy_enabled: false
+
+    # Off. Tempo reports usage statistics to Grafana by default, from a cluster
+    # whose whole point is that it can be rebuilt and thrown away.
+    usage_report:
+      reporting_enabled: false
+
+    server:
+      http_listen_port: 3200
+
+    distributor:
+      receivers:
+        # OTLP gRPC and nothing else. Alloy is the only sender, and it forwards
+        # over gRPC. Every other protocol would be a listener accepting spans
+        # from anything that can reach the pod, and unauthenticated span
+        # ingestion fills a bucket someone else pays for.
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+
+    ingester:
+      # Cut a block every five minutes rather than the default thirty. The WAL
+      # is an emptyDir here, so this bounds what a restart can lose.
+      max_block_duration: 5m
+
+    compactor:
+      compaction:
+        # The SAME 7 days as the bucket lifecycle rule in
+        # infra/lifecycle/tempo-traces.json. If Tempo kept blocks longer than
+        # the bucket does, queries would return a trace ID and then fail to
+        # fetch it, because S3 expired the object the index still points at.
+        # These two numbers have to move together.
+        block_retention: 168h
+
+    storage:
+      trace:
+        backend: s3
+        s3:
+          bucket: xenopsbase-dev-tempo-traces
+          # NO SCHEME. Tempo takes a bare host and decides TLS from `insecure`
+          # below -- unlike Loki in this same stack, which takes a full https://
+          # URL. A scheme here yields a hostname that does not resolve, and the
+          # error names DNS rather than configuration.
+          endpoint: fsn1.your-objectstorage.com
+          region: fsn1
+          insecure: false
+          # Hetzner needs path-style addressing. Virtual-host style turns the
+          # bucket into a subdomain that does not exist, which again reads as a
+          # DNS fault.
+          forcepathstyle: true
+          # No access_key/secret_key: values here would sit in this ConfigMap in
+          # plaintext. Tempo's S3 client falls back to AWS_ACCESS_KEY_ID and
+          # AWS_SECRET_ACCESS_KEY from the environment, supplied by the secret
+          # referenced in the StatefulSet.
+        wal:
+          path: /var/tempo/wal
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: tempo
+  namespace: observability
+  labels: {app.kubernetes.io/name: tempo, app.kubernetes.io/part-of: xenopsbase}
+spec:
+  replicas: 1
+  serviceName: tempo
+  selector:
+    matchLabels: {app.kubernetes.io/name: tempo}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: tempo, app.kubernetes.io/part-of: xenopsbase}
+      annotations:
+        # Restarts the pod when the config changes. A ConfigMap update does not
+        # roll a StatefulSet by itself, which is how the deprecated chart came
+        # to serve a configuration that no longer matched what was committed.
+        checksum/config: "otlp-grpc-only-s3-168h-v1"
+    spec:
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: tempo
+          image: docker.io/grafana/tempo:2.9.0
+          args: ["-config.file=/conf/tempo.yaml"]
+          ports:
+            - {name: http, containerPort: 3200}
+            - {name: otlp-grpc, containerPort: 4317}
+          # The observability access key, from the SAME secret Loki uses rather
+          # than a copy. The bucket policy on tempo-traces already names that key
+          # because the bucket is declared with owner = access_keys.observability,
+          # and a second SOPS secret holding the same credential is a second
+          # value that can drift from the first.
+          envFrom:
+            - secretRef: {name: loki-s3}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /ready, port: http}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 512Mi}
+          volumeMounts:
+            - {name: config, mountPath: /conf}
+            # readOnlyRootFilesystem means every path Tempo writes to needs a
+            # volume. /var/tempo holds the WAL and compactor scratch; the durable
+            # copy is the bucket, so a restart loses at most the spans not yet
+            # flushed into a block.
+            - {name: data, mountPath: /var/tempo}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: config
+          configMap: {name: tempo}
+        - name: data
+          emptyDir: {sizeLimit: 2Gi}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo
+  namespace: observability
+  labels: {app.kubernetes.io/name: tempo}
+spec:
+  selector: {app.kubernetes.io/name: tempo}
+  ports:
+    # Query API and /ready, which is what Grafana's datasource talks to.
+    - {name: http, port: 3200, targetPort: http}
+    # Where Alloy forwards spans.
+    - {name: otlp-grpc, port: 4317, targetPort: otlp-grpc}
