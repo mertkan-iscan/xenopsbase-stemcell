@@ -10,7 +10,17 @@ metadata:
   namespace: apps
   labels: {app.kubernetes.io/name: gateway, app.kubernetes.io/part-of: xenopsbase}
 spec:
-  replicas: 1
+  # TWO, and this is the change the whole of T-2.11 was for.
+  #
+  # It was 1 because the session lived in the pod's heap, so a second replica
+  # served requests that landed on the wrong one and signed people out at
+  # random. With the session in Valkey the replicas are interchangeable, which
+  # is what "stateless" has to mean before it means anything.
+  #
+  # Two is also what makes a rollout survivable: the old pod keeps serving while
+  # the new one starts, instead of every logged-in user being dropped on every
+  # deploy.
+  replicas: 2
   selector:
     matchLabels: {app.kubernetes.io/name: gateway}
   template:
@@ -76,6 +86,15 @@ spec:
             # laptop with no collector exports nothing instead of retrying
             # against a closed port.
             - {name: OTLP_TRACING_ENDPOINT, value: "http://alloy.observability.svc.cluster.local:4317"}
+
+            # Sessions in Valkey rather than in this pod's heap (ADR-0009).
+            # Set explicitly rather than defaulted in application.yml, so what
+            # runs in the cluster is visible here; the default is `none`, which
+            # is an in-memory store and correct for a laptop with no Valkey.
+            - {name: SESSION_STORE_TYPE, value: redis}
+            - {name: VALKEY_HOST, value: valkey.cache.svc.cluster.local}
+            - name: VALKEY_PASSWORD
+              valueFrom: {secretKeyRef: {name: valkey-client, key: password}}
 
             - {name: MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED, value: "true"}
           startupProbe:

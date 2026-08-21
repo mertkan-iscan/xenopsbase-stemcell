@@ -167,6 +167,35 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-opentelemetry</artifactId>
         </dependency>
+        <!--
+            Session storage in Valkey (T-2.11, ADR-0009).
+
+            This gateway is a backend-for-frontend: a confidential OIDC client
+            that holds the session and relays the token downstream. Spring's
+            default for that shape is WebSessionServerOAuth2AuthorizedClientRepository
+            over an InMemoryWebSessionStore, so the access and refresh tokens
+            lived in one JVM's heap.
+
+            That made `replicas: 1` load-bearing rather than a sizing choice. A
+            second replica serves requests that land on the pod without the
+            session, so users are signed out at random: intermittently,
+            unreproducibly, and with nothing logged. The single-replica version
+            was already visible: every rollout ended every logged-in session.
+
+            The reactive starter as well as the session one, because this is
+            WebFlux. With only the servlet stack on the classpath Spring
+            Session configures a blocking repository that the reactive session
+            machinery never consults, and sessions stay in memory while
+            everything looks configured.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-session-data-redis</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis-reactive</artifactId>
+        </dependency>
         <dependency>
             <groupId>io.opentelemetry</groupId>
             <artifactId>opentelemetry-exporter-otlp</artifactId>

@@ -165,6 +165,47 @@ spring:
     context-propagation: auto
   application:
     name: gateway
+
+  # Session storage (T-2.11, ADR-0009).
+  #
+  # This gateway is a backend-for-frontend: it holds the OIDC session and relays
+  # the access token downstream. Spring's default keeps that in an
+  # InMemoryWebSessionStore, which puts the access and refresh tokens in one
+  # JVM's heap and makes `replicas: 1` load-bearing rather than a sizing choice.
+  # A second replica would serve requests that land on the pod without the
+  # session, signing users out at random, intermittently, with nothing logged.
+  session:
+    # `none` by DEFAULT, meaning the in-memory store.
+    #
+    # A laptop has no Valkey, and defaulting to redis there would make the
+    # gateway fail to start rather than simply run single-instance. The
+    # deployment sets this to `redis` explicitly, so what is running in the
+    # cluster is visible in the manifest rather than inherited from a default.
+    store-type: ${SESSION_STORE_TYPE:none}
+    # Matches the OIDC session rather than exceeding it. A session record that
+    # outlives the tokens it holds is a record of an identity that can no longer
+    # be refreshed.
+    timeout: ${SESSION_TIMEOUT:30m}
+    redis:
+      # Namespaced, so a future consumer of the same Valkey cannot collide with
+      # session keys, and so `KEYS xenopsbase:gateway:session:*` is meaningful
+      # when someone is trying to work out whether sessions are landing at all.
+      namespace: xenopsbase:gateway:session
+
+  data:
+    redis:
+      # No default host. Blank plus store-type `none` is a working laptop; blank
+      # plus store-type `redis` fails at startup, loudly, which is the correct
+      # way round. A localhost default would instead produce a gateway that
+      # starts, appears healthy, and cannot store a session.
+      host: ${VALKEY_HOST:}
+      port: ${VALKEY_PORT:6379}
+      password: ${VALKEY_PASSWORD:}
+      # Bounded like every other outbound call in this service (T-3.9). An
+      # unreachable session store must fail the request, not hold the thread.
+      timeout: 2s
+      connect-timeout: 2s
+
   cloud:
     gateway:
       server:
