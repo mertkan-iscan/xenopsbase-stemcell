@@ -31,13 +31,13 @@ resources:
 # two no longer move together.
 images:
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/core
-    # Commit 5b4d627 -- forward-headers-strategy: framework, in every profile.
-    # Core builds absolute URLs (pagination Link headers) and is only ever
-    # reached through the gateway, so those have to come from the forwarded
-    # headers or they name the in-cluster Service.
-    digest: sha256:b435a3cdad73f32e686c4372da79473c1b5b88b48f3440b2b98133ffbf561c15
+    # Commit 331636e -- exports traces over OTLP (T-2.7). Replaces the
+    # generator's Zipkin config, which pointed at localhost:9411 behind an
+    # inactive Maven profile, so the service emitted no spans at all while
+    # Tempo and Alloy sat healthy and empty.
+    digest: sha256:de9c8d898450b76f79207efa00095f21bf692e6c857f9ad1c553d872ff338b32
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway
-    # Commit 6d965b8 -- CSP drops 'unsafe-inline' and 'unsafe-eval' (T-3.14),
-    # now that the T-3.13 frontend demonstrates nothing needs them. Follows
-    # 806e8be (logout origin derived from the request) and f430d36.
-    digest: sha256:56a7aec718243bcd62ee17e6cd0f14bda855aeb2d121ea558f28ea54ecb74982
+    # Commit 331636e -- exports traces over OTLP (T-2.7). Carries forward
+    # 6d965b8 (CSP without 'unsafe-inline'/'unsafe-eval'), 806e8be (logout
+    # origin from the request) and f430d36.
+    digest: sha256:982d6fbb4b6335b8ced73d63be6f7463519e7b8ef770ea8131f58d2c316c0bd4
