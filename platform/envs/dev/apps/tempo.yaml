@@ -123,3 +123,11 @@ spec:
           # through its own datasource, so it would be a second pod serving a
           # second UI nobody opens.
           enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
