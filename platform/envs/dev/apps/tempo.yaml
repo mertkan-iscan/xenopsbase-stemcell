@@ -57,15 +57,32 @@ spec:
           # to fetch it. The two numbers have to be changed together.
           retention: 168h
 
-          # OTLP only.
+          # OTLP gRPC only -- and the nulls are what does it.
           #
-          # The chart's default also opens Jaeger (four ports), OpenCensus and
-          # OTLP HTTP. Nothing here speaks them: Alloy forwards over OTLP gRPC
-          # and the services export to Alloy. Every other listener is a port
-          # accepting spans from anything that can reach the pod.
+          # Helm DEEP MERGES maps, so naming only `otlp` here does not replace
+          # the chart's receiver set, it merges into it. Everything omitted is
+          # kept. Verified the hard way: the first deploy of this file listed
+          # otlp alone and Tempo still logged
+          #   Starting UDP server for Binary Thrift  endpoint=0.0.0.0:6832
+          #   Starting gRPC server for Jaeger Protobuf endpoint=0.0.0.0:14250
+          # An explicit null is the only way to take a default key away.
+          #
+          # Worth removing rather than ignoring: nothing here speaks Jaeger,
+          # OpenCensus or Zipkin. Alloy forwards over OTLP gRPC and the services
+          # export to Alloy. Each of the others is a listener accepting spans
+          # from anything that can reach the pod, and unauthenticated span
+          # ingestion is a way to fill a bucket someone else pays for.
+          #
+          # Note the chart's Service still publishes every receiver port from
+          # _ports.tpl regardless of this. Those now point at nothing listening,
+          # which is the right way round.
           receivers:
+            jaeger: null
+            opencensus: null
+            zipkin: null
             otlp:
               protocols:
+                # http deliberately absent, for the same reason.
                 grpc:
                   endpoint: 0.0.0.0:4317
 
