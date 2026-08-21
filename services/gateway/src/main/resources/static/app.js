@@ -482,13 +482,10 @@ function renderContainers(containers) {
     const row = document.createElement("tr");
 
     const node = document.createElement("td");
+    // The API only returns containers whose pod kube-state-metrics still knows
+    // about, so this should always be set. Rendered defensively anyway: a dash
+    // is a better answer than the string "undefined" if that ever stops holding.
     node.textContent = c.node || "—";
-    if (!c.node) {
-      // A pod can have cAdvisor series before kube-state-metrics has reported
-      // where it is. That is a gap in the join, not a container running nowhere.
-      node.title = "placement not reported yet";
-      node.className = "muted";
-    }
 
     const ns = document.createElement("td");
     ns.textContent = c.namespace;

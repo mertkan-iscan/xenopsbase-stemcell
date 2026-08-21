@@ -191,16 +191,35 @@ public class InfraUsageService {
             if (parts.length < 3) {
                 continue;
             }
+
+            // kube_pod_info is the authority on what EXISTS; cAdvisor is only the
+            // authority on what it last measured. Those disagree for several
+            // minutes after a pod is deleted, because cAdvisor keeps serving the
+            // dead container's last values while kube-state-metrics drops it
+            // immediately.
+            //
+            // Observed: after one rollout the table listed four `apps` containers
+            // -- the two running and the two just replaced -- and the terminated
+            // pair still reported memory, so they sorted near the top of a list
+            // ordered by consumption. A usage view that shows containers which no
+            // longer exist is worse than one that briefly omits a new one.
+            //
+            // The risk of trusting kube_pod_info this way is that a failure of THAT
+            // query would empty the table. It cannot do so silently: a query
+            // matching nothing is reported in emptyQueries, and the page says so
+            // instead of rendering an empty dashboard.
+            String node = podNode.get(parts[0] + "/" + parts[1]);
+            if (node == null) {
+                continue;
+            }
+
             containers.put(
                 key,
                 new ContainerUsage(
                     parts[0],
                     parts[1],
                     parts[2],
-                    // Empty rather than null when unknown: a pod that has just been
-                    // scheduled can have cAdvisor series before kube-state-metrics
-                    // has caught up, and that is a gap in the join, not an error.
-                    podNode.getOrDefault(parts[0] + "/" + parts[1], ""),
+                    node,
                     cpu.get(key),
                     asLong(memory.get(key)),
                     cpuLimit.get(key),
