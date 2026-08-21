@@ -1,6 +1,5 @@
 package com.xenopsoftware.core.service.infra;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.xenopsoftware.core.config.ApplicationProperties;
 import java.time.Duration;
 import java.time.Instant;
@@ -13,6 +12,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
+// tools.jackson, NOT com.fasterxml.jackson. Both are on the classpath -- Jackson 2
+// arrives through the AWS SDK and the OpenAPI tooling, Jackson 3 is what Spring
+// Boot 4 registers its HTTP message converters with.
+//
+// Importing the wrong one COMPILES, because the class is present, and then fails
+// at runtime on the first call with:
+//
+//   Type definition error: [simple type, class com.fasterxml.jackson.databind.JsonNode]
+//
+// which names a type rather than the mistake.
+import tools.jackson.databind.JsonNode;
 
 /**
  * Reads container, volume and node usage out of Prometheus (T-3.16).
