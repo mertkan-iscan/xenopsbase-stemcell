@@ -24,6 +24,21 @@
         -->
         <maven.version>3.2.5</maven.version>
         <java.version>25</java.version>
+        <!--
+            The Maven-standard reproducible-build timestamp. Without it,
+            spring-boot:build-info writes a wall-clock build.time into
+            META-INF/build-info.properties, that file lands in an image layer,
+            and two builds of the same commit produce different image digests.
+
+            That was measured, not assumed: with only Jib's creationTime pinned,
+            two consecutive builds of an unchanged tree gave config digests
+            7f68d680... and 9fded033....
+
+            Maven also uses this to normalise entry timestamps inside the jar,
+            so it fixes the archive and the image together. Bump it when
+            releasing; release tooling is expected to own it.
+        -->
+        <project.build.outputTimestamp>2026-08-21T00:00:00Z</project.build.outputTimestamp>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <maven.build.timestamp.format>yyyyMMddHHmmss</maven.build.timestamp.format>
@@ -42,7 +57,14 @@
         <jacoco-maven-plugin.version>0.8.15</jacoco-maven-plugin.version>
         <jhipster-framework.version>9.1.0</jhipster-framework.version>
         <jib-maven-plugin.architecture>amd64</jib-maven-plugin.architecture>
-        <jib-maven-plugin.image>eclipse-temurin:25-jre-noble</jib-maven-plugin.image>
+        <!--
+            Pinned by digest, not by tag. T-6.1 requires that the same commit
+            produces the same image digest; a floating tag breaks that on the
+            day upstream republishes it, and the resulting difference is
+            invisible in the diff. Resolved from eclipse-temurin:25-jre-noble.
+            Update deliberately, the same way a dependency version is updated.
+        -->
+        <jib-maven-plugin.image>eclipse-temurin@sha256:1a99f30a84d58729f1184c1c693f25fb6f91970ddf05395515540bc5773b8edd</jib-maven-plugin.image>
         <jib-maven-plugin.version>3.5.1</jib-maven-plugin.version>
         <lifecycle-mapping.version>1.0.0</lifecycle-mapping.version>
         <mapstruct.version>1.6.3</mapstruct.version>
@@ -752,30 +774,37 @@
                             <image>core:latest</image>
                         </to>
                         <container>
-                            <entrypoint>
-                                <shell>bash</shell>
-                                <option>-c</option>
-                                <arg>/entrypoint.sh</arg>
-                            </entrypoint>
+                            <!--
+                                No custom entrypoint. The generated configuration ran
+                                `bash -c /entrypoint.sh` and mounted it from
+                                src/main/docker/jib, a directory that was removed with the
+                                rest of the generator in T-3.4 and is not in this repository.
+
+                                Jib builds that image quite happily. The container then dies
+                                on start with "No such file or directory", so the first sign
+                                of it is a CrashLoopBackOff in a cluster, not a build failure.
+
+                                JibSpringBootExtension writes the correct entrypoint for a
+                                Spring Boot application on its own, which is what it is for.
+                            -->
                             <ports>
                                 <port>8081</port>
                             </ports>
                             <environment>
                                 <SPRING_OUTPUT_ANSI_ENABLED>ALWAYS</SPRING_OUTPUT_ANSI_ENABLED>
-                                <JHIPSTER_SLEEP>0</JHIPSTER_SLEEP>
                             </environment>
-                            <creationTime>USE_CURRENT_TIMESTAMP</creationTime>
+                            <!--
+                                EPOCH, not USE_CURRENT_TIMESTAMP. The generated
+                                value stamps the build time into the image config, so two
+                                builds of the same commit produce different digests and
+                                "reproducible" is false by construction (T-6.1).
+
+                                The cost is that `docker images` reports the creation date as
+                                1970, which is the conventional trade for reproducibility.
+                            -->
+                            <creationTime>EPOCH</creationTime>
                             <user>1000</user>
                         </container>
-                        <extraDirectories>
-                            <paths>src/main/docker/jib</paths>
-                            <permissions>
-                                <permission>
-                                    <file>/entrypoint.sh</file>
-                                    <mode>755</mode>
-                                </permission>
-                            </permissions>
-                        </extraDirectories>
                         <pluginExtensions>
                             <pluginExtension>
                                 <implementation>com.google.cloud.tools.jib.maven.extension.springboot.JibSpringBootExtension</implementation>
