@@ -38,3 +38,12 @@ kind: Namespace
 metadata:
   name: database
   labels: {app.kubernetes.io/managed-by: argocd}
+---
+# The two application services (T-6.1). Separated from the platform namespaces
+# above rather than sharing `default`, so a NetworkPolicy or resource quota can
+# name what is ours without also naming everything Kubernetes puts in default.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: apps
+  labels: {app.kubernetes.io/managed-by: argocd}

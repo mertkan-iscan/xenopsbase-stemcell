@@ -1,0 +1,106 @@
+# The core service: Spring Boot on Postgres, documents on object storage.
+#
+# Not exposed through the ingress. Everything public enters through the gateway,
+# which is what holds the session and relays the token (T-3.5). A second public
+# entry point straight to core would be an unauthenticated one.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: core
+  namespace: apps
+  labels: {app.kubernetes.io/name: core, app.kubernetes.io/part-of: xenopsbase}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: core}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: core, app.kubernetes.io/part-of: xenopsbase}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: core
+          # Pinned by digest at deploy time, not by a moving tag. See the
+          # kustomization in this directory for how the value is set.
+          image: ghcr.io/mertkan-iscan/xenopsbase-stemcell/core:main
+          imagePullPolicy: IfNotPresent
+          ports:
+            - {name: http, containerPort: 8081}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          env:
+            - {name: SPRING_PROFILES_ACTIVE, value: prod}
+
+            # Flyway runs at startup and the schema is validated against the
+            # entities (T-3.6a), so a drifted image fails here rather than on
+            # the first query that touches a missing column.
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://postgres-rw.database.svc.cluster.local:5432/core
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom: {secretKeyRef: {name: core-db, key: username}}
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom: {secretKeyRef: {name: core-db, key: password}}
+
+            # No default anywhere for these two, deliberately (T-3.7): a wrong
+            # default writes documents into another environment's bucket and
+            # nothing reports an error.
+            - {name: DOCUMENTS_BUCKET, value: xenopsbase-dev-documents}
+            - {name: DOCUMENTS_ENDPOINT, value: https://fsn1.your-objectstorage.com}
+
+            # The AWS SDK reads these from the environment by its own default
+            # provider chain, which is why they are named this way and not
+            # mapped into application.yml.
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom: {secretKeyRef: {name: documents-s3, key: AWS_ACCESS_KEY_ID}}
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom: {secretKeyRef: {name: documents-s3, key: AWS_SECRET_ACCESS_KEY}}
+            - {name: AWS_REGION, value: fsn1}
+
+            # Set explicitly rather than relying on Spring Boot's Kubernetes
+            # auto-detection. The detection works by looking for *_SERVICE_HOST
+            # environment variables, so it is a heuristic -- and when it misses,
+            # the probe paths below 404 and the pod never becomes ready, which
+            # reads as an application failure.
+            - {name: MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED, value: "true"}
+          startupProbe:
+            # Generous, because this is the probe that covers Flyway. A slow
+            # migration is not a failure, but a liveness probe cannot tell the
+            # difference -- so startupProbe holds the others off instead of
+            # restarting a pod midway through a schema change.
+            httpGet: {path: /management/health, port: http}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /management/health/readiness, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /management/health/liveness, port: http}
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 200m, memory: 768Mi}
+            limits: {memory: 1Gi}
+          volumeMounts:
+            # readOnlyRootFilesystem is on, and the JVM still needs somewhere to
+            # write. /tmp is used for multipart staging and JVM scratch files.
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: core
+  namespace: apps
+  labels: {app.kubernetes.io/name: core}
+spec:
+  # Named `core` on port 8081 because that is what the gateway's CORE_URI
+  # defaults to. Renaming either without the other produces a 503 on a real
+  # request rather than a startup failure.
+  selector: {app.kubernetes.io/name: core}
+  ports:
+    - {name: http, port: 8081, targetPort: http}

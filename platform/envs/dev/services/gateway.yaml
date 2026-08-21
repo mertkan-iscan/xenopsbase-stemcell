@@ -1,0 +1,108 @@
+# The gateway: the only public entry point to the application.
+#
+# It holds the browser session, performs the OIDC authorization-code flow
+# against Keycloak, and relays the access token downstream (T-3.5). Core is
+# reachable only through it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: apps
+  labels: {app.kubernetes.io/name: gateway, app.kubernetes.io/part-of: xenopsbase}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: gateway}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: gateway, app.kubernetes.io/part-of: xenopsbase}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: gateway
+          image: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway:main
+          imagePullPolicy: IfNotPresent
+          ports:
+            - {name: http, containerPort: 8080}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          env:
+            - {name: SPRING_PROFILES_ACTIVE, value: prod}
+
+            # The PUBLIC issuer, not a cluster-internal address. The login flow
+            # redirects the user's BROWSER to Keycloak, and a browser cannot
+            # resolve a .svc.cluster.local name. It must also match the issuer
+            # Keycloak advertises, or token validation fails after a login that
+            # otherwise appeared to work.
+            - {name: OIDC_ISSUER_URI, value: https://auth-dev.xenopsoftware.com/realms/xenopsbase}
+            - {name: OIDC_CLIENT_ID, value: gateway}
+            - name: OIDC_CLIENT_SECRET
+              # Key name differs from the env var on purpose: this is the same
+              # secret the realm import consumes, mirrored into this namespace
+              # rather than duplicated with a second value that could drift.
+              valueFrom: {secretKeyRef: {name: gateway-oidc, key: GATEWAY_CLIENT_SECRET}}
+
+            - {name: MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED, value: "true"}
+          startupProbe:
+            httpGet: {path: /management/health, port: http}
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: {path: /management/health/readiness, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /management/health/liveness, port: http}
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 200m, memory: 512Mi}
+            limits: {memory: 768Mi}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: apps
+  labels: {app.kubernetes.io/name: gateway}
+spec:
+  selector: {app.kubernetes.io/name: gateway}
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+---
+# app-dev.xenopsoftware.com terminates here.
+#
+# The tunnel delivers every hostname to the same ingress controller, which
+# routes by Host header -- so this needs no load balancer and no second tunnel,
+# exactly as Keycloak's ingress does.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gateway
+  namespace: apps
+  annotations:
+    # Document uploads go straight to object storage from the browser, so the
+    # bytes do not pass through here (T-3.7). This bound is for ordinary API
+    # requests; leaving it at nginx's 1m default would still be enough, but a
+    # stated limit is better than an inherited one.
+    nginx.ingress.kubernetes.io/proxy-body-size: "8m"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: app-dev.xenopsoftware.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway
+                port:
+                  number: 8080

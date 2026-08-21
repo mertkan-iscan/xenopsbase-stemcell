@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The two application services. Everything else under platform/ is off-the-shelf
+# infrastructure; this is the part that is ours.
+resources:
+  - core.yaml
+  - gateway.yaml
+
+# Images are pinned here rather than in the Deployments, so a deploy is a
+# one-line commit and `git log` on this file is the deployment history.
+#
+# The `main` tag in the Deployment is a placeholder that this overrides. A
+# moving tag with imagePullPolicy: IfNotPresent is the worst combination
+# available -- the node keeps whatever it cached, so two replicas can run
+# different code and nothing reports a difference.
+images:
+  - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/core
+    newTag: main
+  - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway
+    newTag: main

@@ -1,0 +1,33 @@
+# The gateway and core service.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: services
+  namespace: argocd
+  annotations:
+    # Wave 4: after Postgres (2) and Keycloak (3). Core validates its schema
+    # against the database at startup and the gateway resolves the OIDC issuer
+    # metadata from Keycloak, so starting either earlier just produces a
+    # crash loop until its dependency arrives.
+    argocd.argoproj.io/sync-wave: "4"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mertkan-iscan/xenopsbase-stemcell.git
+    targetRevision: main
+    path: platform/envs/dev/services
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: apps
+  syncPolicy:
+    automated:
+      # prune: true, unlike the database and Keycloak. These are stateless --
+      # deleting a Deployment from git should remove it, and there is nothing
+      # here whose loss is not recoverable by a sync.
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
