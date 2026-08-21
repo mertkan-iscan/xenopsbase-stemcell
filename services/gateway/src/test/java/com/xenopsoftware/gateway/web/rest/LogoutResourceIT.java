@@ -52,22 +52,37 @@ class LogoutResourceIT {
         this.webTestClient = WebTestClient.bindToApplicationContext(this.context).apply(springSecurity()).configureClient().build();
     }
 
-    @Test
-    void getLogoutInformation() {
-        final String ORIGIN_URL = "http://localhost:8080";
-        String logoutUrl = this.registrations
+    private static final String ORIGIN_URL = "http://localhost:8080";
+
+    private String expectedLogoutUrl() {
+        String endSession = this.registrations
             .findByRegistrationId("oidc")
             .map(oidc -> oidc.getProviderDetails().getConfigurationMetadata().get("end_session_endpoint").toString())
             .block();
-        logoutUrl = logoutUrl + "?id_token_hint=" + ID_TOKEN + "&post_logout_redirect_uri=" + ORIGIN_URL;
+        return endSession + "?id_token_hint=" + ID_TOKEN + "&post_logout_redirect_uri=" + ORIGIN_URL;
+    }
+
+    /**
+     * NO Origin header, deliberately.
+     *
+     * <p>This used to send one, and passing meant only that the header had been echoed back.
+     * Without it the endpoint returned {@code post_logout_redirect_uri=null} -- the literal
+     * string -- and Keycloak rejected it with the same "Invalid redirect uri" a missing
+     * registration produces, one hop from the gateway that built it.
+     *
+     * <p>A browser always sends Origin on a POST, so no browser could reach the broken path.
+     * Everything else does: the generated client in T-3.11, the smoke suite in T-5.5, any
+     * scripted teardown. Sending the header here reproduced the one case that already worked.
+     */
+    @Test
+    void getLogoutInformationWithoutAnOriginHeader() {
         this.webTestClient
             .mutateWith(csrf())
             .mutateWith(
                 mockAuthentication(registerAuthenticationToken(authorizedClientService, clientRegistration, authenticationToken(claims)))
             )
             .post()
-            .uri("http://localhost:8080/api/logout")
-            .header(HttpHeaders.ORIGIN, ORIGIN_URL)
+            .uri(ORIGIN_URL + "/api/logout")
             .exchange()
             .expectStatus()
             .isOk()
@@ -75,6 +90,33 @@ class LogoutResourceIT {
             .contentType(MediaType.APPLICATION_JSON_VALUE)
             .expectBody()
             .jsonPath("$.logoutUrl")
-            .isEqualTo(logoutUrl);
+            .isEqualTo(expectedLogoutUrl());
+    }
+
+    /**
+     * The caller does not get to choose where logout lands.
+     *
+     * <p>The redirect target is now derived from the request rather than read from the header,
+     * so an Origin the caller invented is ignored. Asserting that it is ignored, rather than
+     * merely that the happy path works, is what stops the header being reintroduced as a
+     * convenience later: post_logout_redirect_uri is a value Keycloak will redirect a browser
+     * to, and letting a caller supply it is the shape of an open redirect.
+     */
+    @Test
+    void ignoresAnOriginSuppliedByTheCaller() {
+        this.webTestClient
+            .mutateWith(csrf())
+            .mutateWith(
+                mockAuthentication(registerAuthenticationToken(authorizedClientService, clientRegistration, authenticationToken(claims)))
+            )
+            .post()
+            .uri(ORIGIN_URL + "/api/logout")
+            .header(HttpHeaders.ORIGIN, "https://attacker.example.com")
+            .exchange()
+            .expectStatus()
+            .isOk()
+            .expectBody()
+            .jsonPath("$.logoutUrl")
+            .isEqualTo(expectedLogoutUrl());
     }
 }
