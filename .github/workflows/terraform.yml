@@ -316,6 +316,39 @@ jobs:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
 
+      # Same reconstruction the plan job does, and for the same reason: the
+      # *.secrets.tfvars files are gitignored, so the runner rebuilds the
+      # non-sensitive half from repository secrets.
+      #
+      # Absent here until now, which means this job had never once succeeded.
+      # `apply` is workflow_dispatch only, so no push and no PR ever exercised
+      # it, and the first real dispatch died on "No value for required variable"
+      # for account_id and zone_id. It died safely -- variables resolve before
+      # any provider call, so the state lock was taken and released with no plan
+      # and no change.
+      - name: Write per-environment secrets tfvars
+        working-directory: infra/terraform/${{ inputs.module }}
+        run: |
+          case "${{ inputs.module }}" in
+            storage)
+              cat > "env/${ENVIRONMENT}.secrets.tfvars" <<EOF
+          project_id = "${{ secrets.HETZNER_PROJECT_ID }}"
+          access_keys = {
+            infra         = "${{ secrets.HETZNER_KEY_INFRA }}"
+            app           = "${{ secrets.HETZNER_KEY_APP }}"
+            db            = "${{ secrets.HETZNER_KEY_DB }}"
+            observability = "${{ secrets.HETZNER_KEY_OBS }}"
+          }
+          EOF
+              ;;
+            edge)
+              cat > "env/${ENVIRONMENT}.secrets.tfvars" <<EOF
+          account_id = "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}"
+          zone_id    = "${{ secrets.CLOUDFLARE_ZONE_ID }}"
+          EOF
+              ;;
+          esac
+
       - name: terraform init and apply
         working-directory: infra/terraform/${{ inputs.module }}
         run: |
@@ -331,5 +364,11 @@ jobs:
           esac
           terraform init -input=false -reconfigure \
             -backend-config=backend.hcl -backend-config="key=${KEY}"
+          # Deliberately not the plan job's "[ -f x ] && EXTRA=..." one-liner:
+          # as the last command of a "set -e" step, a false test exits 1.
+          EXTRA=""
+          if [ -f "env/${ENVIRONMENT}.secrets.tfvars" ]; then
+            EXTRA="-var-file=env/${ENVIRONMENT}.secrets.tfvars"
+          fi
           terraform apply -auto-approve -input=false -lock-timeout=5m \
-            -var-file="env/${ENVIRONMENT}.tfvars"
+            -var-file="env/${ENVIRONMENT}.tfvars" $EXTRA
