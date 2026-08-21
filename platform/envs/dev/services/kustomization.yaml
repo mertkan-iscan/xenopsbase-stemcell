@@ -37,8 +37,7 @@ images:
     # headers or they name the in-cluster Service.
     digest: sha256:b435a3cdad73f32e686c4372da79473c1b5b88b48f3440b2b98133ffbf561c15
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway
-    # Commit 806e8be -- logout derives its redirect target from the request
-    # instead of the Origin header, which was absent for every non-browser
-    # caller and produced post_logout_redirect_uri=null. Carries the T-3.13
-    # frontend from 5b4d627 and the forwarded-prefix correction from f430d36.
-    digest: sha256:f751480768735bca1df623a92db2a950a056d9d67c5dd8eb0c8c7084967a6d84
+    # Commit 6d965b8 -- CSP drops 'unsafe-inline' and 'unsafe-eval' (T-3.14),
+    # now that the T-3.13 frontend demonstrates nothing needs them. Follows
+    # 806e8be (logout origin derived from the request) and f430d36.
+    digest: sha256:56a7aec718243bcd62ee17e6cd0f14bda855aeb2d121ea558f28ea54ecb74982
