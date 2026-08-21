@@ -42,6 +42,32 @@ variable "prefix" {
   default     = "xenopsbase"
 }
 
+variable "document_cors_origins" {
+  description = <<-EOT
+    Browser origins allowed to upload straight to the documents bucket.
+
+    Empty by default, which manages no CORS configuration at all. A bucket that
+    only ever sees server-side traffic needs none, and a wildcard here would let
+    any page on the internet drive a presigned URL a user has been issued.
+
+    Set it to the application origin, scheme included, and nothing else:
+    ["https://app-dev.example.com"]. It has to match Origin byte for byte -- no
+    trailing slash, no path.
+  EOT
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for o in var.document_cors_origins : can(regex("^https?://[^/]+$", o))])
+    error_message = "each origin must be scheme://host[:port] with no trailing slash and no path."
+  }
+
+  validation {
+    condition     = !contains(var.document_cors_origins, "*")
+    error_message = "a wildcard origin would expose presigned uploads to any site. Name the application origin explicitly."
+  }
+}
+
 variable "project_id" {
   description = <<-EOT
     Hetzner Cloud project ID, the numeric part of the console URL. Used to build

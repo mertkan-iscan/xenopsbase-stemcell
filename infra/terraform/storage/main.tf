@@ -60,6 +60,58 @@ resource "aws_s3_bucket_versioning" "this" {
 }
 
 # ------------------------------------------------------------------------------
+# CORS on the documents bucket.
+#
+# T-3.7 hands the browser a presigned PUT and has it upload straight here, so
+# the bytes never cross the gateway. That makes the upload a cross-origin
+# request from https://app-*, and one that preflights: a presigned PUT carries
+# Content-Type, which is not a CORS-safelisted value. Without this the browser
+# never sends the PUT at all.
+#
+# Nothing before now could have caught it. The T-3.7 integration tests upload
+# with an HttpClient, which has no origin and no same-origin policy, so they
+# pass against a bucket that no browser can write to.
+#
+# Only the documents bucket. pg_backups and loki_chunks are written by
+# CloudNativePG and Loki over server-side credentials; neither has an origin,
+# and a CORS policy on them would widen reach for nothing.
+#
+# MAY NOT SURVIVE APPLY. aws_s3_bucket_lifecycle_configuration is unusable
+# against Hetzner for reasons in the block below -- the provider's post-write
+# stabilization polls until the response matches what it sent, and Hetzner
+# answers in a shape it will not accept. The same polling exists for CORS. If
+# this times out having actually written the rules, it moves to
+# infra/scripts/ alongside the lifecycle rules rather than staying here half
+# working.
+# ------------------------------------------------------------------------------
+resource "aws_s3_bucket_cors_configuration" "documents" {
+  count  = length(var.document_cors_origins) > 0 ? 1 : 0
+  bucket = aws_s3_bucket.this["documents"].id
+
+  cors_rule {
+    allowed_origins = var.document_cors_origins
+    allowed_methods = ["PUT", "GET", "HEAD"]
+
+    # The browser asks permission for the exact headers it intends to send, and
+    # a presigned PUT sends Content-Type plus whatever was signed into the
+    # request. Listing them individually means a signature that includes one
+    # more fails preflight for a reason the network tab reports as a bare CORS
+    # error.
+    #
+    # This is not a wildcard ORIGIN and grants no reach: it only concerns which
+    # headers an already-allowed origin may send.
+    allowed_headers = ["*"]
+
+    # So the caller can read the ETag off the response and confirm what landed.
+    # Response headers are hidden from script unless named here, and the upload
+    # otherwise succeeds with nothing to check it against.
+    expose_headers = ["ETag"]
+
+    max_age_seconds = 3600
+  }
+}
+
+# ------------------------------------------------------------------------------
 # Lifecycle rules are NOT managed here.
 #
 # aws_s3_bucket_lifecycle_configuration cannot be used against Hetzner. The PUT
