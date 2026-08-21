@@ -47,3 +47,13 @@ kind: Namespace
 metadata:
   name: apps
   labels: {app.kubernetes.io/managed-by: argocd}
+---
+# The in-memory store (ADR-0009). Named for what may live in it, not for the
+# product that implements it: nothing authoritative belongs here, and a
+# namespace called `cache` makes a pull request that puts a source of truth in
+# it look wrong at a glance.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cache
+  labels: {app.kubernetes.io/managed-by: argocd}

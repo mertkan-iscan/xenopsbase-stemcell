@@ -1,0 +1,182 @@
+# Valkey: the shared in-memory store (T-2.11, ADR-0009).
+#
+# The namespace is called `cache` on purpose. Nothing authoritative may live
+# here — ADR-0009 puts this on the DISPOSABLE side of ADR-0002, and the rule is
+# that anything stored must be reconstructable by a user retrying. Sessions and
+# rate-limit counters qualify; idempotency records do not, which is why those
+# are in Postgres and stay there.
+#
+# A namespace named `cache` makes a pull request that puts a source of truth in
+# it look wrong at a glance. That is the cheapest guard available against the
+# drift this ADR exists to prevent.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: valkey-config
+  namespace: cache
+data:
+  valkey.conf: |
+    # Password comes from the Secret, which is included rather than inlined so
+    # that everything a reviewer needs to check is in THIS file.
+    include /etc/valkey/secret/auth.conf
+
+    bind 0.0.0.0
+    port 6379
+    protected-mode no
+
+    # BOUNDED, and this is the setting that keeps a bad day from becoming an
+    # outage of the whole node. An in-memory store with no maxmemory grows until
+    # the kernel kills something, and the OOM killer does not necessarily choose
+    # this pod -- it takes down whatever else was scheduled alongside it.
+    #
+    # Deliberately well under the container limit below. maxmemory bounds the
+    # DATASET; the process also needs room for client buffers, replication
+    # buffers and fragmentation, so a maxmemory equal to the limit gets the
+    # container OOM-killed rather than evicting.
+    maxmemory 192mb
+
+    # allkeys-lru, not volatile-lru or noeviction.
+    #
+    #   noeviction    writes start failing when full. For a session store that
+    #                 means logins failing under memory pressure rather than
+    #                 old sessions being dropped, which is strictly worse.
+    #   volatile-lru  only evicts keys with a TTL. Correct while everything has
+    #                 one, and it fails closed the moment something is written
+    #                 without one -- a subtle dependency on every future writer
+    #                 remembering.
+    #   allkeys-lru   always able to make room.
+    #
+    # allkeys-lru is only safe BECAUSE of the disposability rule above. If
+    # anything authoritative is ever stored here, this line silently becomes a
+    # data-loss bug, which is the strongest reason to keep that rule.
+    maxmemory-policy allkeys-lru
+
+    # No persistence, in either form. This is disposable by decision, and an RDB
+    # or AOF file would mean a pod restart quietly restoring stale sessions and
+    # rate-limit counters -- state that ADR-0002 says lives inside the cluster,
+    # surviving in a way nothing else here does.
+    save ""
+    appendonly no
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkey
+  namespace: cache
+  labels: {app.kubernetes.io/name: valkey, app.kubernetes.io/part-of: xenopsbase}
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate. Two Valkey pods briefly serving the same
+  # Service would split sessions between them at random, which is the exact
+  # failure this component was added to remove. One pod is correct here: the
+  # contents are disposable, so a few seconds of unavailability during a
+  # rollout costs a re-login, and clustering would be a different decision with
+  # a different ADR.
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app.kubernetes.io/name: valkey}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: valkey, app.kubernetes.io/part-of: xenopsbase}
+    spec:
+      # NOTE: there is no checksum annotation over the config or the Secret, so
+      # editing either does NOT restart this pod. A rotated password sits in the
+      # Secret while the running process keeps the old one, and the mismatch
+      # only surfaces when a client reconnects.
+      #
+      # Stated rather than faked. An annotation with a hand-written value looks
+      # like it does this and does not; wiring it properly needs a
+      # configMapGenerator for the config and something else again for a
+      # ksops-managed Secret. Until then: `kubectl -n cache rollout restart
+      # deploy/valkey` after changing either.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: valkey
+          # Pinned by digest, like the application images. A floating tag on a
+          # data-path component changes what is running without a commit, and
+          # the tag is kept alongside only so a reader knows which version the
+          # digest is.
+          image: valkey/valkey@sha256:e706d1213aaba6896c162bb6a3a9e1894e1a435f28f8f856d14fab2e10aa098b  # 8.1.4-alpine
+          args: ["/etc/valkey/valkey.conf"]
+          ports:
+            - {name: valkey, containerPort: 6379}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            # Above maxmemory (192mb) with room for buffers and fragmentation.
+            limits: {memory: 320Mi}
+          livenessProbe:
+            # A TCP check would pass while the server refuses every command.
+            # Running an actual PING means the probe fails when Valkey is
+            # unresponsive rather than merely listening.
+            exec:
+              command: ["sh", "-c", "valkey-cli -a \"$(sed -n 's/^requirepass //p' /etc/valkey/secret/auth.conf)\" ping | grep -q PONG"]
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "valkey-cli -a \"$(sed -n 's/^requirepass //p' /etc/valkey/secret/auth.conf)\" ping | grep -q PONG"]
+            periodSeconds: 10
+          volumeMounts:
+            - {name: config, mountPath: /etc/valkey/valkey.conf, subPath: valkey.conf}
+            - {name: auth, mountPath: /etc/valkey/secret, readOnly: true}
+            # readOnlyRootFilesystem is on and Valkey still wants a working
+            # directory, even with persistence off.
+            - {name: data, mountPath: /data}
+      volumes:
+        - name: config
+          configMap: {name: valkey-config}
+        - name: auth
+          secret: {secretName: valkey-auth, items: [{key: auth.conf, path: auth.conf}]}
+        - name: data
+          # emptyDir, not a PVC. A PVC would survive the pod and quietly turn a
+          # disposable component into one holding state across restarts -- and
+          # it would be one more volume for cluster-destroy to orphan (#109).
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey
+  namespace: cache
+  labels: {app.kubernetes.io/name: valkey}
+spec:
+  # ClusterIP. There is no Ingress and no LoadBalancer for this, and there must
+  # not be: an in-memory store with a single shared password is not something to
+  # expose, and the tunnel only routes hostnames that are declared in the edge
+  # module anyway.
+  selector: {app.kubernetes.io/name: valkey}
+  ports:
+    - {name: valkey, port: 6379, targetPort: valkey}
+---
+# Only the application namespace may reach it.
+#
+# ENFORCED HERE, which was worth checking rather than assuming: this cluster
+# runs flannel, which has no policy engine of its own, so a NetworkPolicy would
+# ordinarily be an object that exists and does nothing. k3s embeds kube-router's
+# policy controller in the server process -- no pod to see -- and the node
+# config confirms `disable-network-policy: false`.
+#
+# Without that, this file would be security theatre: present in review, inert in
+# the cluster, and impossible to tell apart from the real thing by reading it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: valkey-allow-apps
+  namespace: cache
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: valkey}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: apps}
+      ports:
+        - {protocol: TCP, port: 6379}

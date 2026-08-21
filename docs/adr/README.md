@@ -57,5 +57,6 @@ than a clean file that hides the fact a mistake was ever made.
 | [0003](0003-secrets-management.md) | Secrets encrypted in git with SOPS and age | Accepted |
 | [0004](0004-gitops-engine.md) | Argo CD reconciles the cluster from git | Accepted |
 | [0005](0005-terraform-state-backend.md) | Terraform state lives in Cloudflare R2, not Hetzner | Accepted |
-| [0006](0006-tailscale-node-transport.md) | Tailscale node transport; the public API is closed | Accepted, blocked |
+| [0006](0006-tailscale-node-transport.md) | Tailscale node transport; the public API is closed | Accepted |
 | [0007](0007-postgres-backup-mechanism.md) | Postgres backs up through the Barman Cloud plugin | Accepted |
+| [0009](0009-in-memory-store.md) | Valkey is the in-memory store, and it is disposable | Accepted |

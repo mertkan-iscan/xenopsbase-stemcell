@@ -1,0 +1,32 @@
+# The shared in-memory store (T-2.11, ADR-0009).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: valkey
+  namespace: argocd
+  annotations:
+    # Wave 2, alongside the database rather than after it. The gateway (wave 4)
+    # will not start without a session store once it is wired to one, so this
+    # has to exist before the services do.
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mertkan-iscan/xenopsbase-stemcell.git
+    targetRevision: main
+    path: platform/envs/dev/cache
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cache
+  syncPolicy:
+    automated:
+      # prune: true, unlike the database. Everything here is disposable by
+      # decision (ADR-0009), so removing a manifest from git should remove the
+      # object; there is nothing whose loss is not recovered by a user retrying.
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
