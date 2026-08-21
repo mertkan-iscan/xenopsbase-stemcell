@@ -389,6 +389,36 @@ jhipster:
     license: unlicensed
     license-url:
   security:
+    # Stated here rather than inherited from JHipster's default, which had no
+    # connect-src at all.
+    #
+    # connect-src falls back to default-src when absent, and default-src is
+    # 'self', so the browser refused every XHR to an origin that is not this
+    # one. That includes the presigned PUT straight to object storage in T-3.7 --
+    # blocked here, before the request leaves the browser, and so before the
+    # bucket's CORS policy is ever consulted. Two independent gates on the same
+    # upload, failing in the same unhelpful way in the network tab; fixing the
+    # bucket alone changes nothing.
+    #
+    # The object-storage origin is the only addition, and it is overridable so
+    # staging and prod name their own rather than inheriting dev's.
+    #
+    # https://storage.googleapis.com is REMOVED from script-src. It is a
+    # generator default, this application loads no script from Google, and its
+    # presence made the policy look as though object storage had been thought
+    # about here when it had not.
+    #
+    # 'unsafe-eval' is kept, reluctantly and only because T-3.13 has not chosen a
+    # framework yet. Nothing currently served needs it -- there is no frontend at
+    # all -- so drop it the moment there is a build that runs without it.
+    content-security-policy: >-
+      default-src 'self';
+      frame-src 'self' data:;
+      script-src 'self' 'unsafe-inline' 'unsafe-eval';
+      style-src 'self' 'unsafe-inline';
+      img-src 'self' data:;
+      font-src 'self' data:;
+      connect-src 'self' ${DOCUMENTS_PUBLIC_ENDPOINT:https://fsn1.your-objectstorage.com}
     oauth2:
       audience:
         # Checked by security/oauth2/AudienceValidator. These must match the
