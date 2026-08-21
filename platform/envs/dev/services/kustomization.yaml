@@ -35,10 +35,9 @@ images:
     # since every path core serves is named explicitly above it.
     digest: sha256:51572fef4bc4f06cdd8225c782156c3b2a98e639eb1d8d0d320fe17a402d4dee
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway
-    # Commit 1f1758f -- keeps the public hostname out of the 404 `detail`, after
-    # 16618a6 made `path` relative. Follows 2381ff1 (terminal .anyExchange()
-    # rule), 491c6e6 (drop offline_access) and 065d2560 (drop `api`). All of it
-    # lives in the image, so a digest bump is what deploys it; the realm halves
-    # reach the cluster by a different route again (see
-    # docs/runbooks/authorization.md, "Applying a realm change in dev").
-    digest: sha256:c84836d9779f6fa5b90474df056b53c3e17acda040dcb6dc60309c14af09e04d
+    # Commit 4b0c1f3 -- CSP gains a connect-src, so the browser is allowed to
+    # PUT to object storage at all; the bucket's CORS policy is the other half
+    # and lives in infra/terraform/storage. Follows 1f1758f and 16618a6
+    # (problem-detail hygiene), 2381ff1 (terminal .anyExchange() rule), 491c6e6
+    # (drop offline_access) and 065d2560 (drop `api`).
+    digest: sha256:dda82d5fbbf67ca691818e138881e3bf097ec9c811af9adac9ea7c67250eaa46
