@@ -46,6 +46,28 @@ spec:
               # rather than duplicated with a second value that could drift.
               valueFrom: {secretKeyRef: {name: gateway-oidc, key: GATEWAY_CLIENT_SECRET}}
 
+            # The exact string Keycloak compares redirect_uri against, stated
+            # rather than inferred.
+            #
+            # Spring otherwise builds it from the forwarded headers, and those
+            # have been wrong twice on this path: once in the realm (the
+            # registration id) and once at the edge (X-Forwarded-Port: 80
+            # alongside X-Forwarded-Proto: https, giving https://host:80/...).
+            # Keycloak matches this by exact string and answers 400 on any
+            # difference, so it is the worst value in the system to derive from
+            # a header an intermediary can get wrong.
+            #
+            # This does NOT replace the edge fix. It covers only this one URL;
+            # logout and every other absolute URL the gateway builds still come
+            # from the headers. See the request_headers ruleset in
+            # infra/terraform/edge/main.tf.
+            #
+            # Relaxed binding, so no rebuild is needed to set it:
+            # SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_OIDC_REDIRECT_URI maps to
+            # spring.security.oauth2.client.registration.oidc.redirect-uri.
+            - name: SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_OIDC_REDIRECT_URI
+              value: https://app-dev.xenopsoftware.com/login/oauth2/code/oidc
+
             - {name: MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED, value: "true"}
           startupProbe:
             httpGet: {path: /management/health, port: http}
