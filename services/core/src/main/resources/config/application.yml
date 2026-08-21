@@ -189,6 +189,21 @@ spring:
       console-available: true
 
 server:
+  # `framework`, and in the base file rather than only in dev.
+  #
+  # This service never receives a request directly -- the gateway is the only
+  # caller -- so every absolute URL it builds has to come from the forwarded
+  # headers or it describes the wrong origin. Pagination Link headers are the
+  # visible case: without this they named https://core/api/... , the in-cluster
+  # Service, which no browser can resolve.
+  #
+  # NOT `native`, which is what the dev profile used to set. Native delegates to
+  # the servlet container, and the container understands X-Forwarded-Proto, Host
+  # and Port but NOT X-Forwarded-Prefix. The gateway strips /services/core
+  # before proxying, so the prefix is exactly the part that has to be restored,
+  # and native is the one strategy that cannot restore it. `framework` uses
+  # Spring's ForwardedHeaderFilter, which handles all four.
+  forward-headers-strategy: framework
   servlet:
     session:
       cookie:

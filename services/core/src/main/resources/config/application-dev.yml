@@ -59,8 +59,10 @@ spring:
 
 server:
   port: 8081
-  # make sure requests the proxy uri instead of the server one
-  forward-headers-strategy: native
+  # forward-headers-strategy moved to application.yml as `framework`. It was
+  # `native` here, which does not understand X-Forwarded-Prefix, and it applied
+  # only in dev -- so the behaviour differed between dev and prod in exactly the
+  # area where a proxy is involved in both.
 
 # ===================================================================
 # JHipster specific properties

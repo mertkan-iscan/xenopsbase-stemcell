@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>XenOpsBase — Documents</title>
+
+    <!--
+      Stylesheet and script are separate files rather than inline blocks.
+
+      The CSP still allows 'unsafe-inline' for both, because JHipster's default did
+      and removing it was not this task. Nothing here relies on it, so that
+      allowance can be dropped from application.yml without touching this page --
+      which is the point of not writing inline blocks in the first place.
+    -->
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+
+  <body>
+    <header class="bar">
+      <h1>Documents</h1>
+      <div class="identity">
+        <span id="identity" class="muted">checking session…</span>
+        <button id="logout" type="button" class="secondary" disabled>Log out</button>
+      </div>
+    </header>
+
+    <!-- Assertive rather than polite: this is where a failed upload or an expired
+         session is reported, and both need to interrupt. -->
+    <div id="banner" class="banner" role="alert" hidden></div>
+
+    <main>
+      <section class="panel">
+        <h2>Upload</h2>
+        <div class="row">
+          <input type="file" id="file" />
+          <button id="upload" type="button" disabled>Upload</button>
+        </div>
+        <!-- role="status" so a screen reader hears each stage. The three-step
+             upload is slow enough that silence reads as a hang. -->
+        <p id="upload-status" class="muted" role="status"></p>
+      </section>
+
+      <section class="panel">
+        <h2>Your documents <span id="total" class="muted"></span></h2>
+
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th class="num">Size</th>
+                <th>Uploaded</th>
+                <th><span class="sr-only">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+
+        <p id="empty" class="muted" hidden>Nothing uploaded yet.</p>
+
+        <nav class="pager" aria-label="Pagination">
+          <button id="prev" type="button" class="secondary" disabled>Previous</button>
+          <span id="page-label" class="muted"></span>
+          <button id="next" type="button" class="secondary" disabled>Next</button>
+        </nav>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
