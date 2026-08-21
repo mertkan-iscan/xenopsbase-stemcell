@@ -36,9 +36,10 @@ images:
     # reproducibility claim in T-6.1 holding up rather than a coincidence.
     digest: sha256:cd28b14ca2839066e4dbdb283aaff66a4e081e36e3f94031905eb0f9cbcee07f
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway
-    # Commit 065d2560d6a9df75f686ea1d8a5e0935395eaa54 -- drops the `api` scope
-    # from the OIDC authorization request. The scope lives in application.yml,
-    # so it is baked into the image and a digest bump is what deploys it; the
-    # realm half of that commit reaches the cluster by a different route again
-    # (see docs/runbooks/authorization.md, "Applying a realm change in dev").
-    digest: sha256:bbfcd929ebed4fee73cefb6fab7596378c1a173d8fb19c13506a8861ed254c98
+    # Commit 491c6e6 -- drops offline_access from the OIDC authorization
+    # request, after 065d2560 dropped `api` from it. The scope lives in
+    # application.yml, so it is baked into the image and a digest bump is what
+    # deploys it; the realm half of those commits reaches the cluster by a
+    # different route again (see docs/runbooks/authorization.md, "Applying a
+    # realm change in dev").
+    digest: sha256:aaaaaffa56a33af18190a364b5c2e6856dd3777de3c3d8840e733ece72ad273e
