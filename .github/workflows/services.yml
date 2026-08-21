@@ -18,6 +18,11 @@ on:
       - 'services/**'
       - 'clients/**'
       - 'docs/api/**'
+      # Present on pull_request and missing here, which meant a change to this
+      # file could not trigger the workflow it changes. A commit touching only
+      # the pipeline produced no run at all, so the pipeline was the one thing
+      # that shipped to main unverified.
+      - '.github/workflows/services.yml'
   workflow_dispatch:
 
 permissions:
