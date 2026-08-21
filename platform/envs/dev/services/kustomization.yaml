@@ -37,9 +37,9 @@ images:
     # headers or they name the in-cluster Service.
     digest: sha256:b435a3cdad73f32e686c4372da79473c1b5b88b48f3440b2b98133ffbf561c15
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway
-    # Commit 5b4d627 -- the T-3.13 frontend, plus the X-Forwarded-Prefix that
-    # makes core's pagination links usable from a browser. Follows 4b0c1f3
-    # (CSP connect-src), 1f1758f and 16618a6 (problem-detail hygiene), 2381ff1
-    # (terminal .anyExchange() rule), 491c6e6 (drop offline_access) and
-    # 065d2560 (drop `api`).
-    digest: sha256:cf593304cbd1931ad5c6cc37074aa4ace9d2fcb01fdaf2a3dd8fa7fe69551782
+    # Commit f430d36 -- drops the duplicate X-Forwarded-Prefix route filter;
+    # Spring Cloud Gateway already sends one, and core concatenated both. Carries
+    # the T-3.13 frontend from 5b4d627. Follows 4b0c1f3 (CSP connect-src),
+    # 1f1758f and 16618a6 (problem-detail hygiene), 2381ff1 (terminal
+    # .anyExchange() rule), 491c6e6 (drop offline_access), 065d2560 (drop `api`).
+    digest: sha256:0575ab57c8d5f9763bde6f60472f40474e530d9a9fd620dfee4fe5e06a6eff14
