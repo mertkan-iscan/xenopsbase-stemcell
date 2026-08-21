@@ -7,11 +7,15 @@ variable "cloudflare_api_token" {
       Zone / DNS / Edit
       Zone / Zone Settings / Edit   (only if manage_zone_settings = true)
       Zone / Zone WAF / Edit        (only if manage_waf = true)
+      Zone / Transform Rules / Edit
       Account / Cloudflare Tunnel / Edit
 
-    Zone Settings and Zone WAF are SEPARATE permissions. Holding one does not
-    imply the other, and the apply that discovers this has already created
-    whatever came before the ruleset. `make edge-plan` runs a preflight that
+    Zone Settings, Zone WAF and Transform Rules are SEPARATE permissions, and
+    the last two are separate despite both being rulesets on the same zone:
+    Zone WAF covers http_request_firewall_custom, while the X-Forwarded-Port
+    rewrite lives in http_request_late_transform. Holding one does not imply
+    another, and the apply that discovers this has already created whatever
+    came before the ruleset. `make edge-plan` runs a preflight that
     names any missing one up front — see infra/scripts/preflight.sh.
   EOT
   type        = string
