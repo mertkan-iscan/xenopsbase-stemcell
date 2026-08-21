@@ -12,7 +12,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.5.15</version>
+        <version>4.0.7</version>
         <relativePath/>
         <!-- lookup parent from repository -->
     </parent>
@@ -45,7 +45,6 @@
         <jib-maven-plugin.architecture>amd64</jib-maven-plugin.architecture>
         <jib-maven-plugin.image>eclipse-temurin:25-jre-noble</jib-maven-plugin.image>
         <jib-maven-plugin.version>3.5.1</jib-maven-plugin.version>
-        <junit-jupiter.version>5.13.3</junit-jupiter.version>
         <lifecycle-mapping.version>1.0.0</lifecycle-mapping.version>
         <mapstruct.version>1.6.3</mapstruct.version>
         <maven-checkstyle-plugin.version>3.6.0</maven-checkstyle-plugin.version>
@@ -61,22 +60,16 @@
         <resource.delimiter>@</resource.delimiter>
         <sonar-maven-plugin.version>5.7.0.6970</sonar-maven-plugin.version>
         <spotless-maven-plugin.version>3.8.0</spotless-maven-plugin.version>
-        <spring-cloud-dependencies.version>2025.0.0</spring-cloud-dependencies.version>
+        <spring-cloud-dependencies.version>2025.1.3</spring-cloud-dependencies.version>
         <spring.profiles.active>dev</spring.profiles.active>
         <!--
-            2.x, and NOT 3.x, however much it looks like it should match core.
-
-            This service runs Spring Boot 3.5 / Framework 6.2, because Spring Cloud Gateway has no
-            Boot 4 release yet. core runs Boot 4 / Framework 7. springdoc 3.x is built against
-            Framework 7 and needs org.springframework.web.reactive.accept.ApiVersionStrategy, which
-            does not exist here. The context then fails to start with a NoClassDefFoundError buried
-            under a @ConditionalOnMissingBean deduction failure, which reads as a springdoc bug
-            rather than as a version mismatch.
-
-            Verified by trying it; OpenApiSpecIT is what caught it. Do not align these versions
-            without also moving this service to Boot 4. See issue #144.
+            3.x now that this service is on Boot 4 / Framework 7, matching core. springdoc 3.x
+            needs org.springframework.web.reactive.accept.ApiVersionStrategy, which only exists on
+            Framework 7; on the old Boot 3.5 line it failed at runtime with a NoClassDefFoundError
+            buried under a @ConditionalOnMissingBean deduction failure. OpenApiSpecIT is what
+            catches that, in either direction.
         -->
-        <springdoc-openapi-starter-webflux-api.version>2.8.15</springdoc-openapi-starter-webflux-api.version>
+        <springdoc-openapi-starter-webflux-api.version>3.0.3</springdoc-openapi-starter-webflux-api.version>
     </properties>
 
     <dependencyManagement>
@@ -109,9 +102,19 @@
             <artifactId>spring-boot-configuration-processor</artifactId>
             <scope>provided</scope>
         </dependency>
+        <!--
+            Boot 4 defaults to Jackson 3. spring-boot-jackson2 keeps the Jackson 2 API available,
+            which is what JacksonConfiguration and the JHipster utilities are written against, and
+            is what core already does. Under Boot 3 these arrived transitively via the web starter;
+            they have to be explicit now.
+        -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-loader-tools</artifactId>
+            <artifactId>spring-boot-jackson2</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jackson</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -123,7 +126,7 @@
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-aop</artifactId>
+            <artifactId>spring-boot-starter-aspectj</artifactId>
         </dependency>
 
         <dependency>
@@ -141,6 +144,23 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!--
+            Boot 4 split test autoconfiguration into per-concern modules. WebTestClient got its own
+            artifact entirely: AutoConfigureWebTestClient is in
+            org.springframework.boot.webtestclient.autoconfigure, not under the webflux test module
+            as the old package name suggests. Both are needed: the webflux one for @WebFluxTest,
+            this one for the client itself.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-webtestclient</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -318,12 +338,12 @@
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
-            <artifactId>jdbc</artifactId>
+            <artifactId>testcontainers-jdbc</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
-            <artifactId>junit-jupiter</artifactId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
 

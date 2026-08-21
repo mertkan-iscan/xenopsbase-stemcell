@@ -35,7 +35,11 @@ spring:
       additional-exclude: static/**
     livereload:
       enabled: false # we use Webpack dev server + BrowserSync for livereload
-  jackson:
+  # jackson2, not jackson. Under Boot 4 `spring.jackson.*` binds to Jackson 3
+  # (tools.jackson), where WRITE_DURATIONS_AS_TIMESTAMPS does not exist -- the
+  # context fails at startup on an unconvertible enum. This service still uses the
+  # Jackson 2 API, so it configures the Jackson 2 namespace. core does the same.
+  jackson2:
     serialization:
       indent-output: true
   messages:

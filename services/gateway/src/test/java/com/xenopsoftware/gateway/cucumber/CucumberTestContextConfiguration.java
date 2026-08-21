@@ -3,7 +3,7 @@ package com.xenopsoftware.gateway.cucumber;
 import com.xenopsoftware.gateway.IntegrationTest;
 import com.xenopsoftware.gateway.security.AuthoritiesConstants;
 import io.cucumber.spring.CucumberContextConfiguration;
-import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
+import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
 import org.springframework.security.test.context.support.WithMockUser;
 
 @CucumberContextConfiguration
