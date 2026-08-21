@@ -27,6 +27,12 @@
 const CORE = "/services/core/api";
 const PAGE_SIZE = 10;
 
+// Matches AuthoritiesConstants.ADMIN in core. Written out here because there is
+// no build step to share a constant with Java; if the realm renames the role,
+// this panel stops appearing while the API keeps refusing -- visible, and the
+// safe direction to fail in.
+const ADMIN_AUTHORITY = "app-admin";
+
 const el = (id) => document.getElementById(id);
 const state = { page: 0, links: {}, total: 0 };
 
@@ -215,6 +221,14 @@ async function loadIdentity() {
     // still succeeded, so it is worth showing rather than assuming.
     el("identity").textContent = who.name ? `Signed in as ${who.name}` : "Signed in";
     el("logout").disabled = false;
+
+    // Same source as the authorities core enforces with, so the panel cannot
+    // be shown to someone the server would refuse. Hiding it is a courtesy;
+    // /api/admin/** is what actually stops anyone reading this.
+    if ((who.authorities || []).includes(ADMIN_AUTHORITY)) {
+      el("infra-panel").hidden = false;
+      loadInfra();
+    }
   } catch {
     el("identity").textContent = "Session unknown";
   }
@@ -357,6 +371,196 @@ el("upload").addEventListener("click", async () => {
     el("upload").disabled = el("file").files.length === 0;
   }
 });
+
+/* ------------------------------------------------------------------ *
+ * Infrastructure usage (T-3.16)
+ * ------------------------------------------------------------------ */
+
+/** Cores, at the precision the number is actually worth. */
+function formatCores(cores) {
+  if (cores === null || cores === undefined) return "—";
+  if (cores >= 1) return `${cores.toFixed(2)} cores`;
+  return `${Math.round(cores * 1000)} m`;
+}
+
+function formatBytesOrDash(bytes) {
+  return bytes === null || bytes === undefined ? "—" : formatSize(bytes);
+}
+
+/**
+ * A proportion bar with the percentage written beside it.
+ *
+ * The number is not decoration. Colour alone would put the only signal in a
+ * red/green difference that a good proportion of readers cannot see, and the
+ * bar is clipped at 100% while the label is not -- so a container over its
+ * limit reads as "118%" rather than as a full bar identical to one at exactly
+ * the limit.
+ */
+function meterCell(used, total) {
+  const cell = document.createElement("div");
+  cell.className = "meter-cell";
+
+  if (used === null || used === undefined || !total) {
+    cell.textContent = "—";
+    cell.title = "no limit set";
+    return cell;
+  }
+
+  const ratio = used / total;
+  const percent = Math.round(ratio * 100);
+
+  const meter = document.createElement("div");
+  meter.className = "meter" + (ratio >= 1 ? " over" : ratio >= 0.8 ? " warn" : "");
+  meter.setAttribute("role", "progressbar");
+  meter.setAttribute("aria-valuenow", String(percent));
+  meter.setAttribute("aria-valuemin", "0");
+  meter.setAttribute("aria-valuemax", "100");
+
+  const fill = document.createElement("span");
+  fill.style.width = `${Math.min(100, percent)}%`;
+  meter.appendChild(fill);
+
+  const label = document.createElement("span");
+  label.className = "meter-label";
+  label.textContent = `${percent}%`;
+
+  cell.append(meter, label);
+  return cell;
+}
+
+function renderNodes(nodes) {
+  const host = el("infra-nodes");
+  host.replaceChildren();
+
+  for (const node of nodes) {
+    const card = document.createElement("div");
+    card.className = "card";
+
+    const title = document.createElement("h4");
+    title.textContent = node.node || "unknown";
+    card.appendChild(title);
+
+    const cpu = document.createElement("div");
+    cpu.className = "metric";
+    const cpuLabel = document.createElement("span");
+    cpuLabel.textContent = "CPU";
+    const cpuValue = document.createElement("span");
+    cpuValue.textContent = `${formatCores(node.cpuUsedCores)} / ${formatCores(node.cpuCores)}`;
+    cpu.append(cpuLabel, cpuValue);
+    card.appendChild(cpu);
+    card.appendChild(meterCell(node.cpuUsedCores, node.cpuCores));
+
+    const mem = document.createElement("div");
+    mem.className = "metric";
+    const memLabel = document.createElement("span");
+    memLabel.textContent = "Memory";
+    const memValue = document.createElement("span");
+    memValue.textContent = `${formatBytesOrDash(node.memoryUsedBytes)} / ${formatBytesOrDash(node.memoryTotalBytes)}`;
+    mem.append(memLabel, memValue);
+    card.appendChild(mem);
+    card.appendChild(meterCell(node.memoryUsedBytes, node.memoryTotalBytes));
+
+    host.appendChild(card);
+  }
+}
+
+function renderContainers(containers) {
+  const body = el("infra-containers");
+  body.replaceChildren();
+
+  // Heaviest first. A dashboard sorted by name makes you hunt for the thing
+  // that is actually consuming the cluster.
+  const sorted = [...containers].sort((a, b) => (b.memoryBytes || 0) - (a.memoryBytes || 0));
+
+  for (const c of sorted) {
+    const row = document.createElement("tr");
+
+    const ns = document.createElement("td");
+    ns.textContent = c.namespace;
+
+    const name = document.createElement("td");
+    name.textContent = c.container;
+    // The pod carries the replica hash, which is noise in the common case and
+    // exactly what you need when two replicas differ.
+    name.title = c.pod;
+
+    const cpu = document.createElement("td");
+    cpu.className = "num";
+    cpu.textContent = formatCores(c.cpuCores);
+
+    const mem = document.createElement("td");
+    mem.className = "num";
+    mem.textContent = formatBytesOrDash(c.memoryBytes);
+
+    const limit = document.createElement("td");
+    limit.appendChild(meterCell(c.memoryBytes, c.memoryLimitBytes));
+
+    row.append(ns, name, cpu, mem, limit);
+    body.appendChild(row);
+  }
+}
+
+function renderVolumes(volumes) {
+  const body = el("infra-volumes");
+  body.replaceChildren();
+
+  for (const v of volumes) {
+    const row = document.createElement("tr");
+
+    const ns = document.createElement("td");
+    ns.textContent = v.namespace;
+
+    const claim = document.createElement("td");
+    claim.textContent = v.claim;
+
+    const used = document.createElement("td");
+    used.className = "num";
+    used.textContent = formatBytesOrDash(v.usedBytes);
+
+    const capacity = document.createElement("td");
+    capacity.className = "num";
+    capacity.textContent = formatBytesOrDash(v.capacityBytes);
+
+    const bar = document.createElement("td");
+    bar.appendChild(meterCell(v.usedBytes, v.capacityBytes));
+
+    row.append(ns, claim, used, capacity, bar);
+    body.appendChild(row);
+  }
+}
+
+async function loadInfra() {
+  const status = el("infra-status");
+  const content = el("infra-content");
+  status.textContent = "Loading…";
+
+  try {
+    const response = await api(`${CORE}/admin/infra/usage`);
+    const usage = await response.json();
+
+    renderNodes(usage.nodes || []);
+    renderContainers(usage.containers || []);
+    renderVolumes(usage.volumes || []);
+
+    el("infra-collected").textContent = `· ${new Date(usage.collectedAt).toLocaleTimeString()}`;
+    content.hidden = false;
+
+    // A query that succeeded and matched nothing is named rather than shown as
+    // an empty table. That is what a metric renamed by a chart upgrade looks
+    // like, and "no containers" is otherwise indistinguishable from "the
+    // cluster is idle".
+    const empty = usage.emptyQueries || [];
+    status.textContent = empty.length ? `No data returned for: ${empty.join(", ")}` : "";
+  } catch (error) {
+    if (error.message === "unauthenticated") return;
+    content.hidden = true;
+    // Reported, not blanked. The endpoint distinguishes "not configured" (501)
+    // from "Prometheus is down" (503) and both arrive here as their detail.
+    status.textContent = error.message;
+  }
+}
+
+el("infra-refresh").addEventListener("click", () => loadInfra());
 
 el("prev").addEventListener("click", () => loadPage(state.links.prev).catch((e) => banner(e.message, "error")));
 el("next").addEventListener("click", () => loadPage(state.links.next).catch((e) => banner(e.message, "error")));

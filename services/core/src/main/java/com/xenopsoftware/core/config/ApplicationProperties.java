@@ -13,9 +13,71 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class ApplicationProperties {
 
     private final Storage storage = new Storage();
+    private final Infra infra = new Infra();
 
     public Storage getStorage() {
         return storage;
+    }
+
+    public Infra getInfra() {
+        return infra;
+    }
+
+    /**
+     * Where the infrastructure usage view reads its numbers from (T-3.16).
+     */
+    public static class Infra {
+
+        /**
+         * Base URL of the Prometheus HTTP API, e.g. {@code http://prometheus.observability.svc:9090}.
+         *
+         * <p><b>No default, deliberately.</b> A default pointing at localhost would make an
+         * unconfigured deployment look like a running one with nothing to report: the dashboard
+         * would render, every panel would be empty, and "the cluster is idle" is indistinguishable
+         * from "the query never reached Prometheus". Blank means the feature reports itself
+         * unavailable and says why.
+         */
+        private String prometheusUrl = "";
+
+        /**
+         * How long to wait for a query before giving up.
+         *
+         * <p>Short on purpose. This endpoint is a convenience view; a Prometheus that has become
+         * slow must not be able to occupy request threads in the service that serves documents.
+         */
+        private Duration timeout = Duration.ofSeconds(5);
+
+        /**
+         * Window for rate() when turning the CPU counter into cores.
+         *
+         * <p>Must be several scrape intervals wide or rate() returns nothing at all for a series
+         * with too few samples, which presents as a container using exactly zero CPU.
+         */
+        private Duration cpuWindow = Duration.ofMinutes(5);
+
+        public String getPrometheusUrl() {
+            return prometheusUrl;
+        }
+
+        public void setPrometheusUrl(String prometheusUrl) {
+            this.prometheusUrl = prometheusUrl;
+        }
+
+        public Duration getTimeout() {
+            return timeout;
+        }
+
+        public void setTimeout(Duration timeout) {
+            this.timeout = timeout;
+        }
+
+        public Duration getCpuWindow() {
+            return cpuWindow;
+        }
+
+        public void setCpuWindow(Duration cpuWindow) {
+            this.cpuWindow = cpuWindow;
+        }
     }
 
     /**

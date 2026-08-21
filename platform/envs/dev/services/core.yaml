@@ -60,6 +60,11 @@ spec:
               valueFrom: {secretKeyRef: {name: documents-s3, key: AWS_SECRET_ACCESS_KEY}}
             - {name: AWS_REGION, value: fsn1}
 
+            # Where the infrastructure usage view reads from (T-3.16). Read
+            # only, and the endpoint that uses it is restricted to app-admin by
+            # core's existing /api/admin/** rule.
+            - {name: PROMETHEUS_URL, value: "http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090"}
+
             # Traces to the Alloy collector, which batches and forwards to
             # Tempo (T-2.7). gRPC on 4317, which is the only receiver Alloy
             # declares; there is no HTTP receiver on 4318 to fall back to.

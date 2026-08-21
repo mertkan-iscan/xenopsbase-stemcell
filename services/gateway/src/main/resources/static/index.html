@@ -67,6 +67,61 @@
           <button id="next" type="button" class="secondary" disabled>Next</button>
         </nav>
       </section>
+
+      <!--
+        Infrastructure usage (T-3.16).
+
+        Hidden until the session is known to hold app-admin. That is a
+        CONVENIENCE, not the control: /api/admin/** is restricted server-side by
+        core's SecurityConfiguration, and this section only avoids showing a
+        panel that would answer 403. Anyone can unhide it with dev tools and
+        will get exactly nothing.
+      -->
+      <section class="panel" id="infra-panel" hidden>
+        <div class="row spread">
+          <h2>Infrastructure <span id="infra-collected" class="muted"></span></h2>
+          <button id="infra-refresh" type="button" class="secondary">Refresh</button>
+        </div>
+
+        <p id="infra-status" class="muted" role="status"></p>
+
+        <div id="infra-content" hidden>
+          <h3>Nodes</h3>
+          <div id="infra-nodes" class="cards"></div>
+
+          <h3>Containers</h3>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Namespace</th>
+                  <th>Container</th>
+                  <th class="num">CPU</th>
+                  <th class="num">Memory</th>
+                  <th>Memory vs limit</th>
+                </tr>
+              </thead>
+              <tbody id="infra-containers"></tbody>
+            </table>
+          </div>
+
+          <h3>Volumes</h3>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Namespace</th>
+                  <th>Claim</th>
+                  <th class="num">Used</th>
+                  <th class="num">Capacity</th>
+                  <th>Used vs capacity</th>
+                </tr>
+              </thead>
+              <tbody id="infra-volumes"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     </main>
 
     <script src="/app.js"></script>

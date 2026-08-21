@@ -292,3 +292,15 @@ application:
     # expires and by nothing else.
     presign-ttl: 15m
     max-upload-bytes: 52428800
+  infra:
+    # Where the operations view reads container, volume and node usage from
+    # (T-3.16). Blank on purpose: a localhost default would make an
+    # unconfigured deployment render a dashboard full of zeroes, and "the
+    # cluster is idle" must not look like "the query never arrived".
+    prometheus-url: ${PROMETHEUS_URL:}
+    # Short. This is a convenience view, and a Prometheus that has gone slow
+    # must not be able to tie up threads in the service that serves documents.
+    timeout: 5s
+    # Several scrape intervals wide. rate() over too few samples returns
+    # nothing at all, which reads as a container using exactly zero CPU.
+    cpu-window: 5m
