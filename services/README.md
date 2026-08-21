@@ -95,3 +95,33 @@ cd services/core && ./mvnw test-compile
 ```
 
 The Maven wrapper is committed on purpose, so a clone builds without Maven installed.
+
+### If it will not compile
+
+The likely cause is that `JAVA_HOME` points at a different JDK than you think. A machine can
+easily carry three: this one had a Java 8 JRE first on `PATH`, `JAVA_HOME` on 21, and the 25 the
+build needs installed but unreferenced.
+
+```bash
+make java-home
+```
+
+```
+required:  Java 25  (services/*/pom.xml)
+JAVA_HOME: C:\Users\you\scoop\apps\corretto21-jdk\current
+selected:  /c/Users/you/scoop/apps/corretto25-jdk/current
+```
+
+Targets that run Maven (`make api-spec`, `make api-client`) resolve the JDK themselves and do not
+depend on `JAVA_HOME` being right. Running `./mvnw` directly does, and will now stop at `validate`
+naming the version it needs, rather than failing later in the compiler.
+
+That distinction used to be the bug. The generated enforcer rule accepted `[21,22),[25,26)` while
+`java.version` was `25`, so a JDK 21 **passed** the guard and then failed three phases later with:
+
+```
+error: release version 25 not supported
+```
+
+which names neither the JDK in use nor where it came from. The rule is now derived from
+`${java.version}`, so the guard and what the build targets cannot drift apart again.

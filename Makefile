@@ -21,6 +21,28 @@ SCRIPTS     := infra/scripts
 # problem in one. Harmless on Linux and macOS, where autocrlf is already off.
 TF_GIT := GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.autocrlf GIT_CONFIG_VALUE_0=false
 
+# Selects a JDK the build can actually use, for the same reason and in the same
+# way TF_GIT scopes a git setting: JAVA_HOME is global and other projects on the
+# machine depend on it, so this repository fixes its own invocation rather than
+# rewriting the developer's environment.
+#
+# The failure without it is not obvious. A machine can have several JDKs and none
+# of them selected -- this one had Java 8 first on PATH, JAVA_HOME on 21, and the
+# 25 the build needs installed but unreferenced -- and the compiler reports only:
+#
+#   error: release version 25 not supported
+#
+# naming neither the JDK it used nor the correct one sitting on the same disk.
+#
+# Invoked as `JH="$(bash .../java-home.sh)" && ... JAVA_HOME="$JH" ./mvnw`,
+# deliberately, rather than as a reusable prefix macro. A prefix of the form
+# JAVA_HOME="$(bash ...)" cannot fail the target: when the script exits non-zero
+# the substitution yields an EMPTY string, JAVA_HOME is set to nothing, and the
+# wrapper falls back to whatever `java` is first on PATH -- which on the machine
+# this was written on is a Java 8 JRE. The `&&` is what turns a missing JDK into
+# a stopped build with the script's diagnostic, instead of the compiler message
+# above arriving from an even older JDK than the one that caused it.
+
 # Terraform state lives in Cloudflare R2, not Hetzner (ADR-0005).
 BUCKET      ?= xenopsbase-tfstate
 R2_ENDPOINT ?=
@@ -233,10 +255,16 @@ mail-dns-verify: ## Resolve every mail record and report what is actually publis
 # fails the next build rather than the discrepancy being noticed by a consumer.
 # ------------------------------------------------------------------------------
 
+.PHONY: java-home
+java-home: ## Report which JDK the build will use, and why
+	@echo "required:  Java $$(grep -oE '<java\.version>[0-9]+' services/core/pom.xml | head -1 | grep -oE '[0-9]+')  (services/*/pom.xml)"
+	@echo "JAVA_HOME: $${JAVA_HOME:-<unset>}"
+	@printf "selected:  "; bash $(SCRIPTS)/java-home.sh
+
 .PHONY: api-spec
 api-spec: ## Regenerate docs/api/*.json from the services
-	@cd services/core && ./mvnw --batch-mode verify -DskipITs=false -Dit.test=OpenApiSpecIT -DfailIfNoTests=false -Dtest=SchemaOwnershipTest
-	@cd services/gateway && ./mvnw --batch-mode verify -DskipITs=false -Dit.test=OpenApiSpecIT -DfailIfNoTests=false -Dtest=SecurityUtilsUnitTest
+	@JH="$$(bash $(SCRIPTS)/java-home.sh)" && cd services/core && JAVA_HOME="$$JH" ./mvnw --batch-mode verify -DskipITs=false -Dit.test=OpenApiSpecIT -DfailIfNoTests=false -Dtest=SchemaOwnershipTest
+	@JH="$$(bash $(SCRIPTS)/java-home.sh)" && cd services/gateway && JAVA_HOME="$$JH" ./mvnw --batch-mode verify -DskipITs=false -Dit.test=OpenApiSpecIT -DfailIfNoTests=false -Dtest=SecurityUtilsUnitTest
 	@mkdir -p docs/api
 	@cp services/core/target/openapi/core.json docs/api/core.json
 	@cp services/gateway/target/openapi/gateway.json docs/api/gateway.json
@@ -244,7 +272,7 @@ api-spec: ## Regenerate docs/api/*.json from the services
 
 .PHONY: api-client
 api-client: ## Generate the typed Java client from the committed spec and compile it
-	@cd clients/java && mvn --batch-mode clean compile
+	@JH="$$(bash $(SCRIPTS)/java-home.sh)" && cd clients/java && JAVA_HOME="$$JH" mvn --batch-mode clean compile
 	@echo "client compiled from docs/api/core.json"
 
 # ------------------------------------------------------------------------------

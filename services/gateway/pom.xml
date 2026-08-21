@@ -519,12 +519,36 @@
                     <configuration>
                         <rules>
                             <requireMavenVersion>
-                                <message>You are running an older version of Maven. JHipster requires at least Maven ${maven.version}</message>
+                                <message>This project requires at least Maven ${maven.version}. Use ./mvnw, which fetches a supported version rather than relying on whatever is installed.</message>
                                 <version>[${maven.version},)</version>
                             </requireMavenVersion>
+                            <!--
+                                Derived from java.version rather than written out, and a lower
+                                bound rather than a range. Both of those are the fix for a real
+                                failure, not tidying.
+
+                                The generated rule was [21,22),[25,26) while java.version was 25,
+                                so a JDK 21 PASSED this check and then failed in the compiler with:
+
+                                    error: release version 25 not supported
+
+                                A guard that admits a JDK the build cannot use is worse than no
+                                guard: it moves the failure past the point that was supposed to
+                                explain it, into a message that names neither the JDK in use nor
+                                where it came from.
+
+                                Tying the version to ${java.version} means the two cannot drift
+                                apart again. The open upper bound is deliberate: a newer JDK
+                                can always compile to release ${java.version}, so refusing one
+                                would block a build that would have worked.
+
+                                (No double hyphens above: XML forbids them inside a comment, and
+                                the resulting parse error names a line number rather than the
+                                rule.)
+                            -->
                             <requireJavaVersion>
-                                <message>You are running an incompatible version of Java. JHipster supports JDK 21 to 25.</message>
-                                <version>[21,22),[25,26)</version>
+                                <message>This project targets Java ${java.version} and cannot be built with an older JDK. Check JAVA_HOME: `make java-home` reports which JDKs are on this machine and which one is needed.</message>
+                                <version>[${java.version},)</version>
                             </requireJavaVersion>
                         </rules>
                     </configuration>
