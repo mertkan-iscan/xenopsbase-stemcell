@@ -1,0 +1,125 @@
+# Tempo: trace storage, with blocks in object storage so traces outlive the
+# cluster.
+#
+# The `tempo` chart, NOT `tempo-distributed`. Distributed splits Tempo into
+# distributor, ingester, querier, query-frontend and compactor Deployments --
+# correct at volume, and more memory than this cluster has spare before a single
+# span arrives. Same reasoning as Loki's SingleBinary mode, and the same
+# constraint: one worker is already at 82% of its memory limits.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tempo
+  namespace: argocd
+  annotations:
+    # Wave 1, alongside Loki. Alloy is wave 2 and forwards to both, so a
+    # receiver that does not exist yet only produces export errors in the logs
+    # of the component whose job is telemetry.
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: tempo
+    # Pinned. Chart 1.24.4 carries Tempo 2.9.0.
+    targetRevision: 1.24.4
+    helm:
+      values: |
+        replicas: 1
+
+        # No PVC. Hetzner's 10Gi minimum is disproportionate for dev and the
+        # durable copy is the bucket. This path holds the write-ahead log and
+        # compactor scratch only, so a restart loses at most the spans not yet
+        # flushed into a block.
+        #
+        # Disabling it does NOT leave an emptyDir behind -- the chart simply
+        # stops mounting anything at /var/tempo (see the persistence guard in
+        # templates/statefulset.yaml), and Tempo then writes its WAL into the
+        # container's own writable layer, where nothing bounds it. The volume
+        # below is what makes that explicit and capped. Exactly the trap Loki
+        # hit, in the same chart family.
+        persistence:
+          enabled: false
+
+        tempo:
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits:   {memory: 512Mi}
+
+          # Blocks older than this are deleted by the compactor.
+          #
+          # Deliberately the same 7 days as the bucket's lifecycle rule
+          # (infra/lifecycle/tempo-traces.json). If Tempo kept blocks longer
+          # than the bucket does, it would serve index entries for objects S3
+          # had already expired -- queries that return a trace ID and then fail
+          # to fetch it. The two numbers have to be changed together.
+          retention: 168h
+
+          # OTLP only.
+          #
+          # The chart's default also opens Jaeger (four ports), OpenCensus and
+          # OTLP HTTP. Nothing here speaks them: Alloy forwards over OTLP gRPC
+          # and the services export to Alloy. Every other listener is a port
+          # accepting spans from anything that can reach the pod.
+          receivers:
+            otlp:
+              protocols:
+                grpc:
+                  endpoint: 0.0.0.0:4317
+
+          storage:
+            trace:
+              backend: s3
+              s3:
+                bucket: xenopsbase-dev-tempo-traces
+                # NO SCHEME. Tempo takes a bare host here and decides TLS from
+                # `insecure` below -- unlike Loki in the same stack, which takes
+                # a full https:// URL. Putting a scheme in produces a host that
+                # does not resolve, and the error names DNS rather than config.
+                endpoint: fsn1.your-objectstorage.com
+                region: fsn1
+                insecure: false
+                # Hetzner needs path-style addressing. With virtual-host style
+                # the bucket becomes a subdomain that does not resolve, which
+                # again looks like a DNS fault.
+                forcepathstyle: true
+                # access_key / secret_key deliberately absent: values here render
+                # into a ConfigMap in plaintext. Tempo's S3 client falls back to
+                # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY from the environment,
+                # which is what extraEnvFrom below supplies.
+              wal:
+                path: /var/tempo/wal
+
+          # The SAME secret Loki uses, not a copy.
+          #
+          # It carries the observability access key, and the bucket policy on
+          # tempo-traces already names that key because the bucket is declared
+          # with owner = access_keys.observability. A second SOPS secret holding
+          # the same credential is a second value that can drift from the first.
+          extraEnvFrom:
+            - secretRef:
+                name: loki-s3
+
+          # The mount for the volume declared below. Both halves are required
+          # and they live under different keys -- the volume is top-level,
+          # the mount is under tempo. Declaring only the volume is silent: Helm
+          # renders it, nothing consumes it, and the WAL goes to the container
+          # layer exactly as if neither had been written.
+          extraVolumeMounts:
+            - name: tempo-data
+              mountPath: /var/tempo
+
+        # Bounded scratch space for the WAL and compaction, mounted where the
+        # chart would have mounted the PVC.
+        extraVolumes:
+          - name: tempo-data
+            emptyDir:
+              sizeLimit: 2Gi
+
+        tempoQuery:
+          # Off. This is the Jaeger-UI shim; Grafana queries Tempo directly
+          # through its own datasource, so it would be a second pod serving a
+          # second UI nobody opens.
+          enabled: false
