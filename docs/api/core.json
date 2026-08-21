@@ -60,7 +60,9 @@
             "type" : "string"
           }
         },
-        "required" : [ "name" ],
+        "required" : [
+          "name"
+        ],
         "type" : "object"
       },
       "InitiateRequest" : {
@@ -80,7 +82,10 @@
             "type" : "integer"
           }
         },
-        "required" : [ "contentType", "filename" ],
+        "required" : [
+          "contentType",
+          "filename"
+        ],
         "type" : "object"
       },
       "Pageable" : {
@@ -154,20 +159,24 @@
             "description" : "OK"
           }
         },
-        "tags" : [ "example-item-resource" ]
+        "tags" : [
+          "example-item-resource"
+        ]
       }
     },
     "/api/documents" : {
       "get" : {
         "operationId" : "list_1",
-        "parameters" : [ {
-          "in" : "query",
-          "name" : "pageable",
-          "required" : true,
-          "schema" : {
-            "$ref" : "#/components/schemas/Pageable"
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "pageable",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/Pageable"
+            }
           }
-        } ],
+        ],
         "responses" : {
           "200" : {
             "content" : {
@@ -183,7 +192,9 @@
             "description" : "OK"
           }
         },
-        "tags" : [ "document-resource" ]
+        "tags" : [
+          "document-resource"
+        ]
       },
       "post" : {
         "operationId" : "initiate",
@@ -209,41 +220,49 @@
             "description" : "OK"
           }
         },
-        "tags" : [ "document-resource" ]
+        "tags" : [
+          "document-resource"
+        ]
       }
     },
     "/api/documents/{id}" : {
       "delete" : {
         "operationId" : "delete",
-        "parameters" : [ {
-          "in" : "path",
-          "name" : "id",
-          "required" : true,
-          "schema" : {
-            "format" : "int64",
-            "type" : "integer"
+        "parameters" : [
+          {
+            "in" : "path",
+            "name" : "id",
+            "required" : true,
+            "schema" : {
+              "format" : "int64",
+              "type" : "integer"
+            }
           }
-        } ],
+        ],
         "responses" : {
           "200" : {
             "description" : "OK"
           }
         },
-        "tags" : [ "document-resource" ]
+        "tags" : [
+          "document-resource"
+        ]
       }
     },
     "/api/documents/{id}/complete" : {
       "post" : {
         "operationId" : "complete",
-        "parameters" : [ {
-          "in" : "path",
-          "name" : "id",
-          "required" : true,
-          "schema" : {
-            "format" : "int64",
-            "type" : "integer"
+        "parameters" : [
+          {
+            "in" : "path",
+            "name" : "id",
+            "required" : true,
+            "schema" : {
+              "format" : "int64",
+              "type" : "integer"
+            }
           }
-        } ],
+        ],
         "responses" : {
           "200" : {
             "content" : {
@@ -256,27 +275,33 @@
             "description" : "OK"
           }
         },
-        "tags" : [ "document-resource" ]
+        "tags" : [
+          "document-resource"
+        ]
       }
     },
     "/api/documents/{id}/download" : {
       "get" : {
         "operationId" : "download",
-        "parameters" : [ {
-          "in" : "path",
-          "name" : "id",
-          "required" : true,
-          "schema" : {
-            "format" : "int64",
-            "type" : "integer"
+        "parameters" : [
+          {
+            "in" : "path",
+            "name" : "id",
+            "required" : true,
+            "schema" : {
+              "format" : "int64",
+              "type" : "integer"
+            }
           }
-        } ],
+        ],
         "responses" : {
           "200" : {
             "description" : "OK"
           }
         },
-        "tags" : [ "document-resource" ]
+        "tags" : [
+          "document-resource"
+        ]
       }
     },
     "/api/example-items" : {
@@ -297,7 +322,9 @@
             "description" : "OK"
           }
         },
-        "tags" : [ "example-item-resource" ]
+        "tags" : [
+          "example-item-resource"
+        ]
       },
       "post" : {
         "operationId" : "create",
@@ -323,7 +350,9 @@
             "description" : "OK"
           }
         },
-        "tags" : [ "example-item-resource" ]
+        "tags" : [
+          "example-item-resource"
+        ]
       }
     },
     "/api/whoami" : {
@@ -344,12 +373,16 @@
             "description" : "OK"
           }
         },
-        "tags" : [ "example-item-resource" ]
+        "tags" : [
+          "example-item-resource"
+        ]
       }
     }
   },
-  "servers" : [ {
-    "description" : "Generated server url",
-    "url" : "http://localhost"
-  } ]
+  "servers" : [
+    {
+      "description" : "Generated server url",
+      "url" : "http://localhost"
+    }
+  ]
 }

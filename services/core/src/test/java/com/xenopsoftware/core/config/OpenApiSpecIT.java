@@ -6,6 +6,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.util.DefaultIndenter;
+import com.fasterxml.jackson.core.util.DefaultPrettyPrinter;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.xenopsoftware.core.IntegrationTest;
 import java.nio.charset.StandardCharsets;
@@ -138,6 +140,18 @@ class OpenApiSpecIT {
     private static String canonical(ObjectMapper mapper, JsonNode spec) throws Exception {
         ObjectMapper sorted = mapper.copy().configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
         Object asMap = sorted.treeToValue(spec, Object.class);
-        return sorted.writerWithDefaultPrettyPrinter().writeValueAsString(asMap);
+
+        // Explicit LF. Jackson's default pretty printer uses the SYSTEM line separator, so this
+        // file would be CRLF on Windows and LF on Linux -- the committed artifact differing by the
+        // operating system that produced it. CI would still pass, and `make api-spec` on Windows
+        // would show a whole-file diff on every run, for ever.
+        DefaultPrettyPrinter printer = new DefaultPrettyPrinter();
+        printer.indentObjectsWith(new DefaultIndenter("  ", "\n"));
+        printer.indentArraysWith(new DefaultIndenter("  ", "\n"));
+
+        // Normalised rather than trusted. Setting the indenter's EOL is not sufficient on its own
+        // -- Jackson emits separators from more than one place -- and the point here is a file
+        // that is identical on every platform, not an elegant printer configuration.
+        return sorted.writer(printer).writeValueAsString(asMap).replace("\r\n", "\n").replace("\r", "\n");
     }
 }
