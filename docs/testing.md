@@ -80,12 +80,16 @@ is what the test actually exercises rather than what it asserts. `ExtensionSeams
 each aimed at how a seam fails *silently*. `DeadDownstreamIT` asserts behaviour against a refused
 connection.
 
-**Does not cover identity.** There is no Keycloak container. `TestSecurityConfiguration` mocks
-`ReactiveJwtDecoder`, so token signature validation, audience enforcement, the `roles` client scope
-and the mapping from realm roles to authorities are **never exercised against a real identity
-provider**. Every authorization failure this project has hit — the missing `aud` claim, the dropped
-`roles` scope, the absent `offline_access` role — would have passed this layer. T-4.2 (#36) is the
-card that adds it.
+**Covers identity, in core, since T-4.2 (#36).** `KeycloakTestcontainer` starts a real Keycloak
+preloaded with `platform/envs/dev/keycloak/realm-import.yaml` — the production realm file, not a
+copy of it — and `RealTokenAuthorizationIT` authenticates with tokens Keycloak actually minted.
+That test deliberately does not import `TestSecurityConfiguration`, so signature validation,
+audience enforcement, the `roles` client scope and realm-role-to-authority mapping are all real.
+Every authorization failure this project has hit — the missing `aud` claim, the dropped `roles`
+scope, the absent `offline_access` role — would now be caught here.
+
+**Does not cover identity in the gateway.** Its ITs still mock `ReactiveJwtDecoder`. The harness
+exists and the pattern is proven; extending it to the gateway's reactive stack has not been done.
 
 **Does not cover** anything outside one service. The gateway's ITs do not start core, and core's do
 not start the gateway.
