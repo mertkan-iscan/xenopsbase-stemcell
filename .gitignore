@@ -84,3 +84,7 @@ services/*/.jhipster/
 # it is reproducible from the spec by `make api-client`, and committing it would mean
 # reviewing thousands of generated lines on every API change.
 /clients/java/target/
+
+# Generated from the deployed realm by `make dev-realm` (T-4.1).
+infra/dev/.generated/
+infra/dev/.logs/

@@ -28,10 +28,22 @@ management:
   # service that produced no spans at all, while Tempo and Alloy were deployed,
   # healthy and receiving nothing -- Tempo's own API answered {"traces":[]}.
   #
-  # The endpoint has NO default on purpose. Spring only registers an OTLP
-  # exporter when one is set, so a laptop with no collector generates spans and
-  # exports nothing, rather than retrying against a port that is not listening.
-  # The deployment supplies it; see platform/envs/dev/services/.
+  # The endpoint has no usable default, and `tracing.enabled` below is what makes
+  # that safe.
+  #
+  # This comment used to claim Spring "only registers an OTLP exporter when one
+  # is set". It does not. `${OTLP_TRACING_ENDPOINT:}` resolves to the EMPTY
+  # STRING, which is a set value, and the exporter is built and rejects it:
+  #
+  #   IllegalArgumentException: Invalid endpoint, must start with http:// or https://:
+  #
+  # So the dev profile could not start at all without that variable exported --
+  # found the first time anything ran this profile on a laptop rather than in the
+  # cluster (T-4.1). The deployment was unaffected because it runs the `prod`
+  # profile and supplies the endpoint; see platform/envs/dev/services/.
+  #
+  # Tracing is therefore OFF by default here and ON wherever a collector exists.
+  # Set TRACING_ENABLED=true together with OTLP_TRACING_ENDPOINT to trace locally.
   # Metrics do NOT go over OTLP here; Prometheus scrapes them.
   #
   # spring-boot-starter-opentelemetry brings micrometer-registry-otlp, which
@@ -43,17 +55,26 @@ management:
     metrics:
       export:
         enabled: false
-  opentelemetry:
-    tracing:
-      export:
-        otlp:
-          endpoint: ${OTLP_TRACING_ENDPOINT:}
-          # gRPC, not the `http` default: the Alloy receiver in this platform
-          # listens on 4317 with a grpc block only. Sending protobuf-over-HTTP
-          # to a gRPC port fails per export, in the exporter's own log, while
-          # the application stays healthy.
-          transport: grpc
+  # NO otlp tracing endpoint here, deliberately, and the omission is the fix.
+  #
+  # `endpoint: ${OTLP_TRACING_ENDPOINT:}` used to live here. The empty default is
+  # a SET value, so Boot built the exporter and it rejected it:
+  #
+  #   IllegalArgumentException: Invalid endpoint, must start with http:// or https://:
+  #
+  # which meant the dev profile could not start on a machine that had not
+  # exported that variable -- the whole point of T-4.1 being a five-minute clone.
+  # Setting `management.tracing.enabled: false` does NOT avoid it either: the
+  # exporter bean is conditional on the endpoint property existing, not on
+  # tracing being on. Leaving the property unset is what actually works.
+  #
+  # The deployment is unaffected: it runs the `prod` profile, which sets the
+  # endpoint and the grpc transport (Alloy's receiver listens on 4317 with a
+  # grpc block only). To trace locally, export
+  # MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT and TRACING_ENABLED=true.
   tracing:
+    # OFF unless a collector exists -- see the note above the otlp block.
+    enabled: ${TRACING_ENABLED:false}
     sampling:
       # Everything, which is right for dev and wrong for a busy production
       # service -- overridden by TRACING_SAMPLE_PROBABILITY rather than by

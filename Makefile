@@ -134,6 +134,54 @@ define check_creds
 		exit 1; }
 endef
 
+# ------------------------------------------------------------------------------
+# Local inner loop (T-4.1)
+#
+# Everything a developer needs, with no Hetzner resources and no credentials.
+# Docker is the only prerequisite; the JDK is found by java-home.sh.
+#
+# The DEPENDENCIES run in containers and the SERVICES run from Maven. That split
+# is the whole point: spring-boot-devtools restarts a changed class in seconds,
+# and a container rebuild does not.
+# ------------------------------------------------------------------------------
+
+DEV_DIR      := infra/dev
+DEV_COMPOSE  := docker compose -f $(DEV_DIR)/compose.yml
+DEV_LOGS     := $(DEV_DIR)/.logs
+
+# Points every service at localhost instead of the cluster. AWS_* is set
+# explicitly rather than inherited: a developer who has run `source
+# ~/.xenopsbase.env` has R2 credentials in those names, and MinIO would reject
+# them with a signature error that names neither MinIO nor R2.
+DEV_ENV = 	OIDC_ISSUER_URI=http://localhost:9080/realms/xenopsbase 	OIDC_CLIENT_SECRET=local-dev-gateway-secret 	CORE_URI=http://localhost:8081	VALKEY_HOST=localhost 	VALKEY_PASSWORD=localdev 	DOCUMENTS_ENDPOINT=http://localhost:9000 	DOCUMENTS_BUCKET=xenopsbase-dev-documents 	AWS_ACCESS_KEY_ID=localdevkey 	AWS_SECRET_ACCESS_KEY=localdevsecret 	AWS_REGION=us-east-1
+
+.PHONY: dev-realm
+dev-realm: ## Render the local Keycloak realm from the one the cluster uses
+	@bash $(SCRIPTS)/dev-realm.sh
+
+.PHONY: dev-up
+dev-up: ## Everything: dependencies in containers, both services from Maven
+	@bash $(SCRIPTS)/dev-up.sh
+
+.PHONY: dev-down
+dev-down: ## Stop the services and remove the containers and their volumes
+	@bash $(SCRIPTS)/dev-down.sh
+
+.PHONY: dev-logs
+dev-logs: ## Follow both service logs
+	@tail -f $(DEV_LOGS)/gateway.log $(DEV_LOGS)/core.log
+
+.PHONY: dev-deps
+dev-deps: dev-realm ## Dependencies only, for running the services from an IDE
+	@# Two calls, deliberately. `--wait` treats the one-shot bucket creator's
+	@# clean exit(0) as a failed service, so the wait names only the four
+	@# long-running dependencies while the first call still runs the one-shot.
+	@$(DEV_COMPOSE) up -d
+	@$(DEV_COMPOSE) up -d --wait postgres keycloak minio valkey
+	@echo
+	@echo "Dependencies are up. To run the services from an IDE, set:"
+	@for v in $(DEV_ENV); do echo "    $$v"; done
+
 .PHONY: help
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
