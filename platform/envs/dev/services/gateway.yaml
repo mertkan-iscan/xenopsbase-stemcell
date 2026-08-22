@@ -17,6 +17,16 @@ spec:
   # random. With the session in Valkey the replicas are interchangeable, which
   # is what "stateless" has to mean before it means anything.
   #
+  # THAT WAS HALF TRUE FOR A WHILE (T-3.19, #179). Moving the session did not
+  # move the OAuth2 authorized client: Spring Boot keeps the access and refresh
+  # tokens in a separate, in-memory store that the session's location says
+  # nothing about. So the session replicated and the tokens did not, and the
+  # pod that had not handled the login redirected every request it received --
+  # page, stylesheet, XHR alike -- into a fresh Keycloak authorization request.
+  # Fixed in the gateway, not here: SecurityConfiguration now binds the
+  # authorized client to the WebSession, so it rides the same Valkey that made
+  # this number 2 in the first place.
+  #
   # Two is also what makes a rollout survivable: the old pod keeps serving while
   # the new one starts, instead of every logged-in user being dropped on every
   # deploy.
