@@ -35,11 +35,13 @@ images:
     # Carries 1c81e0d (infra usage endpoint with node placement, T-3.16).
     digest: sha256:1da312ddd92e22272f55d62df61ce16b2e9ec3a61ed3709ea568ab463d1364d8
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway
-    # Commit d861dbf -- trusted-proxies REVERTED to '.*'. The narrowing in
-    # 0c8129a stopped the gateway forwarding X-Forwarded-* to core, and core's
-    # pagination Link header became http://core:8081/... within minutes of
-    # deploying (T-3.15). Carries 1dbbfe5 (failed login restarts at /, T-3.17),
+    # Commit 5efdc48 -- asset requests are no longer treated as browser
+    # navigation (T-3.18). /app.css was answered with a 302 into the OIDC flow,
+    # minting a new authorization request per asset, which orphaned the state
+    # the user's navigation was carrying and dead-ended login intermittently.
+    # Carries d861dbf (trusted-proxies reverted to '.*', T-3.15),
+    # 1dbbfe5 (failed login restarts at /, T-3.17),
     # e7acc9b (correlation id on spans, T-3.8), 4ccd88f (sessions in Valkey,
     # T-2.11), 6d965b8 (CSP without 'unsafe-inline'/'unsafe-eval'), 806e8be
     # (logout origin from the request) and f430d36.
-    digest: sha256:1d8f5a5de55797e2ba76bc7095992f62503abb8985d9ef6913b2061d25add154
+    digest: sha256:10cdfb96cc26819ef042bcca85588b4cfc3ec539670ee0e691bd56116f66ef54
