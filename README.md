@@ -106,6 +106,7 @@ reproduces from nothing.
 - [services/README.md](services/README.md) — package conventions and the tech.jhipster exit path
 - [CONTRIBUTING.md](CONTRIBUTING.md) — branching, commits, and the no-manual-configuration rule
 - Runbooks
+  - [Disaster recovery](docs/runbooks/disaster-recovery.md) — RPO and RTO per component, measured; scenarios; what is not protected
   - [Secrets](docs/runbooks/secrets.md) — SOPS, age, the one bootstrap key, rotation
   - [Terraform CI](docs/runbooks/terraform-ci.md) — lint, checkov, plan-on-PR, manual apply
   - [Edge](docs/runbooks/edge.md) — Cloudflare tunnel, DNS, and the shared-zone hazard
