@@ -56,6 +56,22 @@
         <cucumber-bom.version>7.34.4</cucumber-bom.version>
         <jackson-databind-nullable.version>0.2.10</jackson-databind-nullable.version>
         <jacoco-maven-plugin.version>0.8.15</jacoco-maven-plugin.version>
+        <!--
+            THE ENFORCED FLOOR, WHICH IS NOT THE TARGET.
+
+            docs/testing.md sets the target at 80% instruction / 70% branch and says why. This
+            module measured 54.5% / 41.7% on a merged unit+integration run (2026-08-22), so
+            enforcing the target would fail every build from the moment the gate went in - a gate
+            that cannot pass is removed within a day, and then there is no gate at all.
+
+            These numbers are the measured baseline, one point below, so the build fails on a
+            REGRESSION today and the target is reached by raising them as tests are added. Raise
+            them deliberately, with the reason in the commit, the same as every other threshold in
+            this repository. Getting from here to the target is its own body of work and has its
+            own card.
+        -->
+        <jacoco.minimum.instruction>0.53</jacoco.minimum.instruction>
+        <jacoco.minimum.branch>0.40</jacoco.minimum.branch>
         <jhipster-framework.version>8.12.0</jhipster-framework.version>
         <jib-maven-plugin.architecture>amd64</jib-maven-plugin.architecture>
         <!--
@@ -914,6 +930,87 @@
                             <goals>
                                 <goal>report-integration</goal>
                             </goals>
+                        </execution>
+                        <!--
+                            THE GATE (T-5.2, #41).
+
+                            jacoco writes two separate exec files, so neither report is the
+                            project's coverage: jacoco.exec is unit-only and jacoco-it.exec is
+                            integration-only, and the same line covered by both counts in each.
+                            Gating on either would be gating on half the suite. These three
+                            executions merge them, report the union, and fail the build below the
+                            floor T-5.1 sets.
+                        -->
+                        <execution>
+                            <id>merge-unit-and-integration</id>
+                            <phase>post-integration-test</phase>
+                            <goals>
+                                <goal>merge</goal>
+                            </goals>
+                            <configuration>
+                                <fileSets>
+                                    <fileSet>
+                                        <directory>${project.build.directory}</directory>
+                                        <includes>
+                                            <include>jacoco.exec</include>
+                                            <include>jacoco-it.exec</include>
+                                        </includes>
+                                    </fileSet>
+                                </fileSets>
+                                <destFile>${project.build.directory}/jacoco-merged.exec</destFile>
+                            </configuration>
+                        </execution>
+                        <execution>
+                            <id>merged-report</id>
+                            <phase>post-integration-test</phase>
+                            <goals>
+                                <goal>report</goal>
+                            </goals>
+                            <configuration>
+                                <dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
+                                <outputDirectory>${project.build.directory}/site/jacoco-merged</outputDirectory>
+                            </configuration>
+                        </execution>
+                        <execution>
+                            <id>coverage-gate</id>
+                            <phase>verify</phase>
+                            <goals>
+                                <goal>check</goal>
+                            </goals>
+                            <configuration>
+                                <dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
+                                <rules>
+                                    <rule>
+                                        <!--
+                                            BUNDLE, not CLASS. A per-class floor forces tests onto
+                                            records, DTOs and configuration holders; a module floor
+                                            leaves judgement where it belongs and still fails if a
+                                            substantial untested feature lands.
+                                        -->
+                                        <element>BUNDLE</element>
+                                        <limits>
+                                            <limit>
+                                                <counter>INSTRUCTION</counter>
+                                                <value>COVEREDRATIO</value>
+                                                <minimum>${jacoco.minimum.instruction}</minimum>
+                                            </limit>
+                                            <limit>
+                                                <!--
+                                                    Stated separately and lower than instruction on
+                                                    purpose. Instruction coverage inflates on a
+                                                    single happy path; branch coverage is what
+                                                    notices the error path was never taken, and
+                                                    error paths are where this project's defects
+                                                    have been.
+                                                -->
+                                                <counter>BRANCH</counter>
+                                                <value>COVEREDRATIO</value>
+                                                <minimum>${jacoco.minimum.branch}</minimum>
+                                            </limit>
+                                        </limits>
+                                    </rule>
+                                </rules>
+                            </configuration>
                         </execution>
                     </executions>
                 </plugin>
