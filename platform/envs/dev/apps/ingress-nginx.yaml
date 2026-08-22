@@ -42,6 +42,34 @@ spec:
               cpu: 100m
               memory: 128Mi
 
+          # STRIP X-Forwarded-Prefix FROM EVERY REQUEST (T-3.15, #148).
+          #
+          # nginx rewrites X-Forwarded-Host to $best_http_host and sets
+          # X-Forwarded-Proto itself, so a caller cannot forge either. It does
+          # not touch X-Forwarded-Prefix at all -- the header is passed straight
+          # through to the gateway, which honours it.
+          #
+          # Verified against dev on 2026-08-22, from inside the cluster so
+          # Cloudflare was not in the path:
+          #
+          #   GET / -H 'X-Forwarded-Prefix: /injected'
+          #     -> 302 .../injected/oauth2/authorization/oidc
+          #
+          # A caller choosing the path prefix the gateway builds URLs under, and
+          # -- per #148 -- moving every path out from under the route predicates
+          # so routing to core stops entirely. One header, no authentication.
+          #
+          # That was closed at Cloudflare, which covers the public path and only
+          # the public path. Anything reaching this ingress another way got the
+          # old behaviour, and deleting that Cloudflare rule looks like removing
+          # a header rewrite rather than like reopening request forgery.
+          #
+          # An empty value renders `proxy_set_header X-Forwarded-Prefix "";`,
+          # which makes nginx omit the header rather than forward it. Nothing
+          # here is served under a path prefix, so there is no legitimate sender.
+          proxySetHeaders:
+            X-Forwarded-Prefix: ""
+
           config:
             # cloudflared is the only client, and it is in-cluster, so the real
             # client address arrives in headers rather than at the TCP layer.

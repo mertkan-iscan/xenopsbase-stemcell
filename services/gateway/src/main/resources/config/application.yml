@@ -285,8 +285,33 @@ spring:
                       maxBackoff: 500ms
                       factor: 2
                       basedOnPreviousValue: false
+          # WHOSE X-Forwarded-* HEADERS THIS GATEWAY BELIEVES (T-3.15, #148).
+          #
+          # This was '.*', which trusts the immediate peer whoever it is --
+          # including a caller that reached the gateway directly. The value below
+          # is the cluster pod network, derived from what the gateway actually
+          # sees rather than assumed: requests arrive from the ingress-nginx pod
+          # (10.42.3.26 on 2026-08-22), and every node carries a /24 out of
+          # 10.42.0.0/16 (10.42.0.0/24, 10.42.1.0/24, 10.42.3.0/24).
+          #
+          # Narrowing this is deliberately conservative, because getting it wrong
+          # is worse than leaving it. If X-Forwarded-Proto stops being honoured,
+          # every absolute URL the gateway builds reverts to http:// -- login
+          # redirects, the logout post_logout_redirect_uri, and core's pagination
+          # Link headers -- and that class of fault has already cost a day here.
+          #
+          # WHAT THIS DOES AND DOES NOT BUY. It closes the direct-to-gateway
+          # path: a port-forward, or a workload that resolves the Service, no
+          # longer has its forwarded headers believed. It does NOT stop a
+          # workload that is itself inside the pod CIDR, and it cannot: the
+          # filter matches the peer address, and every pod is in that range.
+          # What stops header forgery arriving THROUGH the ingress is the
+          # ingress rewriting the headers, which is why X-Forwarded-Prefix is
+          # now stripped there (platform/envs/dev/apps/ingress-nginx.yaml).
+          # These are two layers, and neither is redundant.
+          #
           # See alternatives in https://github.com/spring-cloud/spring-cloud-gateway/issues/3818
-          trusted-proxies: '.*'
+          trusted-proxies: '10\.42\.\d{1,3}\.\d{1,3}'
   docker:
     compose:
       # Off. The generated compose files duplicated Keycloak, Postgres, Grafana
