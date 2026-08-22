@@ -313,11 +313,38 @@ directly. But the two fields that say *how old the newest recoverable point is* 
 nothing can alert on backup age. The conditions are green whether the last backup was an hour ago
 or a month ago.
 
-This is #145, and it matters more in a DR document than anywhere else: the entire plan above
-assumes you find out when backups stop. Today you would not. **Until #145 is fixed, check the bucket
-directly** rather than trusting the cluster status:
+This is #145, and the cause is now known. Under the barman-cloud **plugin** backup method this
+project uses, CloudNativePG never populates the in-tree backup fields:
+`status.lastSuccessfulBackup` is absent from the resource altogether, and
+`cnpg_collector_last_available_backup_timestamp` is pinned at `0`. Both belong to the deprecated
+`barmanObjectStore` path. `LastBackupSucceeded` is maintained from `Backup` resources and is
+truthful — it simply says nothing about *age*.
+
+So no field on the cluster answers "when did this last back up". Read the bucket instead:
 
 ```bash
-aws --endpoint-url https://fsn1.your-objectstorage.com \
-  s3 ls s3://xenopsbase-dev-pg-backups/postgres-g3/base/
+make backup-status ENV=dev
 ```
+
+```
+✓ base backups: 4, newest 20260822T084633 (90 min old)
+✓ WAL: newest 000000060000000100000080.gz (4 min old)
+
+  for contrast, what the Cluster resource says:
+      LastBackupSucceeded condition : True
+      status.lastSuccessfulBackup   : <absent — see #145>
+
+BACKUP CHECK PASSED
+```
+
+It exits non-zero when the newest base backup is older than 30 hours or the newest WAL segment is
+older than 15 minutes, and **it gates `cluster-destroy`** — the pre-destroy question is "is this
+recoverable", and that check now reads objects rather than a condition. `SKIP_BACKUP_CHECK=1`
+overrides it, because a cluster whose backups are broken is exactly one you may still need to tear
+down.
+
+Two alerts, `PostgresNoRecentBaseBackup` and `PostgresLastBackupFailed`, cannot fire for the same
+reason. They are documented as such in place rather than deleted, so they resume working by
+themselves if the metric is ever populated. `PostgresBackupAgeUnobservable` fires while they cannot,
+and `PostgresArchivingStalled` covers the RPO directly from `pg_stat_archiver`, which does carry
+real values.

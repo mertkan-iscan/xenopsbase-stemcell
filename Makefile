@@ -349,6 +349,16 @@ cluster-apply: ## Build or update the cluster
 .PHONY: cluster-destroy
 cluster-destroy: ## Destroy the cluster. Does NOT touch the durable buckets or the OS snapshot
 	$(call check_env,$(CLUSTER_DIR))
+	@# The pre-destroy question is "is the data recoverable", and until now
+	@# nothing could answer it. The Cluster's LastBackupSucceeded condition reads
+	@# True whether the last backup was an hour ago or never happened, and
+	@# status.lastSuccessfulBackup does not exist at all under the plugin backup
+	@# method (#145). So this reads the BUCKET, which is the fact rather than a
+	@# claim about it.
+	@#
+	@# SKIP_BACKUP_CHECK=1 to destroy anyway -- a cluster whose backups are
+	@# broken is exactly one you may still need to tear down.
+	@test "$(SKIP_BACKUP_CHECK)" = "1" || bash $(SCRIPTS)/verify-backup.sh $(ENV)
 	@# PVC-backed volumes are created by the CSI driver, not by Terraform, so
 	@# `terraform destroy` neither tracks nor removes them. It reports success and
 	@# leaves them billing forever. The CSI driver runs INSIDE the cluster, so this
@@ -359,6 +369,10 @@ cluster-destroy: ## Destroy the cluster. Does NOT touch the durable buckets or t
 	@# Assert the boundary held rather than trusting it. A leak here is invisible
 	@# and permanent, so it fails the target instead of waiting to be noticed.
 	@bash $(SCRIPTS)/verify-teardown.sh $(ENV)
+
+.PHONY: backup-status
+backup-status: ## Is the database actually recoverable? Reads the bucket, not the Cluster status
+	@bash $(SCRIPTS)/verify-backup.sh $(ENV)
 
 .PHONY: verify-teardown
 verify-teardown: ## Assert a destroy left durable state intact and nothing orphaned
