@@ -59,10 +59,39 @@ class UnauthenticatedRequestIT {
     }
 
     @Test
-    void aClientStatingNoPreferenceIsTreatedAsAnApiClient() {
-        // curl sends Accept: *_/_* by default. Redirecting it to a login page would produce the
-        // original bug for the most common debugging tool there is.
+    void aRequestWithNoAcceptHeaderIsTreatedAsAnApiClient() {
         webTestClient.get().uri("/api/documents").exchange().expectStatus().isUnauthorized();
+    }
+
+    @Test
+    void aClientStatingNoPreferenceIsTreatedAsAnApiClient() {
+        // This test used to send NO Accept header while its comment claimed to cover `*_/_*`, and
+        // those are different requests: the first was always a 401, the second was a 302 for
+        // months. The case the comment described was never actually exercised (T-3.18, #175).
+        webTestClient.get().uri("/api/documents").header(HttpHeaders.ACCEPT, "*/*").exchange().expectStatus().isUnauthorized();
+    }
+
+    @Test
+    void aStylesheetRequestIsNotTreatedAsBrowserNavigation() {
+        // The bug this locks down. A browser sends `text/css,*_/_*;q=0.1` for a stylesheet, and
+        // MediaTypeServerWebExchangeMatcher matches `*_/_*` unless told otherwise -- so every
+        // asset request was answered with a redirect into /oauth2/authorization/oidc.
+        //
+        // Each of those MINTED A NEW AUTHORIZATION REQUEST, replacing the one the user's actual
+        // navigation was carrying, so the callback came back with a superseded state and failed
+        // with authorization_request_not_found. One page load could create several.
+        webTestClient
+            .get()
+            .uri("/app.css")
+            .header(HttpHeaders.ACCEPT, "text/css,*/*;q=0.1")
+            .exchange()
+            .expectStatus()
+            .isUnauthorized();
+    }
+
+    @Test
+    void aScriptRequestIsNotTreatedAsBrowserNavigation() {
+        webTestClient.get().uri("/app.js").header(HttpHeaders.ACCEPT, "*/*").exchange().expectStatus().isUnauthorized();
     }
 
     @Test
