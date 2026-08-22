@@ -46,6 +46,7 @@ preparation, and rebuilt from this repository plus the contents of object storag
 | PostgreSQL base backups and WAL archive — object storage | The PostgreSQL cluster itself |
 | Terraform state — object storage, versioned and locked | Ingress, cert-manager, Keycloak pods |
 | Keycloak realm, clients, roles — JSON in git | Issued sessions and tokens |
+| Keycloak **users and their `sub`** — Postgres, restored with it (ADR-0010) | Grafana's and Prometheus's own volumes |
 | All manifests and Helm values — git, reconciled by GitOps | Grafana dashboards at runtime |
 | Container images — GHCR | Loki index; chunks go to object storage |
 

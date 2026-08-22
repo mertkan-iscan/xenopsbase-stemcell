@@ -60,3 +60,4 @@ than a clean file that hides the fact a mistake was ever made.
 | [0006](0006-tailscale-node-transport.md) | Tailscale node transport; the public API is closed | Accepted |
 | [0007](0007-postgres-backup-mechanism.md) | Postgres backs up through the Barman Cloud plugin | Accepted |
 | [0009](0009-in-memory-store.md) | Valkey is the in-memory store, and it is disposable | Accepted |
+| [0010](0010-user-identity-durability.md) | User identity is durable; declared users carry explicit ids | Accepted |
