@@ -128,6 +128,17 @@ KUBECONFIG=$K kubectl -n keycloak delete keycloakrealmimport xenopsbase
 KUBECONFIG=$K kubectl -n argocd annotate app keycloak argocd.argoproj.io/refresh=hard --overwrite
 ```
 
-This destroys every user in the realm. Acceptable in dev, where the only users are the two
-throwaway test accounts. **Never do this in an environment with real users** — realm changes there
-need the admin API or a migration, not a re-import.
+This deletes every user in the realm and the import recreates them.
+
+That used to be described as harmless because "the only users are the two throwaway test accounts".
+It stopped being harmless once those accounts owned documents: ownership is the Keycloak `sub`, and
+a recreated user gets a new one, so every document would belong to a user that no longer exists —
+silently, with the rows still in Postgres and the objects still in the bucket (T-7.8, #147).
+
+It is safe **because the declared users now carry explicit `id`s** in `realm-import.yaml`, so the
+re-import restores the same subs. If you add a user there, give it an id, or you are reintroducing
+this. Anyone created at runtime instead of declared is still lost — ADR-0010 covers why that is
+accepted and what fixing it properly would take.
+
+**Never do this in an environment with real users** — realm changes there need the admin API or a
+migration, not a re-import.

@@ -362,8 +362,35 @@ spec:
     # no offline_access role. The gateway no longer asks (see application.yml),
     # so nothing here needs that role -- but add it explicitly, or add
     # default-roles-xenopsbase, before relying on anything that does.
+    # EVERY USER CARRIES AN EXPLICIT id, AND THAT id IS THE OWNERSHIP KEY.
+    #
+    # Documents are owned by the Keycloak `sub` (DocumentResource#currentOwner),
+    # which is this id. Declared without one, Keycloak mints a fresh UUID every
+    # time it CREATES the realm -- and the documented way to apply a realm
+    # change is to delete the realm and let the import recreate it
+    # (docs/runbooks/authorization.md). That regenerates every sub, and every
+    # document then belongs to a user that no longer exists: the rows are still
+    # in Postgres, the objects are still in the bucket, and nothing can reach
+    # them. No error is raised at any point (T-7.8, #147).
+    #
+    # These are the ids the realm already had, read out of `user_entity` on
+    # 2026-08-22, not newly invented ones. That is the difference between fixing
+    # this and causing it: a fresh UUID here would orphan the 13 documents this
+    # change exists to protect, the first time anyone followed the procedure.
+    #
+    # A routine rebuild was never the danger, which is worth recording because
+    # the card assumed it was. Postgres bootstraps by `recovery` from the
+    # archive rather than initdb, so Keycloak's user table is RESTORED, and the
+    # import job then reports "Realm 'xenopsbase' already exists. Import
+    # skipped". Verified across a full destroy and rebuild on 2026-08-22:
+    # all 13 documents still listed and downloaded by their owner afterwards.
+    #
+    # This does nothing for users created at RUNTIME, who still get generated
+    # ids. See ADR-0010 for why that is accepted here and what it would cost to
+    # fix properly.
     users:
       - username: smoke
+        id: af70f9df-8441-4259-9d56-ebb6d1868ac4
         enabled: true
         emailVerified: true
         email: smoke@example.invalid
@@ -381,6 +408,7 @@ spec:
       # fires; it does not show a privileged user gets through, and a check that
       # denies everyone looks identical to one that works.
       - username: smoke-admin
+        id: 3b64215b-9126-418f-9460-7ceaf45919d2
         enabled: true
         emailVerified: true
         email: smoke-admin@example.invalid
