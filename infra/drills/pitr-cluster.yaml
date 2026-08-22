@@ -1,0 +1,88 @@
+# Point-in-time recovery drill (T-7.4, #56).
+#
+# A THROWAWAY cluster that restores the `postgres` lineage to an arbitrary
+# instant, so recovery can be demonstrated rather than believed. It is applied
+# by hand, deliberately, and deleted afterwards.
+#
+# WHY THIS LIVES OUTSIDE platform/
+#
+# Anything under platform/envs/<env>/ is reconciled by Argo CD. A drill cluster
+# there would be adopted as desired state and kept alive, which is the opposite
+# of what a drill is. Here it is a template that a human applies for the length
+# of the exercise and then removes. That is not a violation of the
+# no-manual-configuration rule -- the rule is about CONFIGURATION, and this is
+# an operation, the same way `make down` is.
+#
+# THE ONE THING THAT WOULD DO REAL DAMAGE
+#
+# There is deliberately NO top-level `plugins:` block, so this cluster does not
+# archive. Give it one and it would begin writing WAL into
+# s3://.../postgres-g3/, which is the LIVE lineage the production cluster
+# restores from -- two servers archiving into one path, and the corruption would
+# only be discovered during the next real recovery.
+#
+# `externalClusters` below is read-only: it is how the restore FINDS the archive.
+# Reading is safe; archiving is not.
+#
+# USAGE
+#
+#   TARGET="2026-08-22 09:53:13.735077+00"
+#   sed "s|__TARGET_TIME__|$TARGET|" infra/drills/pitr-cluster.yaml | kubectl apply -f -
+#   kubectl get cluster postgres-pitr -n database -w
+#
+#   # ...assert against it, then ALWAYS:
+#   kubectl delete cluster postgres-pitr -n database
+#   kubectl delete pvc -n database -l cnpg.io/cluster=postgres-pitr
+#
+# The PVCs are a separate delete. Deleting the Cluster alone leaves 10Gi of
+# Hetzner volume billing indefinitely, which is the same trap T-1.11 (#109) and
+# T-1.16 (#159) were written about.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres-pitr
+  namespace: database
+  annotations:
+    # Nothing has ever archived under this cluster's own name, and it never
+    # will. Without this the recovered cluster refuses to start on the empty
+    # archive check.
+    cnpg.io/skipEmptyWalArchiveCheck: "enabled"
+spec:
+  # One. This proves recovery, not high availability, and a second instance
+  # would only clone the first.
+  instances: 1
+
+  storage:
+    size: 10Gi
+    storageClass: hcloud-volumes
+
+  # Deliberately small and explicitly bounded. The drill runs alongside the real
+  # cluster on a dev node, and an unbounded restore competing with the database
+  # it is meant to protect would be its own incident.
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }
+
+  postgresql:
+    parameters:
+      max_connections: "100"
+      shared_buffers: "128MB"
+
+  bootstrap:
+    recovery:
+      source: archive
+      database: app
+      owner: app
+      # Replay stops here. `targetTime` is exclusive of transactions that
+      # committed after it, which is precisely what the drill asserts.
+      recoveryTarget:
+        targetTime: "__TARGET_TIME__"
+
+  externalClusters:
+    - name: archive
+      plugin:
+        name: barman-cloud.cloudnative-pg.io
+        parameters:
+          barmanObjectName: pg-backups
+          # The lineage being READ. Never write here from this cluster.
+          serverName: postgres-g3
