@@ -35,13 +35,19 @@ images:
     # Carries 1c81e0d (infra usage endpoint with node placement, T-3.16).
     digest: sha256:1da312ddd92e22272f55d62df61ce16b2e9ec3a61ed3709ea568ab463d1364d8
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway
-    # Commit 5efdc48 -- asset requests are no longer treated as browser
-    # navigation (T-3.18). /app.css was answered with a 302 into the OIDC flow,
-    # minting a new authorization request per asset, which orphaned the state
-    # the user's navigation was carrying and dead-ended login intermittently.
-    # Carries d861dbf (trusted-proxies reverted to '.*', T-3.15),
+    # Commit f7ef7d7 -- the access and refresh tokens now live in the WebSession,
+    # which is in Valkey, instead of one pod's heap (T-3.19). Until this, the
+    # replica that had not handled the login found the session but no authorized
+    # client and answered EVERY request -- page, stylesheet, XHR alike -- with a
+    # 302 into the Keycloak authorization endpoint, so roughly half of each
+    # page's requests failed against style-src and connect-src. This is the
+    # change that makes `replicas: 2` in gateway.yaml true rather than intended.
+    # Also stops a refused refresh escaping as a 500 with no way out of it, and
+    # ungates POST /api/logout from that refresh.
+    # Carries 5efdc48 (asset requests are not navigation, T-3.18),
+    # d861dbf (trusted-proxies reverted to '.*', T-3.15),
     # 1dbbfe5 (failed login restarts at /, T-3.17),
     # e7acc9b (correlation id on spans, T-3.8), 4ccd88f (sessions in Valkey,
     # T-2.11), 6d965b8 (CSP without 'unsafe-inline'/'unsafe-eval'), 806e8be
     # (logout origin from the request) and f430d36.
-    digest: sha256:10cdfb96cc26819ef042bcca85588b4cfc3ec539670ee0e691bd56116f66ef54
+    digest: sha256:be372cca7be2c90af4c22f864023f6b0386d942a88de1cb9500043e043a7b3df
