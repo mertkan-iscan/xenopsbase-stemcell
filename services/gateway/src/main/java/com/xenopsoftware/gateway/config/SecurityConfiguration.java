@@ -189,8 +189,36 @@ public class SecurityConfiguration {
      * {@code /api} URL into the address bar is a browser that deserves a login page.
      */
     private ServerAuthenticationEntryPoint authenticationEntryPoint() {
+        MediaTypeServerWebExchangeMatcher wantsHtml = new MediaTypeServerWebExchangeMatcher(MediaType.TEXT_HTML);
+
+        // IGNORING */* IS WHAT MAKES THIS MATCHER MEAN WHAT IT SAYS (T-3.18, #175).
+        //
+        // MediaTypeServerWebExchangeMatcher matches */* by default, and a browser sends */* on
+        // every subresource: `Accept: text/css,*/*;q=0.1` for a stylesheet, `*/*` for a script.
+        // So every asset request counted as "browser navigation" and was answered with a 302 into
+        // /oauth2/authorization/oidc instead of a 401.
+        //
+        // The consequence was not a cosmetic wrong status. Each of those redirects MINTED A NEW
+        // AUTHORIZATION REQUEST -- a new state, nonce and PKCE verifier -- so loading one page
+        // created several, each replacing the last. The callback for the navigation the user
+        // actually made then arrived with a state that had been superseded, and failed with
+        // authorization_request_not_found. Reported from a browser as intermittent login, several
+        // `oidc` state entries at once, and finally ERR_TOO_MANY_REDIRECTS, with the console
+        // complaining that the Keycloak authorization URL had been loaded as a stylesheet.
+        //
+        // Measured before and after on the deployed gateway:
+        //
+        //   Accept                       before   after
+        //   text/html,...,*/*;q=0.8      302      302   browser navigation, unchanged
+        //   text/css,*/*;q=0.1           302      401
+        //   */*                          302      401
+        //   application/json             401      401
+        //
+        // Only an explicit text/html now redirects, which is what the comment above always claimed.
+        wantsHtml.setIgnoredMediaTypes(Set.of(MediaType.ALL));
+
         DelegatingServerAuthenticationEntryPoint.DelegateEntry browserNavigation = new DelegatingServerAuthenticationEntryPoint.DelegateEntry(
-            new MediaTypeServerWebExchangeMatcher(MediaType.TEXT_HTML),
+            wantsHtml,
             new RedirectServerAuthenticationEntryPoint("/oauth2/authorization/oidc")
         );
 
