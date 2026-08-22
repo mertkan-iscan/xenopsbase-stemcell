@@ -24,7 +24,7 @@ something, and against tests that assert a call **returned**.
 | Layer | Runs | Where | Gate today |
 |---|---|---|---|
 | Unit | `mvn test`, surefire, `*Test.java` | JVM only | `services.yml` on PR |
-| Slice | — | — | none yet (T-5.2, #41) |
+| Slice | surefire, `*SliceTest.java` | JVM; the data slice uses Testcontainers | `services.yml` on PR |
 | Integration | `mvn verify`, failsafe, `*IT.java` | Testcontainers | `services.yml` on PR |
 | Contract | — | — | none yet (T-5.4, #43) |
 | End-to-end | — | — | none yet (T-5.5, #44) |
@@ -48,21 +48,27 @@ rather than theoretical.
 
 **Does not cover** configuration. A property name that Boot silently ignores is invisible here.
 
-### Slice — not built (T-5.2, #41)
+### Slice
 
-**Will cover** one Spring layer with the rest absent — a web layer against mocked services, a
-repository against a real schema.
+**Covers** one Spring layer with the rest absent. Built in T-5.2 (#41); there were none before.
 
-**There are none today.** Checked rather than assumed: no `@WebMvcTest`, `@WebFluxTest`,
-`@DataJpaTest`, `@JsonTest` or `@RestClientTest` appears anywhere in either service. Everything is
-either a plain unit test or a full-context integration test, with nothing in between.
+| Slice | Test | Asserts |
+|---|---|---|
+| Web | `ExampleItemResourceWebSliceTest` | serialization, status, binding — security filters **off** |
+| Security | `SecurityRulesSliceTest` | the authorization rules — filters **on**, real `SecurityConfiguration` |
+| Data | `DocumentRepositorySliceTest` | the owner-scoped queries against a real schema |
 
-That is worth stating because the shape has a cost. Anything needing a Spring context currently
-pays for the whole one, containers included, so the cheap middle ground where most controller and
-repository behaviour belongs does not exist — which is part of why core's unit-only coverage is
-10.6%.
+**Web and security are deliberately two files.** Mixing them produces a test that fails for two
+unrelated reasons and tells you neither.
 
-**Will not cover** interaction between slices, which is where this project's defects live. A slice
+**The security slice must import the application's `SecurityConfiguration`.** Without it
+`@WebMvcTest` applies Boot's default test security, under which every authenticated caller reaches
+everything. The first version of that file asserted 403 on the admin endpoint and got 200 — the
+rule was never loaded, and four of its five tests still passed, because "anonymous is refused"
+happens to be the default too. A security slice that does not load the security configuration is
+worse than none: it reports green against rules it has never seen.
+
+**Does not cover** interaction between slices, which is where this project's defects live. A slice
 test is a faster unit test, not a cheaper integration test.
 
 ### Integration
@@ -167,19 +173,34 @@ Once enforcement is on, the checks that should block are `gateway`, `core`, `gen
 **80% instruction and 70% branch, measured on `mvn verify` — unit and integration together — per
 service, enforced at the module level, not per class.**
 
-**Why measured on `verify`.** Which phase produced the number matters more than the number.
-Measured on 2026-08-22 with unit tests only, because no Docker daemon was available locally:
+**The target is 80/70. The enforced floor is lower, and the difference is deliberate.**
+
+Measured on 2026-08-22, on a merged unit + integration run — which is the number that had never
+existed, because jacoco writes two separate exec files and neither is the project's coverage:
 
 ```
-gateway   instruction 37.6% (1198/3185)   branch 34.5% (91/264)
-core      instruction 10.6% (561/5302)    branch 14.9% (58/390)
+                merged            unit only        integration only
+gateway    54.5% / 41.7%      49.9% / 35.6%       45.2% / 36.0%
+core       60.0% / 46.0%      (see note)          (see note)
 ```
 
-Core's 10.6% is not a statement about how well core is tested. Core's behaviour lives almost
-entirely in its integration tests, and those did not run. Quoting that figure as the project's
-coverage would be as wrong as quoting a `verify` figure as though unit tests had earned it. **The
-true `verify` baseline is currently unmeasured**, and measuring it is the first step of T-5.2 (#41),
-before any gate is switched on.
+The earlier figures in this document — gateway 37.6%, core 10.6% — were unit-only runs with no
+Docker, and the gateway one also excluded the Cucumber context test. Both understated the project
+substantially, which is exactly why this document refused to set a gate from them.
+
+**Enforcing 80/70 today would fail every build from the moment the gate went in**, and a gate that
+cannot pass is removed within a day — after which there is no gate at all. So the enforced floor is
+the measured baseline, one point below:
+
+| | instruction | branch |
+|---|---|---|
+| gateway `jacoco.minimum.*` | 0.53 | 0.40 |
+| core `jacoco.minimum.*` | 0.58 | 0.44 |
+
+That fails the build on a **regression** today, which is the job a gate can actually do now. Getting
+from there to 80/70 means writing tests, which is a separate body of work with its own card
+(T-5.9, #172). Raise the floors deliberately as it lands, with the reason in the commit — the same
+treatment every other threshold in this repository gets.
 
 **Why 80/70 and not higher.** The number has to be one that fails only when something is genuinely
 untested. Set at 90+, the gate starts failing on generated code, exception plumbing and Spring
