@@ -51,6 +51,32 @@ chart bump, silently, and the first sign would be a worse RPO nobody asked for. 
 Note also that 300s is a *ceiling*: it bounds how long a quiet database waits before forcing a
 segment. A busy one archives sooner, so 5 minutes is the worst case rather than the typical one.
 
+**Worst-case RPO, measured (T-7.4, #56): 301 seconds.**
+
+Two components, both measured on 2026-08-22 rather than assumed:
+
+| | |
+|---|---|
+| Time a committed transaction can sit in an unarchived segment | ≤ 300s — `archive_timeout` |
+| Time from segment close to the object existing in the bucket | **1.08s**, measured |
+
+```
+pg_switch_wal() at   09:57:57.150
+last_archived_time   09:57:58.227
+```
+
+So the most a sudden total loss of the primary and its volume can cost is **301 seconds of
+commits** — and only if the loss lands in the worst instant of a quiet period. Under write load the
+segment fills and ships sooner, and the figure improves without anything being reconfigured.
+
+This is the number to quote. ADR-0002's "≤ 5 min" is correct, and this is where it comes from.
+
+**One observation worth recording rather than alarming about.** `pg_stat_archiver` shows
+`failed_count = 12`, all against `00000006.history` at 08:45:03 — during the recovery bootstrap of
+that morning's rebuild, before the archiver settled. There have been no failures since and
+`archived_count` climbs normally. A *rising* `failed_count` would be the thing to act on, and there
+is currently nothing watching it (#155, #145).
+
 **Document RPO: 0** — documents are written directly to object storage by a presigned PUT and never
 enter the cluster, so there is no window in which a cluster failure can lose one. Verified on
 2026-08-22: the 13 documents uploaded before a destroy were listed and downloaded by their owner
@@ -80,10 +106,9 @@ card; it is not built. **This is the largest single gap in this plan.**
 
 **There is no second copy of Terraform state outside R2.** T-1.9 (#71) is the card; not built.
 
-**No restore has ever been proven end to end by automation.** T-7.3 (#55) and T-7.4 (#56) are not
-built. Everything in the RTO column for Postgres is inferred from a rebuild that used
-`bootstrap.recovery` successfully — which is a real restore, but it is not a *drill*, and nobody
-has demonstrated point-in-time recovery to an arbitrary timestamp.
+**No restore is proven by automation.** Point-in-time recovery *has* now been demonstrated by hand
+(#56, and the drill below reproduces it), but nothing runs it on a schedule, so a regression would
+go unnoticed until it mattered. T-7.3 (#55) is that card and it is not built.
 
 ## The age key, which is the real single point of failure
 
@@ -176,8 +201,8 @@ properly; it depends on T-6.3 (#50).
 
 ### The database is corrupted, or a migration destroyed data
 
-Point-in-time recovery. **This has never been performed here** — T-7.4 (#56) is the card that proves
-it. The mechanism exists: base backups at
+Point-in-time recovery. **Demonstrated on 2026-08-22** (T-7.4, #56) — a restore to an arbitrary
+instant, asserted in both directions, with the drill below reproducing it. Base backups at
 
 ```
 s3://xenopsbase-dev-pg-backups/postgres-g3/base/
@@ -188,8 +213,63 @@ with continuous WAL alongside, retained 30 days by Barman and 35 days by the buc
 The bucket is deliberately the longer of the two, so lifecycle never deletes something Barman still
 expects to find.
 
-Recovery to a timestamp means a new `Cluster` with `bootstrap.recovery` and a
-`recoveryTarget`. Do not attempt it for the first time during an incident.
+#### The drill, which is also the procedure
+
+`infra/drills/pitr-cluster.yaml` is a throwaway `Cluster` that restores the `postgres` lineage to a
+chosen instant. It lives outside `platform/` deliberately: anything under `platform/envs/<env>/` is
+reconciled by Argo CD and would be kept alive, which is the opposite of a drill.
+
+**It has no `plugins:` block, and that is the one thing not to "fix".** Give it one and it starts
+archiving into `s3://.../postgres-g3/` — the live lineage the real cluster restores from. Two
+servers writing one archive, discovered during the next real recovery. `externalClusters` is
+read-only and is how the restore *finds* the archive.
+
+```bash
+export KUBECONFIG=$PWD/infra/terraform/cluster/kubeconfig
+TARGET="2026-08-22 09:53:13.735077+00"          # any instant inside the retention window
+
+sed "s|__TARGET_TIME__|$TARGET|" infra/drills/pitr-cluster.yaml | kubectl apply -f -
+kubectl get cluster postgres-pitr -n database -w   # ~2 min to "Cluster in healthy state"
+
+kubectl exec -n database postgres-pitr-1 -c postgres --   psql -U postgres -d app -c "SELECT * FROM <your table>;"
+```
+
+**Always clean up, and the PVC is a separate delete:**
+
+```bash
+kubectl delete cluster postgres-pitr -n database
+kubectl delete pvc -n database -l cnpg.io/cluster=postgres-pitr
+```
+
+Deleting the `Cluster` alone leaves 10Gi of Hetzner volume billing indefinitely — the same trap as
+T-1.11 (#109) and T-1.16 (#159). Confirm with `hcloud volume list`, or against the API, that the
+count returned to its steady state.
+
+#### What the drill proved
+
+Two rows were committed sixty seconds either side of a chosen target:
+
+```
+committed 09:52:13.668  'BEFORE the target'
+target    09:53:13.735
+committed 09:54:13.796  'AFTER the target'
+```
+
+The restored cluster contained the first and not the second, while the live cluster still had both:
+
+```
+PASS: row committed BEFORE the target is present
+PASS: row committed AFTER the target is absent
+```
+
+Correctness in both directions matters. A restore that simply came up would have passed a
+present-row check while silently replaying too far.
+
+**Restore took 107 seconds** for a 10Gi cluster — base backup fetch, WAL replay to the target, and
+promotion. That is the RTO for a corrupted database, and it is far below the whole-stack figure
+because nothing else is rebuilt.
+
+Do not attempt this for the first time during an incident. That is what the drill is for.
 
 ### The whole Hetzner project is lost
 
@@ -208,7 +288,7 @@ Listed so the next person inherits the reasoning, not just the gap.
 |---|---|---|
 | No offsite replication to a second provider | #57 | The largest gap here. Cost and complexity were deferred while the project was pre-v1 |
 | No automated restore drill | #55 | Must assert a pre-rebuild document is downloadable by its owner afterwards, not just that Postgres came back |
-| PITR never proven | #56 | The mechanism is configured and untested. Untested recovery is a belief |
+| ~~PITR never proven~~ | **closed** | Demonstrated 2026-08-22, #56. `infra/drills/pitr-cluster.yaml` reproduces it |
 | Backup age is not observable | #145 | `LastBackupSucceeded: True` while `lastSuccessfulBackup` is empty — see below |
 | No application metrics reach Prometheus | #155 | So alerting on backup age cannot be built even if the field were populated |
 | `archive_timeout` not pinned | #164 | The stated 5-minute RPO depends on a CNPG default |
