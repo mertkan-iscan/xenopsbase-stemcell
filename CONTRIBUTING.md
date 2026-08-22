@@ -60,6 +60,12 @@ major version bump.
 - Squash merge. The PR title becomes the commit message.
 - The PR body says what changed and, more importantly, **why**, plus how it was verified.
 
+## Tests
+
+What each layer is for, what it deliberately does not cover, and the coverage target with the
+reasoning behind the number: [docs/testing.md](docs/testing.md). Read it before adding a test at a
+new level — the boundaries exist so layers do not quietly duplicate each other.
+
 ## Architecture decisions
 
 Anything that constrains future work gets an ADR before the code. See
