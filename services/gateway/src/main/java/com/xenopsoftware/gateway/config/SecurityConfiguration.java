@@ -35,6 +35,8 @@ import org.springframework.security.oauth2.client.registration.ReactiveClientReg
 import org.springframework.security.oauth2.client.userinfo.ReactiveOAuth2UserService;
 import org.springframework.security.oauth2.client.web.server.DefaultServerOAuth2AuthorizationRequestResolver;
 import org.springframework.security.oauth2.client.web.server.ServerOAuth2AuthorizationRequestResolver;
+import org.springframework.security.oauth2.client.web.server.ServerOAuth2AuthorizedClientRepository;
+import org.springframework.security.oauth2.client.web.server.WebSessionServerOAuth2AuthorizedClientRepository;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest;
@@ -89,8 +91,54 @@ public class SecurityConfiguration {
         this.jHipsterProperties = jHipsterProperties;
     }
 
+    /**
+     * WHERE THE ACCESS AND REFRESH TOKENS LIVE (T-3.19, #179).
+     *
+     * <p>Spring Boot's default is {@code AuthenticatedPrincipalServerOAuth2AuthorizedClientRepository}
+     * over an {@code InMemoryReactiveOAuth2AuthorizedClientService} -- a {@code ConcurrentHashMap}
+     * in one JVM's heap. T-2.11 moved the SESSION to Valkey and raised the deployment to two
+     * replicas on the strength of it, but the authorized client is a SEPARATE store that the
+     * session's location says nothing about. It stayed in the heap.
+     *
+     * <p>So the session was shared and the tokens were not, and the replicas were not
+     * interchangeable after all. The pod that completed the login held the only copy of the
+     * tokens; the other pod read the same session out of Valkey, found the user authenticated,
+     * found no authorized client, and threw {@code ClientAuthorizationRequiredException} --
+     * which {@code OAuth2AuthorizationRequestRedirectWebFilter} answers with a 302 into the
+     * Keycloak authorization endpoint, for EVERY request, whatever it asked for.
+     *
+     * <p>Measured on the deployed gateway with one real session cookie replayed against both
+     * pods directly, bypassing the ingress:
+     *
+     * <pre>
+     *   request                      pod A (logged in here)   pod B
+     *   GET /            text/html   200                      302 -> Keycloak
+     *   GET /app.css     text/css    200                      302 -> Keycloak
+     *   GET /services/core/api/documents  json  200            302 -> Keycloak
+     * </pre>
+     *
+     * <p>With no cookie at all both pods answered identically and correctly, which is why this
+     * hid behind T-3.18: the asset-request fix is real and works, and the redirects it was
+     * blamed for a second time were coming from somewhere else entirely. From the browser it
+     * looked exactly like the old bug -- a stylesheet and a fetch both loading the Keycloak
+     * authorization URL, tripping {@code style-src} and {@code connect-src} -- because roughly
+     * half of every page's requests were load-balanced onto the pod without the tokens.
+     *
+     * <p>{@code WebSessionServerOAuth2AuthorizedClientRepository} keeps the authorized client in
+     * the WebSession, which is already in Valkey and already replicated. The tokens then share
+     * the session's lifetime and its invalidation, which is the correct coupling: a session that
+     * has been ended must not leave a usable refresh token behind.
+     */
     @Bean
-    public SecurityWebFilterChain springSecurityFilterChain(ServerHttpSecurity http) {
+    public ServerOAuth2AuthorizedClientRepository authorizedClientRepository() {
+        return new WebSessionServerOAuth2AuthorizedClientRepository();
+    }
+
+    @Bean
+    public SecurityWebFilterChain springSecurityFilterChain(
+        ServerHttpSecurity http,
+        ServerAuthenticationEntryPoint authenticationEntryPoint
+    ) {
         http.securityMatcher(
             new NegatedServerWebExchangeMatcher(
                 new OrServerWebExchangeMatcher(pathMatchers("/app/**", "/i18n/**", "/content/**", "/swagger-ui/**"))
@@ -164,7 +212,7 @@ public class SecurityConfiguration {
             // Browser navigation still redirects: it is matched by Accept: text/html rather than
             // by path, because the frontend and the API share the /api prefix and it is the
             // CALLER's expectation that decides which answer is useful.
-            .exceptionHandling(e -> e.authenticationEntryPoint(authenticationEntryPoint()))
+            .exceptionHandling(e -> e.authenticationEntryPoint(authenticationEntryPoint))
             // The failure handler is explicit because the default is wrong for this application
             // (T-3.17). Spring sends a failed login to /login?error, and there is no /login here
             // -- no controller, no route, no static file -- so a stale authorization request came
@@ -188,7 +236,8 @@ public class SecurityConfiguration {
      * directions here: the SPA is served from the same origin as the API, and a user typing an
      * {@code /api} URL into the address bar is a browser that deserves a login page.
      */
-    private ServerAuthenticationEntryPoint authenticationEntryPoint() {
+    @Bean
+    public ServerAuthenticationEntryPoint authenticationEntryPoint() {
         MediaTypeServerWebExchangeMatcher wantsHtml = new MediaTypeServerWebExchangeMatcher(MediaType.TEXT_HTML);
 
         // IGNORING */* IS WHAT MAKES THIS MATCHER MEAN WHAT IT SAYS (T-3.18, #175).
