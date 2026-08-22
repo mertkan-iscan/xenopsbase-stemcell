@@ -35,8 +35,9 @@ images:
     # Carries 1c81e0d (infra usage endpoint with node placement, T-3.16).
     digest: sha256:1da312ddd92e22272f55d62df61ce16b2e9ec3a61ed3709ea568ab463d1364d8
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway
-    # Commit e7acc9b -- the correlation id reaches spans, not just logs (T-3.8).
-    # Carries 4ccd88f (sessions in Valkey, T-2.11, so replicas are
-    # interchangeable), 6d965b8 (CSP without 'unsafe-inline'/'unsafe-eval'),
-    # 806e8be (logout origin from the request) and f430d36.
-    digest: sha256:7e8f801b4dc5bedd25f79ab1627f4f6ed195ffa167649e69e7f7ff5249e7aefc
+    # Commit 1dbbfe5 -- a failed login restarts at / instead of dead-ending on
+    # /login?error, which this application does not serve (T-3.17). Carries
+    # e7acc9b (correlation id on spans, T-3.8), 4ccd88f (sessions in Valkey,
+    # T-2.11), 6d965b8 (CSP without 'unsafe-inline'/'unsafe-eval'), 806e8be
+    # (logout origin from the request) and f430d36.
+    digest: sha256:cdccbfeb2a9be825b1ec1479109e002075125337b987eff56a29b30fa1dc792f
