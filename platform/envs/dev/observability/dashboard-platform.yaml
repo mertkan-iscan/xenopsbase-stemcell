@@ -69,7 +69,7 @@ data:
         },
         {
           "type": "stat",
-          "title": "Base backup age",
+          "title": "Base backup age (No data = unobservable, #145 — use make backup-status)",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -258,7 +258,7 @@ data:
         },
         {
           "type": "timeseries",
-          "title": "Recoverability window (first recoverability point age)",
+          "title": "Recoverability window (No data = unobservable, #145 — use make backup-status)",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"

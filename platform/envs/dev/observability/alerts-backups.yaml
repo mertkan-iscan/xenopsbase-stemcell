@@ -55,10 +55,52 @@ spec:
               archiving is failing or it cannot keep up with write volume. Left
               alone this eventually fills the data volume.
 
+        # THE DIRECT RPO SIGNAL, and it was missing.
+        #
+        # The three rules above catch archiving that FAILS. None catches
+        # archiving that simply stops: a hung sidecar raises no error, so
+        # failed_count does not increase; a quiet database does not queue 20
+        # segments; and archived_count is not zero because it worked yesterday.
+        # Everything stays green while recoverability stops advancing.
+        #
+        # seconds_since_last_archival is the value that actually expresses the
+        # RPO, and it is read from pg_stat_archiver -- from Postgres itself --
+        # so unlike the backup collectors below it carries a real number.
+        # Verified on 2026-08-22: 291.69.
+        #
+        # 900s is three archive_timeout periods (300s), so one slow ship does
+        # not trip it and a stall does.
+        - alert: PostgresArchivingStalled
+          expr: cnpg_pg_stat_archiver_seconds_since_last_archival > 900
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "No WAL segment archived for over 15 minutes on {{ $labels.pod }}"
+            description: >-
+              archive_timeout is 300s, so a healthy database ships a segment at
+              least that often. Nothing has been archived for 15 minutes and no
+              failure was reported, which is what a hung archiver looks like.
+              Everything since the last segment is currently unrecoverable.
+
+        # CANNOT FIRE AS WRITTEN, and that is recorded rather than fixed,
+        # because the fix is upstream (#145).
+        #
+        # Under the barman-cloud PLUGIN backup method this project uses,
+        # CloudNativePG never populates the in-tree backup fields:
+        # cluster.status.lastSuccessfulBackup is absent from the resource, and
+        # cnpg_collector_last_available_backup_timestamp is pinned at 0. They
+        # belong to the deprecated barmanObjectStore path.
+        #
+        # So the `> 0` guard below -- added in good faith, to stop a brand-new
+        # cluster alerting with a 57-year age -- matches nothing, on every
+        # cluster, permanently. The rule has never been able to fire.
+        #
+        # It is KEPT rather than deleted so that it starts working by itself if
+        # the metric is ever populated. PostgresBackupAgeUnobservable is what
+        # notices that it currently is not, and `make backup-status` is what
+        # actually answers the question in the meantime.
         - alert: PostgresNoRecentBaseBackup
-          # The > 0 guard matters: the metric is 0 when no backup has ever been
-          # taken, and without it this fires with a nonsense 57-year age on a
-          # brand-new cluster and gets muted.
           expr: >-
             cnpg_collector_last_available_backup_timestamp > 0
             and
@@ -73,6 +115,43 @@ spec:
               run was missed or failed. WAL replays forward FROM a base backup,
               so without a recent one, recovery time grows without bound.
 
+        # The alert about the alerts. Fires while base-backup age is not
+        # observable at all, so the two dead rules around it are KNOWN dead
+        # rather than assumed live.
+        #
+        # `max(...) == 0` rather than `count(...) == 0`: the metric exists and
+        # carries the value 0, so max() returns 0 and the comparison matches.
+        # count() over an empty vector returns an empty vector and would itself
+        # never fire -- the same trap, one level up.
+        #
+        # `absent(...)` covers the metric disappearing entirely, which is a
+        # different failure with the identical consequence.
+        #
+        # Warning, not critical, and a long `for`: this is a standing condition
+        # rather than an incident, and a critical page that can never be cleared
+        # is one that gets muted -- taking the two rules beside it with it.
+        # It resolves by itself if CloudNativePG ever populates the metric.
+        - alert: PostgresBackupAgeUnobservable
+          expr: >-
+            max(cnpg_collector_last_available_backup_timestamp) == 0
+            or
+            absent(cnpg_collector_last_available_backup_timestamp)
+          for: 6h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Base-backup age cannot be read from metrics (#145)"
+            description: >-
+              cnpg_collector_last_available_backup_timestamp is 0 or absent, so
+              PostgresNoRecentBaseBackup and PostgresLastBackupFailed cannot
+              fire. Backups may be perfectly healthy — this says nothing about
+              them, only that nothing is watching their age. Until it clears,
+              run `make backup-status ENV=<env>`, which reads the bucket.
+
+        # CANNOT FIRE AS WRITTEN — same cause as PostgresNoRecentBaseBackup
+        # above. cnpg_collector_last_failed_backup_timestamp is pinned at 0
+        # under the plugin backup method, so the `> 0` guard matches nothing.
+        # Kept for the same reason: it becomes live the moment the metric does.
         - alert: PostgresLastBackupFailed
           expr: >-
             cnpg_collector_last_failed_backup_timestamp > 0
