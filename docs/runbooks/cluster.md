@@ -3,6 +3,11 @@
 The cluster is the cattle side of [ADR-0002](../adr/0002-ephemeral-cluster-and-durable-state.md).
 It is built by Terraform, destroyed routinely, and holds nothing worth keeping.
 
+> **Looking for the two commands?** [everyday-operation.md](everyday-operation.md) is the daily
+> page: `make up`, `make down`, what to check afterwards, and when you do not need a cluster at
+> all. This page is the reference underneath it — first-time setup, the Packer snapshot, CCM and
+> CSI verification, upgrades, and why each step is ordered the way it is.
+
 Provisioned by [kube-hetzner](https://github.com/kube-hetzner/terraform-hcloud-kube-hetzner),
 pinned to **v3.1.0**.
 
