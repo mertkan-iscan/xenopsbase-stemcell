@@ -1,0 +1,83 @@
+name: CodeQL
+
+# Static analysis of the application code (T-5.8).
+#
+# WHY MANUAL BUILD MODE
+#
+# CodeQL's `autobuild` guesses how to compile a project. This repository has two
+# INDEPENDENT Maven projects under services/, no parent pom, and a hard Java 25
+# requirement enforced by maven-enforcer. Autobuild finds one of them, builds it
+# with whatever JDK is on the runner, and either fails on the enforcer or
+# analyses half the code while reporting success — and a security scan that
+# silently covers half the codebase is worse than none, because the green tick
+# is the thing people read.
+#
+# So the build is explicit, both services, on the JDK the project actually
+# requires.
+#
+# `-DskipTests`: CodeQL needs the classes, not the test results. Those are
+# services.yml's job, and running them twice would double the slowest workflow
+# in the repository for no extra signal.
+on:
+  pull_request:
+    paths:
+      - 'services/**'
+      - 'clients/**'
+      - '.github/workflows/codeql.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'services/**'
+      - 'clients/**'
+      - '.github/workflows/codeql.yml'
+  schedule:
+    # Weekly, because a finding can appear without the code changing: CodeQL's
+    # query packs are updated continuously, so code that was clean in August can
+    # have a known problem in September with no commit in between.
+    - cron: '17 3 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: CodeQL (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Writes the findings to the Security tab. Without this the analysis runs
+      # and the results go nowhere.
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [core, gateway]
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          java-version: '25'
+          distribution: corretto
+          cache: maven
+          cache-dependency-path: services/${{ matrix.service }}/pom.xml
+
+      - name: Initialise CodeQL
+        uses: github/codeql-action/init@42947a340483f03ba47bb1a039b2c519aab3df85 # v3.37.8
+        with:
+          languages: java-kotlin
+          build-mode: manual
+          # security-and-quality over the default security-extended: the extra
+          # queries are noisy, and a scan people filter mentally is one they
+          # stop reading. Revisit if the noise turns out to be findings.
+          queries: security-extended
+
+      - name: Build ${{ matrix.service }}
+        working-directory: services/${{ matrix.service }}
+        run: ./mvnw --batch-mode clean compile -DskipTests
+
+      - name: Analyse
+        uses: github/codeql-action/analyze@42947a340483f03ba47bb1a039b2c519aab3df85 # v3.37.8
+        with:
+          category: /language:java-kotlin/service:${{ matrix.service }}

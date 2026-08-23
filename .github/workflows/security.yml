@@ -1,0 +1,176 @@
+name: Security
+
+# Dependency and image scanning, and the SBOM (T-5.8).
+#
+# CodeQL lives in its own workflow because it is per-language and per-service and
+# has a different trigger shape. This one covers everything that is about what
+# the project DEPENDS ON rather than what it was written as.
+#
+# WHAT EACH JOB IS FOR, AND WHY IT IS SEPARATE
+#
+#   dependencies  what a pull request ADDS. Fails the pull request, because a
+#                 new vulnerable dependency is cheapest to reject at the moment
+#                 someone proposes it.
+#   image         what is actually shipped, including the base image and every
+#                 transitive jar. Runs after publish on main, because that is
+#                 when an image exists.
+#   sbom          what is in the artefact, recorded. Not a gate.
+#
+# The split matters: a dependency review that also failed on pre-existing
+# findings would fail every pull request until the backlog was cleared, and a
+# check that always fails is one people learn to skip -- which this repository
+# has now met three times.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # A vulnerability can be published against a dependency nobody touched. The
+    # scan has to run on a clock, not only on a commit.
+    - cron: '23 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  dependencies:
+    name: dependency review
+    # Only meaningful on a pull request: it compares the head against the base.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Review what this pull request adds
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          # Fails on what this change introduces, not on what was already there.
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
+          # A licence that forbids redistribution is a different problem from a
+          # vulnerability and is worth catching in the same pass, since this is
+          # a template other projects are forked from.
+          deny-licenses: AGPL-3.0, GPL-3.0
+
+  # ---------------------------------------------------------------------------
+  image:
+    name: image scan
+    # After the image exists. services.yml publishes on push to main; a pull
+    # request has no image to scan, and scanning the filesystem instead would be
+    # a different check wearing this one's name.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [core, gateway]
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # The digest the cluster runs, not `:main`. A tag moves, and scanning
+      # something other than what is deployed is the kind of green tick this
+      # repository keeps finding.
+      - name: Resolve the deployed digest
+        id: digest
+        run: |
+          digest="$(
+            python - <<'PY'
+          import re
+          text = open('platform/envs/dev/services/kustomization.yaml', encoding='utf-8').read()
+          block = text.split('- name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/${{ matrix.service }}', 1)[1]
+          print(re.search(r'digest:\s*(sha256:[0-9a-f]+)', block).group(1))
+          PY
+          )"
+          if [ -z "$digest" ]; then
+            echo "::error::could not read the pinned digest for ${{ matrix.service }}"
+            exit 1
+          fi
+          echo "ref=ghcr.io/${{ github.repository }}/${{ matrix.service }}@${digest}" >> "$GITHUB_OUTPUT"
+          echo "scanning ${digest}"
+
+      - name: Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.digest.outputs.ref }}
+          format: sarif
+          output: trivy-${{ matrix.service }}.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          # Report everything to the Security tab first; the gate is the next
+          # step. Splitting them means a failure still uploads its findings
+          # rather than leaving the tab empty on the run that mattered.
+          exit-code: '0'
+
+      - name: Upload findings
+        if: always()
+        uses: github/codeql-action/upload-sarif@42947a340483f03ba47bb1a039b2c519aab3df85 # v3.37.8
+        with:
+          sarif_file: trivy-${{ matrix.service }}.sarif
+          category: trivy-${{ matrix.service }}
+
+      - name: Fail on high or critical
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.digest.outputs.ref }}
+          format: table
+          severity: HIGH,CRITICAL
+          # `ignore-unfixed` deliberately. A CRITICAL with no available fix
+          # cannot be actioned by this repository, and failing on it would make
+          # the gate permanently red for reasons nobody here can resolve --
+          # which is how a gate stops being read.
+          ignore-unfixed: true
+          exit-code: '1'
+
+  # ---------------------------------------------------------------------------
+  sbom:
+    name: SBOM
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [core, gateway]
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Resolve the deployed digest
+        id: digest
+        run: |
+          digest="$(
+            python - <<'PY'
+          import re
+          text = open('platform/envs/dev/services/kustomization.yaml', encoding='utf-8').read()
+          block = text.split('- name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/${{ matrix.service }}', 1)[1]
+          print(re.search(r'digest:\s*(sha256:[0-9a-f]+)', block).group(1))
+          PY
+          )"
+          echo "ref=ghcr.io/${{ github.repository }}/${{ matrix.service }}@${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate CycloneDX SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.digest.outputs.ref }}
+          format: cyclonedx
+          output: sbom-${{ matrix.service }}.cdx.json
+
+      # An artefact, not a release asset. There are no releases yet -- tagging
+      # is T-8.5 and the automation is T-6.5 -- so attaching one now would mean
+      # writing release plumbing inside a security task. The SBOM exists and is
+      # downloadable from the run that produced the image; wiring it to a
+      # release is one line in whichever workflow creates releases.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom-${{ matrix.service }}
+          path: sbom-${{ matrix.service }}.cdx.json
+          if-no-files-found: error
+          retention-days: 90
