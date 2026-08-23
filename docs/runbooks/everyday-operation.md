@@ -30,7 +30,19 @@ file in this window.
 
 ## `make up`
 
-Roughly **5–8 minutes**. What it does, in order:
+Budget **20 minutes**. Measured on 2026-08-23, dev sizing:
+
+| Phase | Time |
+|---|---|
+| `terraform apply` — 31 resources | ~8.5 min |
+| Argo CD reconciling the platform to 14/14 healthy | 673 s |
+| **Total** | **1190 s** |
+
+The Terraform half is the part people expect. The other half is Argo CD bringing up fourteen
+applications, and it is the majority of the wait — so a cluster that has "finished building" is
+not yet a cluster that serves. `make up` knows the difference and waits for the second one.
+
+What it does, in order:
 
 1. `terraform init` on the cluster module
 2. `terraform apply`, **retried up to three times** — provisioning fetches the k3s installer over
@@ -41,11 +53,19 @@ Roughly **5–8 minutes**. What it does, in order:
 4. Waits, up to 20 minutes, for the stack to actually serve — not for Terraform to finish, which is
    a different and much weaker claim
 
-It prints its own elapsed time at the end. The measured rebuild baseline is ~305 s of Terraform on
-dev sizing; the rest is Argo CD reconciling the platform.
+It prints its own elapsed time at the end, and finishes by proving the edge answers:
+
+```
+  [ 673s] platform   14/14 applications Healthy
+  [ 673s] edge       https://app-dev.xenopsoftware.com answers 302
+
+STACK SERVING in 673s
+make up ENV=dev completed in 1190s
+```
 
 **You do not need to wait for it to use the repository.** Building, testing and the whole local
-stack work with no cluster at all — see below.
+stack work with no cluster at all — see below. Twenty minutes is a good reason to be sure you
+actually need one.
 
 ## `make down`
 
