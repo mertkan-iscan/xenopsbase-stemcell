@@ -50,4 +50,4 @@ images:
     # e7acc9b (correlation id on spans, T-3.8), 4ccd88f (sessions in Valkey,
     # T-2.11), 6d965b8 (CSP without 'unsafe-inline'/'unsafe-eval'), 806e8be
     # (logout origin from the request) and f430d36.
-    digest: sha256:b660717dc35fd8e4ce8ec77a66b146dab81dcbdcad3feb45655cd63fcfc0408b
+    digest: sha256:be372cca7be2c90af4c22f864023f6b0386d942a88de1cb9500043e043a7b3df
