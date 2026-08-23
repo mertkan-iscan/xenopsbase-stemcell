@@ -1,0 +1,226 @@
+# The gateway and just enough around it to autoscale, for a local k3d cluster
+# (T-2.8 rehearsal).
+#
+# WHY THIS IS NOT THE DEPLOYED MANIFEST
+#
+# It runs the same IMAGE with the same resource requests and the same HPA, and
+# strips everything the scaling question does not touch: no Cloudflare, no
+# tunnel, no ingress, no Argo CD, no observability stack, no core, no Postgres.
+# What is left is the gateway, a Valkey for its session store, and a Keycloak
+# it can resolve at startup.
+#
+# Keycloak is here only because the gateway performs OIDC discovery while
+# building its JwtDecoder, so it cannot start without a reachable issuer. The
+# load never touches it: the scenario hits /api/auth-info, which is permitAll
+# and makes no downstream call.
+#
+# WHAT IT CAN AND CANNOT TELL YOU
+#
+# It can tell you whether the HPA scales up under load, whether it scales back
+# down afterwards, how long a new replica takes to become useful, and whether
+# 70% of a 500m request is a sensible trigger. All of that is the same code
+# path on k3s locally as on k3s at Hetzner.
+#
+# It cannot tell you anything about cluster-autoscaler. That provisions real
+# servers through the Hetzner API and has no local equivalent -- a local test of
+# it would be a test of a fake.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: apps
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: valkey-client, namespace: apps}
+stringData:
+  # Local throwaway. The cluster it protects lives for the length of one test
+  # and is reachable only from inside Docker.
+  password: local-hpa-test
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: gateway-oidc, namespace: apps}
+stringData:
+  GATEWAY_CLIENT_SECRET: local-hpa-test-secret
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: valkey, namespace: apps}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: valkey}}
+  template:
+    metadata: {labels: {app: valkey}}
+    spec:
+      containers:
+        - name: valkey
+          image: valkey/valkey:8.1.4-alpine
+          args: ["--requirepass", "$(VALKEY_PASSWORD)"]
+          env:
+            - name: VALKEY_PASSWORD
+              valueFrom: {secretKeyRef: {name: valkey-client, key: password}}
+          ports: [{name: valkey, containerPort: 6379}]
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {memory: 320Mi}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: valkey, namespace: apps}
+spec:
+  selector: {app: valkey}
+  ports: [{name: valkey, port: 6379, targetPort: valkey}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: keycloak, namespace: apps}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: keycloak}}
+  template:
+    metadata: {labels: {app: keycloak}}
+    spec:
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:26.7.1
+          args: ["start-dev", "--import-realm"]
+          env:
+            - {name: KC_BOOTSTRAP_ADMIN_USERNAME, value: admin}
+            - {name: KC_BOOTSTRAP_ADMIN_PASSWORD, value: admin}
+            # The gateway resolves the issuer by this name from inside the
+            # cluster, and Keycloak must advertise the same string in its
+            # discovery document or the JwtDecoder rejects what it just fetched.
+            - {name: KC_HOSTNAME, value: "http://keycloak.apps.svc.cluster.local:8080"}
+            - {name: KC_HOSTNAME_STRICT, value: "false"}
+            - {name: KC_HTTP_ENABLED, value: "true"}
+          ports: [{name: http, containerPort: 8080}]
+          volumeMounts:
+            - {name: realm, mountPath: /opt/keycloak/data/import}
+          readinessProbe:
+            httpGet: {path: /realms/xenopsbase/.well-known/openid-configuration, port: http}
+            periodSeconds: 5
+            failureThreshold: 60
+          resources:
+            requests: {cpu: 200m, memory: 512Mi}
+            limits: {memory: 1Gi}
+      volumes:
+        - name: realm
+          configMap: {name: keycloak-realm}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: keycloak, namespace: apps}
+spec:
+  selector: {app: keycloak}
+  ports: [{name: http, port: 8080, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: apps
+  labels: {app.kubernetes.io/name: gateway}
+spec:
+  # The HPA takes over from here. Starting at the deployed replica count so the
+  # test observes a scale-up from the real baseline rather than from one.
+  replicas: 2
+  selector: {matchLabels: {app.kubernetes.io/name: gateway}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: gateway}}
+    spec:
+      # WITHOUT THIS THE GATEWAY CRASH-LOOPS HERE (see #212).
+      #
+      # Kubernetes injects legacy Docker-link variables for every Service in the
+      # pod's own namespace: a Service named `valkey` produces
+      # VALKEY_PORT=tcp://10.43.x.x:6379. The gateway reads ${VALKEY_PORT} as
+      # spring.data.redis.port, so it gets that string where an int belongs and
+      # dies with
+      #
+      #   NumberFormatException: For input string: "tcp://10.43.247.109:6379"
+      #
+      # which names neither Kubernetes nor the service link. The deployed
+      # cluster escapes it only because Valkey lives in the `cache` namespace
+      # and links are same-namespace only -- an accident of layout, not a
+      # defence. Nothing here uses the legacy variables, so switching them off
+      # removes the whole class.
+      enableServiceLinks: false
+      containers:
+        - name: gateway
+          image: GATEWAY_IMAGE_PLACEHOLDER
+          ports: [{name: http, containerPort: 8080}]
+          env:
+            - {name: SPRING_PROFILES_ACTIVE, value: prod}
+            - {name: OIDC_ISSUER_URI, value: "http://keycloak.apps.svc.cluster.local:8080/realms/xenopsbase"}
+            - {name: OIDC_CLIENT_ID, value: gateway}
+            - name: OIDC_CLIENT_SECRET
+              valueFrom: {secretKeyRef: {name: gateway-oidc, key: GATEWAY_CLIENT_SECRET}}
+            - {name: SESSION_STORE_TYPE, value: redis}
+            - {name: VALKEY_HOST, value: valkey.apps.svc.cluster.local}
+            - name: VALKEY_PASSWORD
+              valueFrom: {secretKeyRef: {name: valkey-client, key: password}}
+            # REQUIRED, and that is a defect rather than a local quirk (#211).
+            #
+            # application-prod.yml has `endpoint: ${OTLP_TRACING_ENDPOINT:}`,
+            # whose comment claims an unset variable means no exporter. It does
+            # not: `${VAR:}` defaults to the EMPTY STRING, which is a set value,
+            # so Boot builds the exporter and it dies validating the endpoint --
+            # "Invalid endpoint, must start with http:// or https://". The pod
+            # crash-loops. There is no Alloy here, so this points at a port
+            # nothing listens on: the exporter logs failures and the gateway
+            # runs, which is what the comment promised in the first place.
+            - {name: OTLP_TRACING_ENDPOINT, value: "http://localhost:4317"}
+
+            - {name: MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED, value: "true"}
+          startupProbe:
+            httpGet: {path: /management/health, port: http}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /management/health/readiness, port: http}
+            periodSeconds: 5
+          # The deployed requests, unchanged (T-2.15). The point of the local
+          # run is to exercise the real numbers, and this laptop has 12 cores
+          # against the Hetzner cluster's 8, so there is room to.
+          resources:
+            requests: {cpu: 500m, memory: 640Mi}
+            limits: {memory: 768Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: apps
+  labels: {app.kubernetes.io/name: gateway}
+spec:
+  selector: {app.kubernetes.io/name: gateway}
+  ports: [{name: http, port: 8080, targetPort: http}]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: {name: gateway, namespace: apps}
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: gateway}
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: {type: Utilization, averageUtilization: 70}
+  behavior:
+    # Up fast, down slow, and the asymmetry is the whole design.
+    #
+    # Scaling up late costs latency for real users. Scaling down early costs a
+    # second scale-up a minute later, and with a JVM that means another cold
+    # start -- so the cheap mistake is to stay scaled out slightly too long.
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - {type: Percent, value: 100, periodSeconds: 30}
+    scaleDown:
+      # Five minutes of sustained low CPU before giving a replica back. The
+      # default is 300s and it is right here for the reason above.
+      stabilizationWindowSeconds: 300
+      policies:
+        - {type: Pods, value: 1, periodSeconds: 60}
