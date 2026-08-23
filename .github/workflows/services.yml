@@ -5,33 +5,77 @@ name: Services
 # The build and test half is ordinary. The part that earns its place is the spec: it is generated
 # from the running application, compared against what is committed, and fed to a real generator.
 # Each of those catches something the others cannot.
+#
+# No `paths:` filter on the triggers, and that is deliberate rather than an
+# oversight (T-0.7). A required status check that never runs is not reported as
+# skipped, it is reported as expected — and a pull request waiting on a check
+# that will never arrive cannot be merged, ever. So the workflow always starts,
+# the `changed paths` job decides whether there is anything to build, and the
+# expensive jobs skip themselves. A skipped job counts as success to branch
+# protection; a workflow that never ran counts as nothing at all.
 on:
   pull_request:
-    paths:
-      - 'services/**'
-      - 'clients/**'
-      - 'docs/api/**'
-      - '.github/workflows/services.yml'
   push:
     branches: [main]
-    paths:
-      - 'services/**'
-      - 'clients/**'
-      - 'docs/api/**'
-      # Present on pull_request and missing here, which meant a change to this
-      # file could not trigger the workflow it changes. A commit touching only
-      # the pipeline produced no run at all, so the pipeline was the one thing
-      # that shipped to main unverified.
-      - '.github/workflows/services.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  # Replaces the trigger-level path filter. Everything that filter used to name
+  # is named here instead, in one place, for both event types.
+  changes:
+    name: changed paths (services)
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.filter.outputs.services }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # Both sides of the comparison have to exist locally. A shallow clone
+          # has the head and not the base, and `git diff` against a commit it
+          # does not have fails — which would skip every build.
+          fetch-depth: 0
+
+      - name: Decide whether anything relevant changed
+        id: filter
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          # A manual run is someone asking for the build regardless of what
+          # changed, and workflow_dispatch carries neither sha.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "services=true" >> "$GITHUB_OUTPUT"
+            echo "manual run: building everything"
+            exit 0
+          fi
+
+          # The first push to a new branch reports an all-zero `before`, and a
+          # force-push can report a commit that no longer exists. Neither is a
+          # reason to skip the build, so fall back to building.
+          if ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            echo "services=true" >> "$GITHUB_OUTPUT"
+            echo "base ${BASE} is not available: building everything"
+            exit 0
+          fi
+
+          changed="$(git diff --name-only "${BASE}" "${HEAD}")"
+          echo "changed files:"
+          echo "${changed}"
+
+          if echo "${changed}" | grep -Eq '^(services/|clients/|docs/api/|\.github/workflows/services\.yml$)'; then
+            echo "services=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "services=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
     name: ${{ matrix.service }}
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.services == 'true'
     strategy:
       # Both services are reported even when one fails. Stopping at the first turns "the gateway is
       # broken" into "something is broken", and the two are on the same Spring Boot line now, so a
@@ -169,8 +213,10 @@ jobs:
   client:
     name: generated client
     runs-on: ubuntu-latest
+    needs: changes
     # Runs regardless of the services job. A client that cannot be generated is a broken contract
     # whether or not the services happen to be green.
+    if: needs.changes.outputs.services == 'true'
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
@@ -198,3 +244,35 @@ jobs:
           name: core-api-client-sources
           path: clients/java/target/generated-sources/openapi/src/main/java/**/*.java
           if-no-files-found: error
+
+  # The one context branch protection requires from this workflow (T-0.7).
+  #
+  # Requiring `core`, `gateway` and `generated client` by name would work too,
+  # and would couple the protection rules to a matrix definition: rename an
+  # entry or add a third service and the required check silently stops
+  # existing, which reads as "no longer required" rather than as an error. One
+  # aggregate context cannot drift that way.
+  gate:
+    name: services
+    runs-on: ubuntu-latest
+    # `always()` is what makes this reportable when the jobs above skipped —
+    # the default `success()` would skip the gate too, and a skipped gate is
+    # fine for protection but tells nobody anything.
+    if: always()
+    needs: [changes, build, client]
+    steps:
+      - name: Fail if any services job did not succeed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "job results: ${RESULTS}"
+          for result in ${RESULTS}; do
+            case "${result}" in
+              success|skipped) ;;
+              *)
+                echo "::error::a Services job reported '${result}'"
+                exit 1
+                ;;
+            esac
+          done
+          echo "all Services jobs succeeded or were skipped"
