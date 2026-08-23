@@ -149,10 +149,26 @@ management:
       process: true
       system: true
     distribution:
+      # SCOPED, not `all: true` (T-2.12, #155).
+      #
+      # `all: true` asks Micrometer for a full bucket histogram on EVERY timer
+      # and distribution summary. Each one becomes roughly 30-70 additional
+      # series, and it applies to meters nobody reads -- Spring Data repository
+      # timers, task executors, the lot. While the registry was switched off
+      # this cost nothing, because nothing was exported. Turning the registry on
+      # without narrowing it first is how a metrics fix becomes a Prometheus
+      # incident.
+      #
+      # Histograms are for the meter that has an SLO attached to it, which here
+      # is the one the load baseline (T-5.6) will be written against.
       percentiles-histogram:
-        all: true
+        http.server.requests: true
+      # Client-side percentiles on everything else. These are cheap -- one
+      # series per quantile, pre-computed in the process -- but they cannot be
+      # aggregated across replicas, which is the reason the histogram above
+      # exists for the metric that matters.
       percentiles:
-        all: 0, 0.5, 0.75, 0.95, 0.99, 1.0
+        all: 0.5, 0.95, 0.99
     data:
       repository:
         autotime:

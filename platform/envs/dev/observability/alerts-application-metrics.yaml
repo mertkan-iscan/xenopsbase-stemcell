@@ -1,0 +1,83 @@
+# Alerts for the metrics pipeline itself (T-2.12, #155).
+#
+# The defect these exist for was not a broken scrape. It was that neither
+# service exported anything at all, for weeks, while every component involved
+# was healthy: the services answered /management/health, Prometheus was up and
+# holding 2423 metric names, Grafana rendered, and the one dashboard that reads
+# Prometheus kept showing real numbers -- because it queries cAdvisor and
+# kube-state-metrics, which are scraped from the kubelet and have nothing to do
+# with the applications.
+#
+# So the failure had no symptom. It was found by going to look for something
+# else.
+#
+# `absent()` is the point. Every other rule in this repository alerts on a
+# metric crossing a threshold, which requires the metric to exist. These alert
+# on the metric NOT EXISTING, which is the only shape that catches a pipeline
+# that was never connected rather than one that broke.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: application-metrics
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: xenopsbase
+spec:
+  groups:
+    - name: application-metrics
+      rules:
+        # THE ONE THAT WOULD HAVE CAUGHT #155.
+        #
+        # Not "JVM memory is high" -- "there is no JVM memory metric". A
+        # threshold rule on jvm_memory_used_bytes stays silent forever when the
+        # series does not exist, which is exactly the state this was in.
+        - alert: ApplicationMetricsMissing
+          expr: |
+            absent(jvm_memory_used_bytes{namespace="apps", service="gateway"})
+            or
+            absent(jvm_memory_used_bytes{namespace="apps", service="core"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'No JVM metrics from at least one application in {{ $labels.namespace }}'
+            description: >-
+              Either the Micrometer Prometheus registry is disabled again
+              (management.prometheus.metrics.export.enabled in
+              application-prod.yml), the ServiceMonitor in platform/envs/dev/services
+              stopped matching, or the pods are down. Check
+              /management/prometheus on the pod first: a 404 there is the
+              registry, a connection refused is the pod.
+
+        # The scrape target existing but failing is a different failure from the
+        # target never having been configured, and it wants a different first
+        # question, so it is a separate rule rather than a broader expression.
+        - alert: ApplicationScrapeFailing
+          expr: up{namespace="apps"} == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'Prometheus cannot scrape {{ $labels.service }} in {{ $labels.namespace }}'
+            description: >-
+              The target is configured and not answering. Unlike
+              ApplicationMetricsMissing this means the ServiceMonitor matched
+              something, so the question is the pod or the endpoint, not the
+              configuration.
+
+        # HTTP metrics are the ones every SLO and the load baseline (T-5.6) will
+        # be written against, and they can go missing on their own: the registry
+        # can be up and publishing jvm_* while management.metrics.enable.http is
+        # off, which looks like a working pipeline in every dashboard that shows
+        # memory.
+        - alert: HttpServerMetricsMissing
+          expr: absent(http_server_requests_seconds_count{namespace="apps"})
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'No HTTP server metrics from the applications'
+            description: >-
+              jvm_* may still be arriving. Check management.metrics.enable.http
+              and that traffic has actually reached the service -- this fires on
+              a genuinely idle environment too, which is why it waits 30m.

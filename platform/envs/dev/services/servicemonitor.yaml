@@ -1,0 +1,54 @@
+# Tells Prometheus to scrape the applications (T-2.12, #155).
+#
+# Without this nothing scrapes them, so turning the Micrometer registry back on
+# in application-prod.yml would have produced an endpoint that answers and a
+# Prometheus that still holds no application metrics -- the same empty pipeline
+# with one more thing that looks correct.
+#
+# One ServiceMonitor covers both services. They have no shared label, so the
+# selector names them explicitly rather than requiring a label to be added to
+# two Services that are otherwise fine.
+#
+# It works from this namespace because the kube-prometheus-stack values set
+# serviceMonitorSelectorNilUsesHelmValues: false, which leaves the Prometheus
+# CR with an empty selector meaning "every ServiceMonitor in every namespace".
+# The default is the opposite -- select only ServiceMonitors carrying the
+# release label -- and under that default this file would be ignored in
+# silence, which is worth knowing before anyone changes those values.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: applications
+  namespace: apps
+  labels:
+    app.kubernetes.io/part-of: xenopsbase
+spec:
+  namespaceSelector:
+    matchNames:
+      - apps
+  selector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - gateway
+          - core
+  endpoints:
+    - port: http
+      # Management shares the application port; only the base path differs.
+      path: /management/prometheus
+      # 30s against Micrometer's own 60s step. Scraping faster than the meters
+      # update costs nothing and means a restart is visible within half a step
+      # rather than a whole one.
+      interval: 30s
+      scrapeTimeout: 10s
+      # `up` and every series get the pod and namespace, which is what makes a
+      # per-replica question answerable at all -- with two gateway replicas,
+      # aggregate memory tells you nothing about the one that is leaking.
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: namespace
+        - sourceLabels: [__meta_kubernetes_service_name]
+          targetLabel: service
