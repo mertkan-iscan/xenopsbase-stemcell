@@ -120,7 +120,26 @@ if [ -n "$EXPECTED_SHA" ]; then
   # Healthy says the cluster matches SOME revision; only this says it matches
   # the one that was promoted.
   short="${EXPECTED_SHA:0:7}"
-  mismatched="$(echo "$snapshot" | awk -F'\t' -v want="$short" 'substr($4,1,7) != want {print $1"\t"substr($4,1,7)}')"
+
+  # Only Applications sourced from git. A Helm-sourced one reports its CHART
+  # VERSION in this field -- `1.11.1`, `v1.21.1`, `88.5.0` -- not a commit. So
+  # comparing every Application against a git SHA marks cert-manager, loki and
+  # kube-prometheus-stack as stale forever, on a cluster that is entirely up to
+  # date, which makes the whole check unusable.
+  #
+  # Found the first time this ran with SHA= set, immediately after fixing #193
+  # so that it could run at all.
+  git_apps="$(echo "$snapshot" | awk -F'\t' '$4 ~ /^[0-9a-f]{40}$/')"
+
+  if [ -z "$git_apps" ]; then
+    # Never pass by finding nothing to compare. That is the shape of failure
+    # this repository keeps meeting: a check reporting success having checked
+    # nothing at all.
+    echo "  no git-sourced application reported a revision — nothing was compared"
+    FAILED=1
+  fi
+
+  mismatched="$(echo "$git_apps" | awk -F'\t' -v want="$short" '$1 != "" && substr($4,1,7) != want {print $1"\t"substr($4,1,7)}')"
   if [ -n "$mismatched" ]; then
     echo "  EXPECTED revision ${short}, but:"
     echo "$mismatched" | awk -F'\t' '{printf "    %-24s is at %s\n", $1, $2}'
@@ -129,7 +148,8 @@ if [ -n "$EXPECTED_SHA" ]; then
     echo "  first few minutes after a merge. It is a failure only if it persists."
     FAILED=1
   else
-    echo "  revision ${short}: every application matches"
+    echo "  revision ${short}: every git-sourced application matches"
+    echo "  (Helm-sourced applications report a chart version and are not compared)"
   fi
 fi
 
