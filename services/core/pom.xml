@@ -12,7 +12,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.0.7</version>
+        <version>4.0.8</version>
         <relativePath/>
         <!-- lookup parent from repository -->
     </parent>
@@ -24,6 +24,30 @@
         -->
         <maven.version>3.2.5</maven.version>
         <java.version>25</java.version>
+
+        <!--
+            Ahead of Spring Boot, deliberately (T-5.12, #224).
+
+            Boot 4.0.8 manages httpcore5 5.3.6, which carries CVE-2026-54399 and
+            CVE-2026-54428 (both HIGH, both fixed in 5.4.3). The image scan added
+            by T-5.8 failed on them against the digest the cluster was running.
+
+            Boot moved netty for the same round of advisories and did not move
+            httpcore5, so waiting for a patch release is not a plan with a date
+            on it. This override is what carries the fix.
+
+            It outruns Boot's tested matrix, which is the actual risk. What makes
+            it acceptable is that the suites exercise the path: the AWS SDK's
+            apache-client is what pulls httpcore5 in, and DocumentResourceIT
+            drives presigned uploads and downloads against real object storage
+            through it. A binary incompatibility fails there rather than in
+            production.
+
+            REMOVE THIS when Boot manages 5.4.3 or later. To check, read
+            httpcore5.version out of the spring-boot-dependencies pom for the
+            version in the parent above, on repo1.maven.org.
+        -->
+        <httpcore5.version>5.4.3</httpcore5.version>
         <!--
             The Maven-standard reproducible-build timestamp. Without it,
             spring-boot:build-info writes a wall-clock build.time into
