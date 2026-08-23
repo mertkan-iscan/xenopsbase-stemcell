@@ -30,7 +30,7 @@ something, and against tests that assert a call **returned**.
 | End-to-end | `make smoke ENV=<env>` | the **deployed** environment | `smoke.yml` after every deploy; gates promotion |
 | Load | `make load ENV=<env>` | k6, **in-cluster** | none yet — CI cannot reach the cluster (#207) |
 | Chaos | — | — | none yet (T-5.7, #46) |
-| Security | partial — secret scan only | GitHub Actions | `secrets.yml` on PR and push |
+| Security | CodeQL, dependency review, image scan, SBOM | GitHub Actions | `codeql.yml`, `security.yml`, `secrets.yml` |
 
 Counted on 2026-08-23: gateway 8 unit and 6 integration classes, core 9 unit and 8 integration.
 
@@ -209,15 +209,49 @@ the wrong thing.
 `DeadDownstreamIT` covers it. A *hung* downstream is not — testing it means waiting out a real
 timeout, which is the point of a chaos drill and poison in a unit suite.
 
-### Security — partial (T-5.8, #47)
+### Security
 
-**Covers today:** `secrets.yml` scans for unencrypted secrets on PR and push. Terraform static
-analysis via checkov and tflint runs in `terraform.yml`.
+**Covers, since T-5.8 (#47)**, four different questions, deliberately kept apart because they fail
+for different reasons and want different responses:
 
-**Does not cover** dependency vulnerabilities, container image scanning, SAST, or authorization
-regression. That last one is the gap that matters most, and it compounds with integration not
-covering identity: nothing anywhere asserts that an unprivileged user is refused an admin endpoint
-against a real token.
+| Check | Asks | Gate |
+|---|---|---|
+| `check-secrets.sh` | is a secret about to be committed | fails the pull request |
+| GitHub secret scanning + push protection | is a secret already here, or being pushed now | blocks the push |
+| CodeQL | is the code we wrote unsafe | reports to the Security tab |
+| dependency review | does this pull request **add** a vulnerable or badly-licensed dependency | fails the pull request |
+| Trivy image scan | is what we actually ship vulnerable | fails on HIGH or CRITICAL with a fix available |
+| SBOM | what is in the artefact | recorded, not a gate |
+
+**CodeQL uses a manual build, not autobuild.** There is no parent pom, two independent Maven
+projects, and a hard Java 25 requirement enforced by `maven-enforcer`. Autobuild finds one project,
+builds it with whatever JDK the runner has, and either fails the enforcer or analyses half the
+codebase while reporting success — and a security scan silently covering half the code is worse
+than none, because the green tick is what people read.
+
+**The image scan reads the pinned digest, not `:main`.** A tag moves; scanning something other than
+what is deployed is exactly the green tick this repository keeps finding.
+
+**`ignore-unfixed` on the image scan is deliberate.** A CRITICAL with no available fix cannot be
+actioned here, and failing on it would make the gate permanently red for reasons nobody can
+resolve — the pattern that made #193 worth its own card.
+
+**Dependency review fails only on what a change adds**, not on pre-existing findings. Otherwise
+every pull request fails until the backlog is cleared, and a check that always fails is one people
+learn to skip.
+
+**Does not cover DAST.** Nothing drives a scanner against the running application. That needs a
+decision about pointing an active scanner at an environment behind Cloudflare, and is split to
+[#222](https://github.com/mertkan-iscan/xenopsbase-stemcell/issues/222).
+
+**Does not attach the SBOM to a release**, because there are no releases — tagging is T-8.5 (#63)
+and the automation T-6.5 (#52). It is generated and kept as a build artefact; attaching it is one
+line in whichever workflow eventually creates releases.
+
+**Does not cover the infrastructure.** `checkov` runs on the Terraform in `terraform.yml`, and its
+real value is recorded honestly in [terraform-ci.md](runbooks/terraform-ci.md): after waiving the
+AWS-only rules it reports zero passed and zero failed, so it is a regression detector rather than a
+security bar.
 
 ## What blocks a merge
 
