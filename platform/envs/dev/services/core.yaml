@@ -94,8 +94,22 @@ spec:
           livenessProbe:
             httpGet: {path: /management/health/liveness, port: http}
             periodSeconds: 20
+          # SIZED FROM MEASUREMENT, NOT FROM A DEFAULT (T-2.15, #209).
+          #
+          # T-5.6 measured this pod: 0.005 cores idle, 1.72 cores under load,
+          # 638 MiB peak working set. See gateway.yaml for the derivation --
+          # about 110 req/s per core, and why the request is neither the idle
+          # figure nor the synthetic peak.
+          #
+          # memory 832Mi against a 638 MiB observed peak. 768Mi left 17% of
+          # headroom over something already measured, which is thin for a
+          # number the scheduler treats as the whole truth.
+          #
+          # NO CPU LIMIT, deliberately -- CFS throttling stalls a request
+          # mid-flight and surfaces as tail latency. The reasoning is written
+          # out once, in gateway.yaml.
           resources:
-            requests: {cpu: 200m, memory: 768Mi}
+            requests: {cpu: 500m, memory: 832Mi}
             limits: {memory: 1Gi}
           volumeMounts:
             # readOnlyRootFilesystem is on, and the JVM still needs somewhere to

@@ -94,6 +94,16 @@ The honest recommendation for #22: **set requests from these measurements first*
 target, then re-measure. Do not pick a target against requests that are wrong by an order of
 magnitude.
 
+**Done, in T-2.15 (#209).** gateway and core now request `500m` — about 55 req/s of booked capacity
+each, at the measured ~110 req/s per core. Not the idle figure, which would have the scheduler treat
+a serving pod as free, and not the synthetic peak, which would reserve half the cluster for pods
+that spend most of their life at 6 millicores. The measured peak now reads as ~400% rather than
+995%, which is a number an HPA target can be chosen against.
+
+Memory requests went up too, and that was the sharper problem: the gateway requested 512Mi while
+using **490 MiB**, so the scheduler was booking less than the pod actually needs and could evict it
+for using exactly that.
+
 ## What is deliberately not measured
 
 **The edge.** Cloudflare, the tunnel and ingress-nginx are excluded. `smoke.sh` asserts that path

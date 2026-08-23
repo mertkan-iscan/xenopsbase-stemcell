@@ -493,6 +493,10 @@ rollout-status: ## Did the deploy land? Every Argo CD app Synced and Healthy, on
 	@# no GitHub-hosted runner can ask. Tracked as T-6.7 (#195).
 	@bash $(SCRIPTS)/rollout-status.sh "$(ENV)" "$(SHA)"
 
+.PHONY: verify-resources
+verify-resources: ## Every workload we own declares CPU and memory requests (T-2.15)
+	@bash $(SCRIPTS)/verify-resources.sh
+
 .PHONY: secrets-verify
 secrets-verify: ## Assert every encrypted file carries every recipient .sops.yaml names
 	@bash $(SCRIPTS)/verify-secret-recipients.sh
