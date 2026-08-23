@@ -448,6 +448,17 @@ fmt: ## Rewrite Terraform files into canonical format
 check-secrets: ## Refuse unencrypted secrets anywhere in the repository
 	@bash $(SCRIPTS)/check-secrets.sh
 
+.PHONY: promote
+promote: ## Move a build between environments: make promote SERVICE=all FROM=dev TO=staging
+	@bash $(SCRIPTS)/promote.sh "$(or $(SERVICE),all)" "$(or $(FROM),dev)" "$(or $(TO),staging)"
+
+.PHONY: rollout-status
+rollout-status: ## Did the deploy land? Every Argo CD app Synced and Healthy, on the expected commit
+	@# Not a CI job, and that is a limitation rather than a preference: the
+	@# Kubernetes API is a tailnet address with 6443 closed publicly (T-1.5), so
+	@# no GitHub-hosted runner can ask. Tracked as T-6.7 (#195).
+	@bash $(SCRIPTS)/rollout-status.sh "$(ENV)" "$(SHA)"
+
 .PHONY: secrets-verify
 secrets-verify: ## Assert every encrypted file carries every recipient .sops.yaml names
 	@bash $(SCRIPTS)/verify-secret-recipients.sh

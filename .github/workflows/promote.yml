@@ -1,0 +1,137 @@
+name: Promote
+
+# Moves a build between environments as a git operation (T-6.3).
+#
+# Nothing here builds, pushes an image, or talks to a cluster. The entire
+# operation is: read the digest pinned in one environment's directory, write it
+# into another's, and push that as a branch. The target cluster's Argo CD does
+# the rest when the commit reaches `main`.
+#
+# That is what makes the promotion reviewable and revertible: what shipped is a
+# diff, and undoing it is `git revert` rather than a procedure.
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: 'What to promote'
+        required: true
+        default: all
+        type: choice
+        options: [all, core, gateway]
+      from:
+        description: 'Promote FROM this environment'
+        required: true
+        default: dev
+        type: choice
+        options: [dev, staging]
+      to:
+        description: 'Promote TO this environment'
+        required: true
+        default: staging
+        type: choice
+        options: [staging, prod]
+
+permissions:
+  contents: read
+
+jobs:
+  promote:
+    name: promote ${{ inputs.service }} (${{ inputs.from }} -> ${{ inputs.to }})
+    runs-on: ubuntu-latest
+
+    # THE HUMAN GATE.
+    #
+    # `prod` is configured with a required reviewer and can_admins_bypass:
+    # false, so a dispatch aimed at production pauses here until a person
+    # approves it, and GitHub records who. `staging` has no reviewer, so it
+    # proceeds -- the gate is before production, not before every environment.
+    #
+    # An environment named here that does not exist is created implicitly, with
+    # NO protection rules. That is the trap: a typo in `to` would produce a
+    # brand-new unprotected environment and a promotion that skipped the gate
+    # while appearing to honour it. The choice list above is what prevents it,
+    # and the guard step below is what proves it.
+    environment: ${{ inputs.to }}
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # The promotion commit is built on main and pushed as a branch, so
+          # the full ref is needed rather than a detached SHA.
+          ref: main
+
+      - name: Refuse a promotion that would skip an environment
+        run: |
+          # dev -> prod is not a shortcut, it is a build that never ran in
+          # staging being sent to production. If that is genuinely wanted it
+          # should be two deliberate dispatches, each with its own record.
+          if [ "${{ inputs.from }}" = "dev" ] && [ "${{ inputs.to }}" = "prod" ]; then
+            echo "::error::dev -> prod skips staging. Promote dev -> staging first."
+            exit 1
+          fi
+
+      - name: Promote the digest
+        id: promote
+        run: |
+          bash infra/scripts/promote.sh "${{ inputs.service }}" "${{ inputs.from }}" "${{ inputs.to }}" | tee promotion.log
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push the promotion branch
+        if: steps.promote.outputs.changed == 'true'
+        env:
+          # Recorded in the commit so a deploy is traceable to the build it came
+          # from, not merely to the commit that moved it.
+          SOURCE_SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          branch="promote/${{ inputs.to }}-$(date -u +%Y%m%dT%H%M%SZ)"
+
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+          git checkout -b "${branch}"
+          git add platform/envs
+          git commit -F - <<EOF
+          chore(platform): promote ${{ inputs.service }} from ${{ inputs.from }} to ${{ inputs.to }}
+
+          $(sed -n '/^  [a-z]*:$/,$p' promotion.log | sed 's/^/  /')
+
+          Promoted by: ${{ github.actor }}
+          Source env:  ${{ inputs.from }}
+          Source ref:  ${SOURCE_SHA}
+          Workflow:    ${RUN_URL}
+          EOF
+
+          git push origin "${branch}"
+
+          {
+            echo "### Promotion ready"
+            echo ""
+            echo '```'
+            cat promotion.log
+            echo '```'
+            echo ""
+            echo "Open the pull request:"
+            echo ""
+            echo "${{ github.server_url }}/${{ github.repository }}/compare/main...${branch}?expand=1"
+            echo ""
+            echo "A branch rather than a pull request, deliberately: a pull request opened"
+            echo "with GITHUB_TOKEN does not trigger workflows, so the required checks would"
+            echo "never report and the promotion could never merge."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Nothing to promote
+        if: steps.promote.outputs.changed != 'true'
+        run: |
+          {
+            echo "### Nothing to promote"
+            echo ""
+            echo "\`${{ inputs.to }}\` already runs the same digest as \`${{ inputs.from }}\`."
+          } >> "$GITHUB_STEP_SUMMARY"
