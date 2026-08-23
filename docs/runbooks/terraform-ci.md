@@ -1,13 +1,37 @@
 # Runbook: Terraform CI
 
-No infrastructure change reaches `main` without a reviewed plan.
+An infrastructure change is *supposed* to reach `main` only with a reviewed plan. Right now it
+does not: `plan (cluster)` has been failing since 2026-08-21 and `terraform` is deliberately not
+among the required status checks until it is fixed
+([#183](https://github.com/mertkan-iscan/xenopsbase-stemcell/issues/183)). Read that before
+trusting a green tick on an infrastructure pull request.
 
 | Job | Runs on | Needs secrets |
 |---|---|---|
-| `lint` | every PR, per module | no |
-| `checkov` | every PR | no |
-| `plan` | PRs from this repo only, per module | yes |
+| `changed paths (terraform)` | every PR and every push to `main` | no |
+| `lint` | per module, when Terraform changed | no |
+| `checkov` | when Terraform changed | no |
+| `plan` | PRs from this repo only, per module, when Terraform changed | yes |
+| `terraform` | every PR — aggregates the four above | no |
 | `apply` | manual dispatch only | yes |
+
+## Why the workflow starts even when no Terraform changed
+
+The trigger carries no `paths:` filter, which looks wasteful and is not. A required status check
+whose workflow never ran is reported by GitHub as **expected**, not skipped, and a pull request
+waiting on a check that will never arrive cannot be merged at all. Filtering at the trigger and
+requiring the check are mutually exclusive.
+
+So the filter lives in `changed paths (terraform)` instead — one cheap job that diffs the merge
+base and applies exactly the path list the trigger used to hold. Everything expensive is gated on
+its output and skips when nothing relevant changed. A skipped job counts as success to branch
+protection; a workflow that never ran counts as nothing.
+
+`terraform` is a single aggregate context that fails if any job it needs reported anything other
+than success or skipped. Branch protection names that one context rather than the eight
+matrix-derived job names, so adding a fourth root module or renaming one cannot silently drop a
+required check. `apply` is not among its needs — it is dispatch-only and has nothing to say about
+whether a branch is mergeable.
 
 ## Why apply is manual
 
@@ -69,6 +93,14 @@ Verify with `gh secret list`. The script is safe to re-run; setting an existing 
 
 Until they exist, `plan` emits a warning and skips. Lint and checkov work regardless, so the
 workflow is useful from the moment it merges.
+
+**Sixteenth, and missing:** `TAILSCALE_AUTH_KEY`. Every environment now runs
+`node_transport_mode = "tailscale"`, and the cluster module rejects that at plan time without
+`TF_VAR_tailscale_auth_key` — so `plan (cluster)` and `apply (cluster / …)` both die on variable
+validation before reaching a provider. See
+[#183](https://github.com/mertkan-iscan/xenopsbase-stemcell/issues/183), including why a
+placeholder value is not an option: the key reaches nodes through cloud-init `user_data`, which is
+part of the plan diff, so a fake one makes the plan propose replacing every node.
 
 ## What checkov is actually worth here
 
