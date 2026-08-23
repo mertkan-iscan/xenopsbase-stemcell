@@ -24,7 +24,7 @@ RPO is how much you lose. RTO is how long until it is back.
 | Prometheus history | **total loss** | n/a | Volume deleted with the cluster. See "what is not protected" |
 | Loki logs | ≤ chunk flush | stack RTO | Chunks in object storage, expire at 30 days |
 | Tempo traces | ≤ flush | stack RTO | Object storage, expire at 7 days |
-| **SOPS-encrypted secrets** | 0 | **∞ without the age key** | See the section on the age key. This is the one that ends the project |
+| **SOPS-encrypted secrets** | 0 | **∞ without an age key** | Two recipients since 2026-08-23 (T-0.8); either alone decrypts everything |
 
 ### Where the measured numbers come from
 
@@ -110,27 +110,53 @@ card; it is not built. **This is the largest single gap in this plan.**
 (#56, and the drill below reproduces it), but nothing runs it on a schedule, so a regression would
 go unnoticed until it mattered. T-7.3 (#55) is that card and it is not built.
 
-## The age key, which is the real single point of failure
+## The age keys, and why there are now two
 
-Every secret in this repository is encrypted to one age recipient:
+Every secret in this repository is encrypted to **two** age recipients, and either one alone
+decrypts everything:
 
+| Recipient | Private half | Role |
+|---|---|---|
+| `age1sgwm6cky…q8tf8qsgusx5` | `TF_VAR_sops_age_key` in `~/.xenopsbase.env`, plus the `SOPS_AGE_KEY` GitHub Actions secret | everyday work and CI |
+| `age16y5yn6md…tlw3qfq7repy8` | offline, off this machine — location in [secrets.md](secrets.md) | recovery only |
+
+**Every RTO in the table above is conditional on being able to decrypt.** The cluster rebuilds from
+nothing, the database restores from the WAL archive, the documents were never at risk — and none of
+it comes up if the database credentials, the gateway client secret, the S3 keys and the Cloudflare
+token are ciphertext nothing can read. Backups you cannot decrypt are not backups.
+
+Until 2026-08-23 there was one recipient, one private half, one machine, and no escrow. That was an
+omission rather than a decision — ADR-0003 weighed SOPS against Vault and External Secrets and did
+not discuss custody at all. It is fixed under T-0.8 (#163) and recorded as an amendment to that ADR.
+
+### Recovering when the everyday key is gone
+
+This is the scenario the second key exists for: the machine is gone, or `~/.xenopsbase.env` is.
+
+```bash
+export TF_VAR_sops_age_key="$(cat /path/to/escrow.age)"
+make up ENV=dev
 ```
-age1sgwm6ckyjns0grwu6hsc6zhh2esh3ja7xmwynkw9ukc3ygq8tf8qsgusx5
-```
 
-The private half lives in `TF_VAR_sops_age_key`, in `~/.xenopsbase.env`, on one machine.
+Everything downstream is the ordinary path. The escrow key is not a different mechanism, it is the
+same mechanism with the other key — which is deliberate, because a recovery path that works
+differently from the everyday one is a recovery path nobody has exercised.
 
-**Lose it and nothing else in this plan matters.** The cluster rebuilds from nothing, the database
-restores, the documents were never at risk — and none of it can be brought up, because the database
-credentials, the gateway client secret, the S3 keys and the Cloudflare token are all ciphertext that
-nothing can read. Backups you cannot decrypt are not backups.
+Verified on 2026-08-23 by decrypting with the primary removed from the environment; the control,
+with neither key present, correctly refused.
 
-There is no escrow, no second recipient, and no documented recovery. That is an omission being
-named, not a decision: nobody chose it. ADR-0003 weighed SOPS against Vault and External Secrets and
-did not discuss key custody at all.
+### What still has to be true
 
-Adding a second recipient costs one line in `.sops.yaml` and a re-encrypt. It is **the
-highest-value item in this document**, and it is filed as T-0.8 (#163).
+- The escrow key is **not on this machine**. If it is still at `~/.xenopsbase-escrow.age`, this
+  section is describing redundancy that does not exist — two copies on one disk are one copy.
+- Both files carry both recipients. Adding a recipient to `.sops.yaml` does not re-key existing
+  files and sops reports no error, so `make secrets-verify` runs on every pull request to catch it.
+
+### What this does not fix
+
+Both keys are held by one person. This removes the single *object* whose loss is unrecoverable, not
+the single *person*. A cloud KMS recipient, recoverable through an account rather than an object, is
+the next layer and is tracked as T-0.9 (#191).
 
 ## Scenarios
 
@@ -293,7 +319,7 @@ Listed so the next person inherits the reasoning, not just the gap.
 | No application metrics reach Prometheus | #155 | So alerting on backup age cannot be built even if the field were populated |
 | `archive_timeout` not pinned | #164 | The stated 5-minute RPO depends on a CNPG default |
 | Lifecycle rules are shared across environments | #151 | A retention change for dev would apply to prod |
-| No second age recipient | **#163** | Nobody decided this; see the age key section |
+| Both age keys held by one person | #191 | Two recipients removes the single object, not the single person |
 | Rollback not measured | #51 | Blocked on T-6.3 (#50) |
 
 ### The one that undermines the rest

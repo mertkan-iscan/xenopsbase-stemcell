@@ -68,8 +68,8 @@ down here so it cannot be discovered during an incident.
   ciphertext and the old key are forever recoverable together. A leaked key means every secret it
   ever encrypted is compromised, including in past commits, and all of them must be reissued at
   their source.
-- **The age private key is escrowed** in a password manager plus one offline copy. Losing it costs
-  a full credential reissue across the platform.
+- **Every secret is encrypted to two recipients**, and both must be able to decrypt every file. See
+  the amendment below — this bullet used to claim an escrow that did not exist.
 
 ## Consequences
 
@@ -134,3 +134,74 @@ anyway, or every rebuild invalidates every sealed secret in the repository.
 - Rotation frequency rises to where commit-based rotation is a genuine burden.
 - The age key is ever leaked, which forces a full reissue and is the moment to reconsider whether
   permanent public git history is the right store.
+
+## Amendment, 2026-08-23 — key custody (T-0.8, #163)
+
+This ADR chose SOPS and reasoned about its operational cost. It never discussed **custody**, and
+the rules above asserted that the private key was "escrowed in a password manager plus one offline
+copy". That was not true and had never been true. There was one recipient:
+
+```
+age1sgwm6ckyjns0grwu6hsc6zhh2esh3ja7xmwynkw9ukc3ygq8tf8qsgusx5
+```
+
+and its private half existed in exactly one place — `TF_VAR_sops_age_key` in `~/.xenopsbase.env`,
+on one machine. No second recipient, no escrow, no documented recovery. The single-recipient setup
+is what the first `.sops.yaml` happened to contain and was never revisited; the escrow sentence was
+written as intent and read ever after as fact.
+
+### Why this outranked the rest of the disaster recovery plan
+
+Every RTO in `docs/runbooks/disaster-recovery.md` was conditional on one file surviving, and none
+of them said so. The cluster rebuilds from nothing, Postgres restores from the WAL archive, the
+documents were never at risk — and none of it comes up, because the database credentials, the
+gateway client secret, the Hetzner S3 keys and the Cloudflare token are all ciphertext nothing can
+read. **Backups you cannot decrypt are not backups.**
+
+It is also the failure with no warning. A disk dies or a laptop is replaced and everything keeps
+working until the next time something needs decrypting — which is during a recovery.
+
+### Decision
+
+A **second age recipient, held offline**, added as of this amendment:
+
+```
+age16y5yn6mddywkr8vwf5xjuukw6c33vy3yp2gtpmafr09fltlw3qfq7repy8
+```
+
+Every file under `platform/envs/*/secrets/` is encrypted to both. Either key alone decrypts
+everything; neither is required.
+
+**Offline rather than a cloud KMS recipient**, deliberately. KMS is recoverable through an account
+rather than an object, which is genuinely stronger against losing hardware — and it makes recovery
+depend on a provider being reachable at exactly the moment you are recovering, adds a credential to
+manage, and adds a bill. An offline copy has no dependency and no recurring cost, and is only as
+good as the discipline storing it.
+
+That trade is not free and the weakness is real, so KMS is not rejected — it is **deferred as a
+second layer** (T-0.9, #191). Two independent mechanisms beat choosing between them; doing the
+cheap one immediately beats debating the expensive one while a single point of failure stands.
+
+**A second person's key** was not an option: this is a one-person project, so it would name the
+same human twice.
+
+### What enforces it
+
+Adding a recipient to `.sops.yaml` changes what *new* files are encrypted to. It does **nothing**
+to files that already exist, and sops reports no error — so the escrow key can be present in the
+configuration and absent from every secret it exists to rescue, with nothing to show for the
+difference until a recovery. That is the same shape as every other defect this project has found: a
+mechanism reporting success while doing nothing.
+
+Two things close it:
+
+- `make secrets-rekey` re-encrypts every secret to the current recipient list.
+- `make secrets-verify` compares the recipients `.sops.yaml` names against the recipients each file
+  actually carries, and fails if any is missing. It needs **no key** — recipients are public
+  metadata — so it runs on every pull request in `secrets.yml`, with no credential near CI.
+
+### What this does not solve
+
+Both halves of both keys are still material a single person holds. This removes the single *object*
+whose loss is unrecoverable; it does not remove the single *person*. On a team, a colleague's key
+would be the natural third recipient and the right answer.

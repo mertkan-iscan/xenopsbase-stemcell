@@ -14,11 +14,41 @@
 # matches nothing there — failing with "no matching creation rules found", which
 # reads like a missing rule rather than a path-separator problem.
 
+# TWO RECIPIENTS, NOT ONE (T-0.8).
+#
+# Every file here decrypts with EITHER key. Until 2026-08-23 there was one, and
+# its private half existed in exactly one place: TF_VAR_sops_age_key in
+# ~/.xenopsbase.env, on one machine. No escrow, no second copy, no recovery.
+#
+# That made the whole of docs/runbooks/disaster-recovery.md conditional on one
+# file surviving, and said so nowhere. The cluster rebuilds from nothing, the
+# database restores from the WAL archive, the documents were never at risk --
+# and none of it comes up, because the database credentials, the gateway client
+# secret and the Cloudflare token are ciphertext nothing can read. Backups you
+# cannot decrypt are not backups.
+#
+# It is also the failure with no warning: everything keeps working until the
+# next time something needs decrypting, which is during a recovery.
+#
+# The second recipient is an OFFLINE key. It is not on this machine and not in
+# any provider -- see docs/runbooks/secrets.md for where it lives and how to
+# recover with it. A cloud KMS recipient is deliberately a separate, later
+# decision (T-0.9): it trades an object you can lose for a provider that has to
+# be reachable exactly when you are recovering.
+#
+# ADDING A THIRD FILE: the creation rule below covers every path under
+# envs/<env>/secrets/, so a new file encrypts to both recipients automatically.
+# Adding a recipient to this file does NOT re-key files that already exist --
+# `make secrets-rekey` does that, and `make secrets-verify` fails if any file
+# is missing a recipient this file names.
+
 creation_rules:
   # dev
   - path_regex: .*envs.dev.secrets.*\.ya?ml$
     encrypted_regex: '^(data|stringData)$'
-    age: age1sgwm6ckyjns0grwu6hsc6zhh2esh3ja7xmwynkw9ukc3ygq8tf8qsgusx5
+    age: >-
+      age1sgwm6ckyjns0grwu6hsc6zhh2esh3ja7xmwynkw9ukc3ygq8tf8qsgusx5,
+      age16y5yn6mddywkr8vwf5xjuukw6c33vy3yp2gtpmafr09fltlw3qfq7repy8
 
   # staging and prod get their OWN keys, so a leaked dev key cannot decrypt
   # production. Add them as those environments are built. Until then a secrets
