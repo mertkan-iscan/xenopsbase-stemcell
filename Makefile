@@ -448,6 +448,25 @@ fmt: ## Rewrite Terraform files into canonical format
 check-secrets: ## Refuse unencrypted secrets anywhere in the repository
 	@bash $(SCRIPTS)/check-secrets.sh
 
+.PHONY: secrets-verify
+secrets-verify: ## Assert every encrypted file carries every recipient .sops.yaml names
+	@bash $(SCRIPTS)/verify-secret-recipients.sh
+
+.PHONY: secrets-rekey
+secrets-rekey: ## Re-encrypt every secret to the CURRENT recipient list in .sops.yaml
+	@# Adding a recipient to .sops.yaml changes what NEW files get. It does
+	@# nothing to files that already exist, and sops reports no error -- so the
+	@# escrow key can be in the config and in none of the secrets it is meant to
+	@# rescue. This is the step that closes that gap; secrets-verify is what
+	@# notices when it has not been run.
+	@set -e; \
+	for f in platform/envs/*/secrets/*.yaml; do \
+	  grep -q '^sops:' "$$f" || continue; \
+	  echo "  rekey $$f"; \
+	  sops updatekeys --yes "$$f" >/dev/null; \
+	done; \
+	bash $(SCRIPTS)/verify-secret-recipients.sh
+
 .PHONY: validate
 validate: ## Validate every Terraform root module without touching remote state
 	@set -e; for d in $(STORAGE_DIR) $(EDGE_DIR) $(CLUSTER_DIR); do \
