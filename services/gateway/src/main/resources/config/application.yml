@@ -313,29 +313,54 @@ spring:
           # X-Forwarded-Prefix, which is now stripped there
           # (platform/envs/dev/apps/ingress-nginx.yaml).
           #
-          # REVERTED to '.*' on 2026-08-22, and this is the evidence for why.
+          # THIS SETTING HAS NOW BEEN CHANGED TWICE ON AN INFERENCE AND REVERTED
+          # ONCE, AT THE COST OF A CLIENT CONTRACT. Read the whole comment
+          # before touching it.
           #
-          # It was narrowed to '10\.42\.\d{1,3}\.\d{1,3}' -- the pod network,
-          # which is genuinely where requests come from: the ingress-nginx pod
-          # was 10.42.3.26 and every node carries a /24 out of 10.42.0.0/16.
-          # The value was right about the ADDRESS and wrong about the MATCH.
-          #
-          # Deployed, core's pagination Link header immediately became:
+          # WHAT HAPPENED. It was narrowed to '10\.42\.\d{1,3}\.\d{1,3}' in
+          # 0c8129a. Core's pagination Link header immediately became
           #
           #   <http://core:8081/api/documents?page=1&size=2>; rel="next"
           #
           # instead of https://app-dev.xenopsoftware.com/services/core/api/...
-          # The gateway had stopped forwarding X-Forwarded-* to core at all, so
-          # core built absolute URLs from its own in-cluster address -- exactly
-          # the http:// reversion T-3.15 warns about, on the client contract
-          # T-3.8 defines.
+          # An untrusted peer does not merely stop ADDING forwarded headers: the
+          # upstream filter deletes the ones nginx already set, so core saw no
+          # host and no proto and fell back to its own in-cluster address. This
+          # setting fails OPEN on the client contract, not closed on the attack,
+          # which is why a wrong value here is worse than no value.
           #
-          # The likely cause, to be confirmed before trying again: the pattern
-          # is applied as a FULL match against the remote address string, and
-          # that string carries the port (10.42.3.26:54321), which the regex
-          # above does not cover. '10\.42\..*' would. That is a hypothesis and
-          # it is not going back in until it has been observed, because the last
-          # value went in on an inference too.
+          # WHAT THE MECHANISM ACTUALLY IS, now established rather than assumed.
+          # See TrustedProxiesTest, which asserts all of it against the real
+          # upstream classes and fails if Spring changes them:
+          #
+          #   - the pattern is a FULL match (Pattern.matches), so '10\.42\.'
+          #     rejects everything and '10\.42\..*' does not;
+          #   - it is matched against getRemoteAddress().getHostString(), which
+          #     carries NO PORT;
+          #   - an untrusted peer strips every x-forwarded-* header.
+          #
+          # THE RECORDED HYPOTHESIS WAS WRONG. d861dbf guessed the match string
+          # included the port (10.42.3.26:54321). It does not -- getHostString()
+          # never returns one -- and '10\.42\.\d{1,3}\.\d{1,3}' matches
+          # '10.42.3.26' perfectly well. Both are asserted in the test. So the
+          # pattern was not the fault: the string it was fed was not the string
+          # anyone thought it was.
+          #
+          # Reproduced locally on k3d (same k3s, same 10.42.0.0/16 pod CIDR,
+          # ingress-nginx as a ClusterIP Deployment exactly as dev deploys it):
+          # a backend behind the ingress sees its peer as the ingress-nginx POD
+          # IP, in 10.42.0.0/16, no port. Under those conditions the reverted
+          # pattern would have worked. Dev therefore differs from that in some
+          # way nobody has yet looked at, and THAT is the open question -- not
+          # which regex to write.
+          #
+          # HOW TO SETTLE IT IN ONE READ, no deploy and no config change. While
+          # this value is '.*' the gateway already appends what it sees as the
+          # peer to X-Forwarded-For before forwarding (XForwardedHeadersFilter,
+          # isForEnabled/isForAppend). So the LAST entry of the X-Forwarded-For
+          # that CORE receives is literally the string this pattern must match.
+          # Make one request through the public hostname and read it at core.
+          # Do not narrow this until that string is known.
           #
           # See alternatives in https://github.com/spring-cloud/spring-cloud-gateway/issues/3818
           trusted-proxies: '.*'
