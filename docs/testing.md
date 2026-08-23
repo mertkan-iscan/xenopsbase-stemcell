@@ -27,7 +27,7 @@ something, and against tests that assert a call **returned**.
 | Slice | surefire, `*SliceTest.java` | JVM; the data slice uses Testcontainers | `services.yml` on PR |
 | Integration | `mvn verify`, failsafe, `*IT.java` | Testcontainers | `services.yml` on PR |
 | Contract | — | — | none yet (T-5.4, #43) |
-| End-to-end | — | — | none yet (T-5.5, #44) |
+| End-to-end | `make smoke ENV=<env>` | the **deployed** environment | `smoke.yml` after every deploy; gates promotion |
 | Load | — | — | none yet (T-5.6, #45) |
 | Chaos | — | — | none yet (T-5.7, #46) |
 | Security | partial — secret scan only | GitHub Actions | `secrets.yml` on PR and push |
@@ -117,8 +117,9 @@ through `TestSecurityConfiguration`'s mocked decoder.
 **Does not cover** anything outside one service. The gateway's ITs do not start core, and core's do
 not start the gateway.
 
-**Does not cover** the deployed configuration. ITs run under the test profile; `application-prod.yml`
-is not exercised by anything until the service is deployed.
+**Does not cover** the deployed configuration. ITs run under the test profile, so
+`application-prod.yml` is exercised by nothing here — that is the end-to-end layer's job, and until
+T-5.5 it was nobody's.
 
 ### Contract — not built (T-5.4, #43)
 
@@ -130,17 +131,49 @@ drifted. That catches *the spec changing*. It does not catch a consumer breaking
 asserts what a consumer expects. It also cannot detect a breaking change between two revisions of
 the contract — noted on #34 as a known gap.
 
-### End-to-end — not built (T-5.5, #44)
+### End-to-end
 
-**Will cover** a real browser or client against a real cluster: sign in, upload, list, download,
-sign out.
+**Covers the deployed system, since T-5.5 (#44).** `infra/scripts/smoke.sh` runs from outside, over
+the public internet, the way a user would. Ten checks, ~5 seconds:
 
-**Must cover one thing specifically.** Ownership spans the database and the realm — documents are
-owned by the Keycloak `sub`, which lives in Keycloak's schema, while the rows live in another
-database and the bytes in object storage. An e2e suite that signs in with a fresh account each run
-would never notice ownership breaking across a rebuild. See ADR-0010 and the note on #54 and #55.
+| Check | Only true of a deployment |
+|---|---|
+| The edge answers | Cloudflare, the tunnel, and ingress-nginx are all in the path |
+| Access refuses a request with no service token | T-8.6 is still in force |
+| Login against the deployed Keycloak | the realm applied, and the issuer resolves |
+| An unauthenticated API call is 401, not a redirect | T-3.8, through the real edge |
+| An authenticated call reaches core | the gateway's `/services/core` route works |
+| An upload ticket is issued | core reached Postgres and signed a URL |
+| Bytes PUT to the presigned URL | **real** object storage, not MinIO |
+| Upload completed and recorded | the row and the object agree |
+| Downloaded bytes are identical | the round trip through Hetzner survived |
+| The document is deleted again | it cleans up rather than leaking rows and objects every run |
 
-**Will not cover** performance. A green e2e run says nothing about latency under load.
+**This is the only layer that tests `application-prod.yml`.** Everything above it runs under the
+test profile, so the configuration actually in effect in production was exercised by nothing until
+this existed.
+
+**It runs in CI, and `rollout-status` cannot** — the distinction is worth holding. The Kubernetes
+API is a tailnet address a GitHub runner cannot reach (#195), but the *application* is public by
+design. So CI cannot ask the cluster how it is, and can ask the application to prove it.
+
+**It gates promotion.** Promoting out of an environment is a claim that the build works there;
+`promote.yml` now runs this against the **source** environment first. Before, a digest could be
+promoted out of an environment that had been broken since the moment it landed, and the first sign
+would be the same breakage one environment further on.
+
+**Does not cover** ownership across a rebuild — yet. Documents are owned by the Keycloak `sub`,
+which lives in Keycloak's schema while the rows live in another database and the bytes in object
+storage. This suite creates and deletes its own document in one run, so it would not notice
+ownership breaking across a destroy and rebuild. ADR-0010 and #54 carry that; it needs a document
+that outlives the run.
+
+**Does not cover** the browser. It drives the API with a bearer token from the direct-grant client,
+not the interactive login — that is `OidcLoginFlowIT`'s job, against a real Keycloak in a
+container. Nothing yet drives a real browser through the deployed Cloudflare Access flow, which is
+exactly the gap #175 is still open on.
+
+**Does not cover** performance. A green run says nothing about latency under load.
 
 ### Load — not built (T-5.6, #45)
 

@@ -73,6 +73,26 @@ jobs:
             exit 1
           fi
 
+      # GATES THE PROMOTION (T-5.5).
+      #
+      # Promoting out of an environment is a claim that the build works there.
+      # Nothing checked that claim before: a digest could be promoted out of an
+      # environment that had been broken since the moment it landed, and the
+      # first sign would be the same breakage one environment further on.
+      #
+      # This asks the SOURCE environment, not the target -- the target is about
+      # to be changed and its current state is not the question.
+      - name: The source environment must actually work
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          if ! bash infra/scripts/smoke.sh "${{ inputs.from }}"; then
+            echo "::error::${{ inputs.from }} does not pass its own smoke suite."
+            echo "::error::Promoting out of it would carry a build that is not working there."
+            exit 1
+          fi
+
       - name: Promote the digest
         id: promote
         run: |

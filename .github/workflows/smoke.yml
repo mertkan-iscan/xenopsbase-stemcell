@@ -1,0 +1,78 @@
+name: Smoke
+
+# Does the DEPLOYED environment work (T-5.5).
+#
+# This is the one check in this repository that talks to the running system
+# over the public internet. Everything else -- unit, slice, integration -- runs
+# against a JVM on a runner and proves things that are true of the code. This
+# proves things that are only true of the deployment: the tunnel, the ingress,
+# Cloudflare Access, the deployed Keycloak, real object storage, and
+# application-prod.yml being the configuration actually in effect.
+#
+# It can run in CI, unlike `rollout-status` (T-6.7, #195), and the difference is
+# worth understanding: the Kubernetes API is a tailnet address a runner cannot
+# reach, but the APPLICATION is public by design. So CI cannot ask the cluster
+# how it is, and can ask the application to prove it.
+on:
+  # After a deploy. A change under platform/envs/<env> is what moves a digest,
+  # so this fires exactly when something might have broken.
+  push:
+    branches: [main]
+    paths:
+      - 'platform/envs/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to smoke'
+        required: true
+        default: dev
+        type: choice
+        options: [dev, staging, prod]
+
+permissions:
+  contents: read
+
+concurrency:
+  # Two runs against one environment interleave uploads and deletes, and the
+  # failure looks like a broken application rather than a broken test.
+  group: smoke-${{ inputs.environment || 'dev' }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: smoke (${{ inputs.environment || 'dev' }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # Argo CD polls rather than being notified, so a merge is not a deploy
+      # yet. Smoking immediately would test the PREVIOUS build and pass, which
+      # is worse than not running: a green tick against the thing you just
+      # replaced.
+      - name: Wait for Argo CD to pick the commit up
+        if: github.event_name == 'push'
+        run: sleep 90
+
+      - name: Smoke
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          if [ -z "${CF_ACCESS_CLIENT_ID}" ]; then
+            echo "::error::CF_ACCESS_CLIENT_ID is not set. Cloudflare Access sits in front of"
+            echo "::error::the application, so without a service token every request is"
+            echo "::error::answered by a login page and every check fails for the wrong reason."
+            exit 1
+          fi
+          bash infra/scripts/smoke.sh "${{ inputs.environment || 'dev' }}" | tee smoke.log
+
+      - name: Report
+        if: always()
+        run: |
+          {
+            echo "### Smoke — ${{ inputs.environment || 'dev' }}"
+            echo ""
+            echo '```'
+            cat smoke.log 2>/dev/null || echo "(the suite produced no output)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
