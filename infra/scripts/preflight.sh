@@ -23,20 +23,37 @@
 # So this asks each API whether the token can reach it, and names the exact
 # permission when it cannot.
 #
-# WHAT THIS CANNOT TELL YOU
+# A fifth failure got through, which is why some probes now write
+#
+# During T-8.6 a token held Access Read on two endpoints and Edit on only one.
+# Both probes passed — they were GETs, and Cloudflare's Edit implies Read — and
+# the apply created a policy and then died on the service token. Preflight had
+# looked directly at that permission and waved it through, which is worse than
+# not having looked: the whole value of the closing line is that someone stops
+# checking by hand once they trust it.
+#
+# So the probes for permissions the module WRITES with are now DELETEs against
+# an identifier that cannot exist (see cf_probe_edit). They prove Edit and they
+# still create nothing.
+#
+# WHAT THIS STILL CANNOT TELL YOU
 #
 # Cloudflare's /user/tokens/verify reports that a token is active, not what it
 # may do, and reading a token's own policies needs a permission the token will
-# not have. So these are READ probes, and Cloudflare's Edit implies Read: a
-# token with "Zone WAF Read" passes the WAF probe here and still fails to write
-# a ruleset.
+# not have. So a permission is only proven where there is a safe write probe
+# for it, and three are still read-only:
 #
-# That is a real gap, and it is worth being clear that it is a gap. It would not
-# have missed any of the four failures above, because in each the permission was
-# absent altogether rather than read-only. Treat a pass as "the token can see
-# this API", not as "the apply will succeed".
+#   Zone Settings   a GET; Edit is not proven
+#   WAF rulesets    a GET; Edit is not proven — and this one has already failed
+#                   in this project, after three resources had been created
+#   Tunnels         a GET; Edit is not proven
 #
-# Read-only. Every request below is a GET.
+# Those are named in the output as read-only rather than left to look like the
+# rest, because the defect this grew from was a summary that claimed more than
+# it had checked.
+#
+# NOT read-only any more. Most requests are GETs; the Edit probes are DELETEs
+# aimed at identifiers that cannot exist, and nothing below creates anything.
 
 set -euo pipefail
 
@@ -46,11 +63,26 @@ ENVIRONMENT="${2:-dev}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 fail=0
+unproven=0
+
+# Identifiers that cannot exist, for the Edit probes. A DELETE against one of
+# these can neither create nor destroy anything; see cf_probe_edit.
+NIL_UUID="00000000-0000-0000-0000-000000000000"
+NIL_HEX32="00000000000000000000000000000000"
 pass() { printf '  \033[32m✓\033[0m %s\n' "$1"; }
 bad() {
   printf '  \033[31m✗\033[0m %s\n' "$1"
   [ -n "${2:-}" ] && printf '      %s\n' "$2"
   fail=1
+}
+# Neither a pass nor a failure. An Edit probe that gets an answer it does not
+# recognise must not report success: the defect this grew from was a closing
+# line that said "passed" and meant less than a reader took it to mean, so a
+# third state is the point rather than a nicety.
+unknown() {
+  printf '  \033[33m?\033[0m %s\n' "$1"
+  [ -n "${2:-}" ] && printf '      %s\n' "$2"
+  unproven=1
 }
 
 # Reads a bare `key = "value"` out of a tfvars file. Deliberately not a parser:
@@ -87,6 +119,75 @@ cf_probe_auth() {
   fi
 }
 
+# PROVES EDIT, WITHOUT CREATING ANYTHING (T-1.15, #152).
+#
+# The read probes cannot distinguish Read from Edit, because Cloudflare's Edit
+# implies Read. That gap stopped being theoretical during T-8.6: a token with
+# Access Read and Edit on only one of two endpoints passed both probes, and the
+# apply created a policy and then died on
+#
+#   POST .../access/service_tokens: 403 Forbidden  auth.forbidden
+#
+# which is the half-configured mid-flight failure this whole script exists to
+# prevent, on a permission it had explicitly probed.
+#
+# So this issues a WRITE, and the safety comes from the shape of it rather than
+# from care: a DELETE against an all-zero identifier. DELETE cannot create, and
+# an identifier that cannot exist cannot be destroyed. Cloudflare authorizes
+# before it looks the resource up, so:
+#
+#   403 / 401  the token lacks Edit          -> fail, and name the permission
+#   404        Edit present, nothing there   -> pass
+#   anything   not understood                -> unproven, never a pass
+#
+# Verified against the live API on 2026-08-24 for DNS records, Access
+# applications and Access service tokens: all returned 404 with the token that
+# holds Edit, and the collections were unchanged afterwards. The 403 half is the
+# response recorded on #149 from the real failure.
+#
+# DO NOT point this at a collection endpoint. A POST with an empty body to
+# .../access/service_tokens creates a real, usable service token -- established
+# the hard way while writing this, and deleted immediately. The identifier in
+# the URL is what makes the request safe.
+#
+# It reads first, so the message can tell the two failures apart
+#
+# A 403 on the write alone does not say whether the token has Read and lacks
+# Edit, or has nothing on that API at all. Those need different fixes and the
+# first version of this said "read access only" for both — wrong for the mail
+# zone, where this token cannot read DNS either. Two requests are cheap; a
+# message that sends someone to the wrong checkbox is not.
+#
+# $1 collection url to GET, $2 url of a resource that cannot exist to DELETE,
+# $3 description, $4 permission to name
+cf_probe_edit() {
+  local read_url="$1" write_url="$2" what="$3" permission="$4"
+  local read_code write_code
+  read_code="$(curl -s -o /dev/null -w '%{http_code}' \
+    -H "Authorization: Bearer ${TF_VAR_cloudflare_api_token}" "$read_url" || echo 000)"
+  write_code="$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
+    -H "Authorization: Bearer ${TF_VAR_cloudflare_api_token}" "$write_url" || echo 000)"
+
+  case "$write_code" in
+    404)
+      pass "$what"
+      ;;
+    401 | 403)
+      if [ "$read_code" = "200" ]; then
+        bad "$what — READ works, WRITE refused" "add to the token: $permission"
+      else
+        bad "$what — no access at all (read $read_code)" "add to the token: $permission"
+      fi
+      ;;
+    000)
+      unknown "$what — could not reach the API" "network or DNS problem, not a permission one"
+      ;;
+    *)
+      unknown "$what — unexpected HTTP $write_code" "write access NOT proven; treat this as unchecked"
+      ;;
+  esac
+}
+
 cf_probe() {
   local url="$1" what="$2" permission="$3"
   local body
@@ -116,8 +217,9 @@ case "$MODULE" in
     if [ -z "$ZONE" ] || [ -z "$ACCOUNT" ]; then
       bad "zone_id / account_id not readable from $SECRETS" "copy env/secrets.tfvars.example and fill it in"
     else
-      cf_probe "https://api.cloudflare.com/client/v4/zones/$ZONE/dns_records?per_page=1" \
-        "DNS records" "Zone / DNS / Edit"
+      cf_probe_edit "https://api.cloudflare.com/client/v4/zones/$ZONE/dns_records?per_page=1" \
+        "https://api.cloudflare.com/client/v4/zones/$ZONE/dns_records/$NIL_HEX32" \
+        "DNS records, WRITE" "Zone / DNS / Edit"
       cf_probe "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/cfd_tunnel?per_page=1" \
         "Cloudflare Tunnel" "Account / Cloudflare Tunnel / Edit"
 
@@ -144,10 +246,15 @@ case "$MODULE" in
       # permission again from everything above. Probed only when the module
       # will actually create an application.
       if [ "$(tfbool "$VARS" manage_access)" = "true" ]; then
-        cf_probe "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/access/apps?per_page=1" \
-          "Access applications (manage_access = true)" "Account / Access: Apps and Policies / Edit"
-        cf_probe "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/access/service_tokens?per_page=1" \
-          "Access service tokens (manage_access = true)" "Account / Access: Service Tokens / Edit"
+        # EDIT probes, not read probes. This is the exact pair that both passed
+        # on read access and then failed mid-apply during T-8.6 — the policy was
+        # created and the service token was refused (#152).
+        cf_probe_edit "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/access/apps?per_page=1" \
+          "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/access/apps/$NIL_UUID" \
+          "Access applications, WRITE (manage_access = true)" "Account / Access: Apps and Policies / Edit"
+        cf_probe_edit "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/access/service_tokens?per_page=1" \
+          "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/access/service_tokens/$NIL_UUID" \
+          "Access service tokens, WRITE (manage_access = true)" "Account / Access: Service Tokens / Edit"
         # No probe for access/organizations, deliberately. Terraform does not
         # manage the organisation, so failing a preflight over a permission the
         # apply never uses is the cry-wolf case cf_probe_auth exists to avoid.
@@ -162,8 +269,9 @@ case "$MODULE" in
     if [ -z "$ZONE" ]; then
       bad "zone_id not readable from mail.secrets.tfvars" "copy mail.secrets.tfvars.example and fill it in"
     else
-      cf_probe "https://api.cloudflare.com/client/v4/zones/$ZONE/dns_records?per_page=1" \
-        "DNS records on the mail zone" "Zone / DNS / Edit"
+      cf_probe_edit "https://api.cloudflare.com/client/v4/zones/$ZONE/dns_records?per_page=1" \
+        "https://api.cloudflare.com/client/v4/zones/$ZONE/dns_records/$NIL_HEX32" \
+        "DNS records on the mail zone, WRITE" "Zone / DNS / Edit"
 
       # The commonest mistake here is not a missing permission but the WRONG
       # TOKEN: the edge one is scoped to a different account entirely, so it
@@ -228,5 +336,15 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
-echo "Preflight passed — the token can reach every API this module uses."
-echo "(Read probes only; Cloudflare's Edit implies Read, so this cannot prove write access.)"
+if [ "$unproven" -ne 0 ]; then
+  echo "Preflight INCONCLUSIVE — a write probe returned something unrecognised."
+  echo "Nothing has been changed. The permissions marked ? above are NOT proven;"
+  echo "treat them as unchecked rather than as working."
+  exit 1
+fi
+
+echo "Preflight passed."
+echo "  WRITE proven for: DNS records, and Access apps and service tokens where"
+echo "  manage_access is on — by a DELETE against an identifier that cannot exist."
+echo "  READ only for:    Zone Settings, WAF rulesets, Tunnels. Edit on those is"
+echo "  NOT proven, and a read-only token on any of them will still fail mid-apply."
