@@ -67,7 +67,29 @@ management:
     tracing:
       export:
         otlp:
-          endpoint: ${OTLP_TRACING_ENDPOINT:}
+          # NO `endpoint:` HERE, DELIBERATELY, AND THE OMISSION IS THE FIX
+          # (T-2.16, #211).
+          #
+          # This read `endpoint: ${OTLP_TRACING_ENDPOINT:}`. The empty default
+          # is a SET value, so Boot built the exporter and it rejected it:
+          #
+          #   IllegalArgumentException: Invalid endpoint, must start with
+          #   http:// or https://:
+          #
+          # meaning the prod profile could not start anywhere the variable was
+          # absent. In the cluster it never is, so the failure only appeared the
+          # first time anything ran this profile elsewhere -- a local k3s
+          # rehearsal of the HPA (T-2.8), where the gateway crash-looped.
+          #
+          # T-4.1 fixed exactly this line in application-dev.yml and it was
+          # never carried across. Same shape as AuthoritiesConstants in T-3.20.
+          #
+          # The deployment now sets the real property directly, by its own name:
+          #   MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT
+          # so an absent variable leaves the property absent, no exporter is
+          # registered, and the service starts with tracing off. Which is what
+          # the comment here always claimed and never did.
+          #
           # gRPC, not the `http` default: the Alloy receiver in this platform
           # listens on 4317 with a grpc block only. Sending protobuf-over-HTTP
           # to a gRPC port fails per export, in the exporter's own log, while

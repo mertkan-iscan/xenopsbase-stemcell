@@ -159,18 +159,17 @@ spec:
             - {name: VALKEY_HOST, value: valkey.apps.svc.cluster.local}
             - name: VALKEY_PASSWORD
               valueFrom: {secretKeyRef: {name: valkey-client, key: password}}
-            # REQUIRED, and that is a defect rather than a local quirk (#211).
+            # NO OTLP ENDPOINT, AND THAT IS NOW THE POINT (T-2.16, #211).
             #
-            # application-prod.yml has `endpoint: ${OTLP_TRACING_ENDPOINT:}`,
-            # whose comment claims an unset variable means no exporter. It does
-            # not: `${VAR:}` defaults to the EMPTY STRING, which is a set value,
-            # so Boot builds the exporter and it dies validating the endpoint --
-            # "Invalid endpoint, must start with http:// or https://". The pod
-            # crash-loops. There is no Alloy here, so this points at a port
-            # nothing listens on: the exporter logs failures and the gateway
-            # runs, which is what the comment promised in the first place.
-            - {name: OTLP_TRACING_ENDPOINT, value: "http://localhost:4317"}
-
+            # This used to have to set one. application-prod.yml carried
+            # `endpoint: ${OTLP_TRACING_ENDPOINT:}`, whose empty default is a
+            # SET value, so Boot built the exporter, rejected it with "Invalid
+            # endpoint, must start with http:// or https://", and the gateway
+            # crash-looped -- while the config comment claimed an unset variable
+            # meant no exporter.
+            #
+            # There is no Alloy here. The gateway starting anyway, with tracing
+            # simply off, is what proves #211 is fixed.
             - {name: MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED, value: "true"}
           startupProbe:
             httpGet: {path: /management/health, port: http}
