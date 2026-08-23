@@ -117,8 +117,34 @@ spec:
           livenessProbe:
             httpGet: {path: /management/health/liveness, port: http}
             periodSeconds: 20
+          # SIZED FROM MEASUREMENT, NOT FROM A DEFAULT (T-2.15, #209).
+          #
+          # T-5.6 measured this pod: 0.006 cores idle, 1.99 cores under a 10-VU
+          # hammer, 490 MiB peak working set. 568 req/s cost about 5.2 cores
+          # across gateway and core together, so roughly 110 req/s per core.
+          #
+          # cpu 500m books each replica for ~55 req/s of capacity. Not the idle
+          # figure, which would have the scheduler treat a serving pod as free,
+          # and not the synthetic peak, which would reserve 4 of the cluster's 8
+          # cores for pods that spend most of their life at 6 millicores.
+          #
+          # It also makes the HPA arithmetic in T-2.8 mean something: against a
+          # 200m request the measured peak reads as 995% utilisation, so any
+          # conventional target scales to maximum instantly.
+          #
+          # memory 640Mi because the request is what the SCHEDULER books, and
+          # 512Mi was BELOW the 490 MiB this pod actually uses -- 4% of
+          # headroom, so under node pressure it could be evicted while using
+          # exactly what it legitimately needs.
+          #
+          # NO CPU LIMIT, deliberately. A CPU limit is enforced by CFS
+          # throttling, which stalls a request mid-flight for the rest of the
+          # period and shows up as tail latency rather than as a resource
+          # event. Bursting into idle capacity is the better trade for a
+          # latency-sensitive service; the memory limit stays, because memory
+          # is not compressible and the failure mode is the node, not this pod.
           resources:
-            requests: {cpu: 200m, memory: 512Mi}
+            requests: {cpu: 500m, memory: 640Mi}
             limits: {memory: 768Mi}
           volumeMounts:
             - {name: tmp, mountPath: /tmp}
