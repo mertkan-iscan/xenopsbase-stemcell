@@ -111,7 +111,11 @@ management:
   endpoint:
     health:
       show-details: when_authorized
-      roles: 'ROLE_ADMIN'
+      # app-admin, not ROLE_ADMIN. This is Boot's own role check and it is
+      # matched against the principal's authorities, which carry the realm's
+      # role names -- no token has ever contained ROLE_ADMIN, so `when_authorized`
+      # could authorize nobody and every caller saw a bare UP (T-3.20, #186).
+      roles: 'app-admin'
       probes:
         enabled: true
       group:

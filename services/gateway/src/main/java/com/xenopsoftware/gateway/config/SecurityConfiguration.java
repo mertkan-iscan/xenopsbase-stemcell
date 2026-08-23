@@ -13,10 +13,11 @@ import com.xenopsoftware.gateway.web.filter.OidcAuthenticationFailureHandler;
 import com.xenopsoftware.gateway.web.filter.ProblemDetailAuthenticationEntryPoint;
 import java.time.Duration;
 import java.util.Arrays;
-import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -38,11 +39,12 @@ import org.springframework.security.oauth2.client.web.server.ServerOAuth2Authori
 import org.springframework.security.oauth2.client.web.server.ServerOAuth2AuthorizedClientRepository;
 import org.springframework.security.oauth2.client.web.server.WebSessionServerOAuth2AuthorizedClientRepository;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
+import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest;
 import org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
-import org.springframework.security.oauth2.core.oidc.user.OidcUserAuthority;
 import org.springframework.security.oauth2.jwt.*;
 import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtAuthenticationConverter;
 import org.springframework.http.MediaType;
@@ -323,28 +325,96 @@ public class SecurityConfiguration {
     }
 
     /**
-     * Map authorities from "groups" or "roles" claim in ID Token.
+     * Builds the session principal's authorities from {@code realm_access.roles} in the
+     * <b>access token</b>.
      *
-     * @return a {@link ReactiveOAuth2UserService} that has the groups from the IdP.
+     * <h3>Why the access token and not UserInfo, which is what this used to read (T-3.20, #186)</h3>
+     *
+     * Keycloak puts realm roles in the access token and nowhere else. Measured against the
+     * deployed realm, for a user holding {@code app-admin} and {@code app-user}:
+     *
+     * <pre>
+     * access token   realm_access.roles = ["app-admin","app-user"]
+     * id token       no realm_access
+     * userinfo       no realm_access
+     * </pre>
+     *
+     * <p>This method read UserInfo, so {@code extractAuthorityFromClaims} was handed a map that
+     * had never contained a role, returned nothing, and every principal was built with an empty
+     * authority set. Every {@code hasAuthority(ROLE_ADMIN)} rule on the browser-session path —
+     * {@code /api/admin/**}, {@code /management/**}, {@code /v3/api-docs/**} — therefore denied
+     * everyone, the administrator included, and {@code health.show-details: when_authorized} could
+     * authorize nobody. Fail-closed, which is why it never announced itself.
+     *
+     * <p>Reading the access token also makes this service and core agree <em>by construction</em>.
+     * Core maps authorities from the access token it is handed; adding a Keycloak mapper to copy
+     * the roles into the ID token would have worked too, and would have left the two services
+     * reading two different claim sources that are only equal until someone changes one of them.
+     *
+     * <h3>What is validated, and what deliberately is not</h3>
+     *
+     * Signature, issuer and expiry, through the provider's own JWKS. <b>Not</b> audience: this
+     * token's {@code aud} names the services the gateway will call downstream with it, not the
+     * gateway itself, so {@link AudienceValidator} — which is correct for the resource-server path
+     * — would reject a token that is perfectly valid here.
+     *
+     * <p>A token that cannot be decoded fails the login rather than producing a principal with no
+     * roles. The silent-empty-set outcome is the bug this replaces; it must not be reachable by a
+     * second route.
+     *
+     * @return a {@link ReactiveOAuth2UserService} whose principal carries the realm's roles
      */
     @Bean
     public ReactiveOAuth2UserService<OidcUserRequest, OidcUser> oidcUserService() {
         final OidcReactiveOAuth2UserService delegate = new OidcReactiveOAuth2UserService();
+        // One decoder per registration, built on first use. NimbusReactiveJwtDecoder caches the
+        // JWKS itself, so rebuilding it per login would refetch the key set on every sign-in.
+        final Map<String, ReactiveJwtDecoder> accessTokenDecoders = new ConcurrentHashMap<>();
 
-        return userRequest -> {
-            // Delegate to the default implementation for loading a user
-            return delegate.loadUser(userRequest).map(user -> {
-                Set<GrantedAuthority> mappedAuthorities = new HashSet<>();
+        return userRequest ->
+            delegate
+                .loadUser(userRequest)
+                .flatMap(user -> {
+                    ClientRegistration registration = userRequest.getClientRegistration();
+                    ReactiveJwtDecoder decoder = accessTokenDecoders.computeIfAbsent(
+                        registration.getRegistrationId(),
+                        ignored -> accessTokenDecoder(registration)
+                    );
 
-                user.getAuthorities().forEach(authority -> {
-                    if (authority instanceof OidcUserAuthority oidcUserAuthority) {
-                        mappedAuthorities.addAll(SecurityUtils.extractAuthorityFromClaims(oidcUserAuthority.getUserInfo().getClaims()));
-                    }
+                    return decoder
+                        .decode(userRequest.getAccessToken().getTokenValue())
+                        .map(accessToken ->
+                            new DefaultOidcUser(
+                                new LinkedHashSet<>(SecurityUtils.extractAuthorityFromClaims(accessToken.getClaims())),
+                                user.getIdToken(),
+                                user.getUserInfo(),
+                                PREFERRED_USERNAME
+                            )
+                        )
+                        .onErrorMap(JwtException.class, e ->
+                            // Named, because the alternative is an authentication failure whose
+                            // cause reads as a generic OAuth error and sends the next person to
+                            // look at the login flow rather than at the token.
+                            new OAuth2AuthenticationException(
+                                new OAuth2Error(
+                                    "invalid_access_token",
+                                    "the access token could not be decoded, so the user's roles are unknown",
+                                    null
+                                ),
+                                e
+                            )
+                        );
                 });
+    }
 
-                return new DefaultOidcUser(mappedAuthorities, user.getIdToken(), user.getUserInfo(), PREFERRED_USERNAME);
-            });
-        };
+    /**
+     * A decoder for the access token the gateway was just issued. Signature, issuer and expiry
+     * only — see {@link #oidcUserService()} for why audience validation would be wrong here.
+     */
+    private ReactiveJwtDecoder accessTokenDecoder(ClientRegistration registration) {
+        NimbusReactiveJwtDecoder decoder = new NimbusReactiveJwtDecoder(registration.getProviderDetails().getJwkSetUri());
+        decoder.setJwtValidator(JwtValidators.createDefaultWithIssuer(registration.getProviderDetails().getIssuerUri()));
+        return decoder;
     }
 
     @Bean
