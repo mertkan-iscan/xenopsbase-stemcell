@@ -67,9 +67,18 @@ t-2.4/cloudnativepg-wal-archiving
 [Conventional Commits](https://www.conventionalcommits.org/). The **pull request title** is what
 gets linted and what ends up in the squashed commit, so it is the one that must be correct.
 
+That second clause was untrue until 2026-08-23. `squash_merge_commit_title` was
+`COMMIT_OR_PR_TITLE`, which means GitHub uses the *branch's* commit title whenever the branch has
+one commit — and most do. So the string that was linted and the string that landed were different
+strings, and only one of them had been checked. Six commits on `main` carry titles the check would
+reject; they predate the fix and are left alone, because history is public and already pushed.
+
+The setting is now `PR_TITLE`, so the linted string is the one that lands, whatever the commit
+count.
+
 ```
 feat(gateway): relay OIDC token to the core service
-fix(flyway): fail startup when a migration checksum drifts
+fix(core): fail startup when a migration checksum drifts
 docs(adr): record the durable-state boundary
 chore(deps): bump spring-boot to 3.5.13
 ```
@@ -78,7 +87,12 @@ Allowed types: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `build`, `ci`
 
 Scopes follow the component. The full list is the one `pr-conventions.yml` enforces, and now that
 the check is binding a scope missing from here is a blocked merge rather than a wrong document:
-`gateway`, `core`, `infra`, `platform`, `secrets`, `ci`, `adr`, `docs`, `deps`.
+`gateway`, `core`, `services`, `infra`, `platform`, `secrets`, `ci`, `adr`, `docs`, `deps`.
+
+**One scope, never a comma list.** Conventional Commits allows exactly one, so `fix(gateway,core)`
+is rejected. A change spanning components takes the broader scope — `services` for both
+applications, `platform` for the deployed manifests — or no scope at all, which is allowed. The
+comma form kept being written, which is why `services` exists: the list was missing something.
 
 A `!` after the scope, or a `BREAKING CHANGE:` footer, marks a breaking change and drives the
 major version bump.
