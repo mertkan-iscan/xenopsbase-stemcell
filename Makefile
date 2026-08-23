@@ -470,6 +470,10 @@ check-secrets: ## Refuse unencrypted secrets anywhere in the repository
 promote: ## Move a build between environments: make promote SERVICE=all FROM=dev TO=staging
 	@bash $(SCRIPTS)/promote.sh "$(or $(SERVICE),all)" "$(or $(FROM),dev)" "$(or $(TO),staging)"
 
+.PHONY: hpa-local
+hpa-local: ## Rehearse the gateway HPA on a throwaway local k3s cluster (T-2.8)
+	@bash $(SCRIPTS)/hpa-local.sh
+
 .PHONY: load
 load: ## Load baseline: k6 in-cluster against the gateway, thresholds are the SLOs (T-5.6)
 	@bash $(SCRIPTS)/load-test.sh "$(ENV)"
