@@ -20,10 +20,20 @@ logging:
     com.xenopsoftware.core: INFO
 
 management:
+  # THE SWITCH THAT MADE THE WHOLE PIPELINE EMPTY (T-2.12, #155).
+  #
+  # This read `false` until 2026-08-23. It disables the Micrometer Prometheus
+  # registry, so `/management/prometheus` answered 404 even though `prometheus`
+  # is listed in the exposure include list -- and no jvm_*, http_server_* or
+  # pool metric from either service reached anywhere. Prometheus held 2423
+  # metric names and none of them came from an application.
+  #
+  # The comment below the OTLP switch is what let it survive: it said metrics
+  # already reached Prometheus another way. There was no other way.
   prometheus:
     metrics:
       export:
-        enabled: false
+        enabled: true
   # Distributed tracing over OTLP (T-2.7).
   #
   # This block previously configured Zipkin at http://localhost:9411, paired
@@ -35,13 +45,20 @@ management:
   # exporter when one is set, so a laptop with no collector generates spans and
   # exports nothing, rather than retrying against a port that is not listening.
   # The deployment supplies it; see platform/envs/dev/services/.
-  # Metrics do NOT go over OTLP here; Prometheus scrapes them.
+  #
+  # TRACES go over OTLP. METRICS do not, and are scraped instead -- by the
+  # ServiceMonitor in platform/envs/dev/services/servicemonitor.yaml, which is
+  # the "another way" this comment used to assert without one existing.
   #
   # spring-boot-starter-opentelemetry brings micrometer-registry-otlp, which
   # turns OTLP metrics export on by default and aims it at
-  # http://localhost:4318/v1/metrics. Nothing listens there, and Alloy's
-  # pipeline handles traces only, so the effect was a stack trace once a minute
-  # in every pod, for metrics that already reach Prometheus another way.
+  # http://localhost:4318/v1/metrics. Nothing listens there and Alloy's
+  # pipeline handles traces only, so leaving it on produced a stack trace once
+  # a minute in every pod. Disabling it was right; believing that left a
+  # working metrics path behind was not.
+  #
+  # Exactly one path is enabled. If OTLP metrics are ever turned on, the scrape
+  # must be turned off in the same commit, or every series is counted twice.
   otlp:
     metrics:
       export:

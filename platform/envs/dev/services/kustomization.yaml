@@ -6,6 +6,10 @@ kind: Kustomization
 resources:
   - core.yaml
   - gateway.yaml
+  # Without this nothing scrapes the applications, and the registry being on
+  # in application-prod.yml produces an endpoint that answers into nowhere
+  # (T-2.12).
+  - servicemonitor.yaml
 
 # Images are pinned here rather than in the Deployments, so a deploy is a
 # one-line commit and `git log` on this file is the deployment history.
