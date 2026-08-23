@@ -70,7 +70,17 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 // none because every other test mocks the decoder away. `account` is what Keycloak puts in `aud`
 // for an ordinary user token; `gateway` is what the realm's audience mapper adds.
 @TestPropertySource(
-    properties = { "jhipster.security.oauth2.audience[0]=account", "jhipster.security.oauth2.audience[1]=gateway" }
+    properties = {
+        "jhipster.security.oauth2.audience[0]=account",
+        "jhipster.security.oauth2.audience[1]=gateway",
+        // The test config shadows config/application.yml entirely, so neither the deployed base
+        // path nor the exposure list is loaded: actuator sits at /actuator and exposes health
+        // only. The authorization rules are written against /management/**, so without these two
+        // the admin rule guards a path where no endpoint exists -- it still answers 401 and 403
+        // correctly, and can never answer 200, which is exactly the assertion that matters here.
+        "management.endpoints.web.base-path=/management",
+        "management.endpoints.web.exposure.include=health,loggers",
+    }
 )
 class OidcLoginFlowIT {
 
@@ -119,12 +129,11 @@ class OidcLoginFlowIT {
     }
 
     /**
-     * A CHARACTERIZATION TEST. It records behaviour that is wrong (#186).
+     * Inverted from a characterization test when #186 was fixed (T-3.20).
      *
-     * <p>{@code smoke-admin} holds {@code app-admin} in {@code realm_access.roles} and still does
-     * not reach an admin endpoint, because {@code oidcUserService()} reads authorities from the
-     * UserInfo response and Keycloak puts realm roles only in the access token. Measured against
-     * the deployed realm:
+     * <p>It used to assert 403 here and say so loudly, because {@code oidcUserService()} read
+     * authorities from the UserInfo response and Keycloak puts realm roles only in the access
+     * token:
      *
      * <pre>
      * access token  realm_access.roles = ["app-admin","app-user"]
@@ -132,28 +141,79 @@ class OidcLoginFlowIT {
      * userinfo      no realm_access
      * </pre>
      *
-     * <p>So every {@code hasAuthority(ROLE_ADMIN)} rule on the session path denies everyone,
-     * including the admin. Fail-closed, which is why nothing broke loudly enough to be noticed.
+     * <p>Every principal was therefore built with an empty authority set, and every
+     * {@code hasAuthority(ROLE_ADMIN)} rule on the session path denied everyone including the
+     * administrator. Fail-closed, which is why nothing broke loudly enough to be noticed.
      *
-     * <p>This asserts the defect rather than the intent on purpose. Asserting the intent would
-     * mean a red test that cannot merge; deleting it would mean the observation is lost. Written
-     * this way, <b>fixing #186 makes this test fail</b>, which is exactly when someone should be
-     * made to come back and invert it — an acceptance criterion on that issue says so.
+     * <p>What this asserts now is the whole chain: the {@code roles} client scope being on the
+     * token, {@code realm_access} being read as the nested object it is rather than the flat
+     * {@code roles} claim Spring looks for by default, {@code app-admin} becoming
+     * {@code ROLE_APP_ADMIN}, and the rule matching.
      */
     @Test
-    @DisplayName("realm roles do not reach the session principal, so even an admin is refused (#186)")
-    void realmRolesDoNotReachTheSessionPrincipal() throws Exception {
-        Login login = signIn(KeycloakTestcontainer.ADMIN_USER);
+    @DisplayName("realm roles reach the session principal, so an admin reaches an admin endpoint")
+    void realmRolesReachTheSessionPrincipal() throws Exception {
+        Login admin = signIn(KeycloakTestcontainer.ADMIN_USER);
 
         gateway
             .get()
             .uri("/management/loggers")
-            .cookie("SESSION", login.authenticatedSession())
+            .cookie("SESSION", admin.authenticatedSession())
             .exchange()
-            // 403, not 401: the gateway knows exactly who this is. It just does not know that they
-            // are an administrator. When #186 lands this becomes isOk().
+            .expectStatus()
+            .isOk();
+    }
+
+    @Test
+    @DisplayName("and a user without the role still does not, so the rule is a rule")
+    void aUserWithoutTheAdminRoleIsStillRefused() throws Exception {
+        // The other half, and the one that makes the test above mean something. A change that
+        // handed every principal ROLE_ADMIN would satisfy the admin case perfectly.
+        Login user = signIn(KeycloakTestcontainer.USER);
+
+        gateway
+            .get()
+            .uri("/management/loggers")
+            .cookie("SESSION", user.authenticatedSession())
+            .exchange()
             .expectStatus()
             .isForbidden();
+    }
+
+    @Test
+    @DisplayName("preferred_username survives the change of claim source")
+    void thePrincipalIsStillNamedByPreferredUsername() throws Exception {
+        Login login = signIn(KeycloakTestcontainer.USER);
+
+        // The authorities now come from the access token while the principal name and the id token
+        // still come from the ID token, so this is exactly what a "just read the other token"
+        // change breaks silently. /api/logout is the one endpoint that reads the OidcUser's id
+        // token, so a principal built without one fails here and nowhere else.
+        //
+        // It is a POST, so it needs a real CSRF token rather than the csrf() mutator the other
+        // logout tests use — which means this also exercises the cookie-to-header CSRF plumbing
+        // against a real session, and nothing else did.
+        EntityExchangeResult<byte[]> primed = gateway
+            .get()
+            .uri("/management/health")
+            .cookie("SESSION", login.authenticatedSession())
+            .exchange()
+            .expectBody()
+            .returnResult();
+        String csrf = primed.getResponseCookies().getFirst("XSRF-TOKEN").getValue();
+
+        gateway
+            .post()
+            .uri("/api/logout")
+            .cookie("SESSION", login.authenticatedSession())
+            .cookie("XSRF-TOKEN", csrf)
+            .header("X-XSRF-TOKEN", csrf)
+            .exchange()
+            .expectStatus()
+            .isOk()
+            .expectBody()
+            .jsonPath("$.logoutUrl")
+            .exists();
     }
 
     @Test
