@@ -95,7 +95,19 @@ spec:
             # Set here rather than defaulted in application.yml so that a
             # laptop with no collector exports nothing instead of retrying
             # against a closed port.
-            - {name: OTLP_TRACING_ENDPOINT, value: "http://alloy.observability.svc.cluster.local:4317"}
+            # The REAL property name, not a placeholder alias (T-2.16, #211).
+            #
+            # application-prod.yml used to carry `${OTLP_TRACING_ENDPOINT:}`,
+            # whose empty default is a set value -- so the exporter was built
+            # and rejected it, and the profile could not start anywhere this
+            # variable was absent. Setting the property by its own name means an
+            # absent variable leaves it absent, no exporter is registered, and
+            # the service starts with tracing off rather than crash-looping.
+            #
+            # Relaxed binding: this maps to
+            # management.opentelemetry.tracing.export.otlp.endpoint
+            - name: MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT
+              value: "http://alloy.observability.svc.cluster.local:4317"
 
             # Sessions in Valkey rather than in this pod's heap (ADR-0009).
             # Set explicitly rather than defaulted in application.yml, so what
