@@ -407,6 +407,15 @@ cluster-destroy: ## Destroy the cluster. Does NOT touch the durable buckets or t
 	@# SKIP_BACKUP_CHECK=1 to destroy anyway -- a cluster whose backups are
 	@# broken is exactly one you may still need to tear down.
 	@test "$(SKIP_BACKUP_CHECK)" = "1" || bash $(SCRIPTS)/verify-backup.sh $(ENV)
+	@# Force the current WAL segment into the archive while the database is
+	@# still running (T-7.2). archive_timeout is 300s, so a transaction
+	@# committed inside that window is durable in Postgres and absent from the
+	@# archive -- and a destroy loses it. Measured: a document created 19
+	@# seconds after a segment shipped did not survive the rebuild, because the
+	@# next segment was due five minutes later and the cluster was gone by
+	@# then. The 301s RPO in the DR runbook is the number for a DISASTER; this
+	@# is a planned teardown, and losing five minutes to one is avoidable.
+	@bash $(SCRIPTS)/flush-wal.sh $(ENV)
 	@# PVC-backed volumes are created by the CSI driver, not by Terraform, so
 	@# `terraform destroy` neither tracks nor removes them. It reports success and
 	@# leaves them billing forever. The CSI driver runs INSIDE the cluster, so this
@@ -414,8 +423,17 @@ cluster-destroy: ## Destroy the cluster. Does NOT touch the durable buckets or t
 	@# left to do it. Set KEEP_VOLUMES=1 to skip.
 	@bash $(SCRIPTS)/release-cluster-volumes.sh $(ENV)
 	@cd $(CLUSTER_DIR) && terraform destroy $(APPROVE) -var-file=$(TFVARS)
+	@# Reap what the in-cluster release could not (#159). The CSI driver has a
+	@# 300s budget and the Prometheus volume routinely outlives it, so destroy
+	@# succeeds and leaves a volume Terraform no longer tracks. Until this step
+	@# existed, `make down` exited non-zero and a human ran two hcloud commands
+	@# -- fine when someone is watching, and fatal to T-7.2's claim that a cold
+	@# rebuild is fully automated. The drill stopped dead on exactly this.
+	@bash $(SCRIPTS)/reap-orphaned-volumes.sh $(ENV)
 	@# Assert the boundary held rather than trusting it. A leak here is invisible
 	@# and permanent, so it fails the target instead of waiting to be noticed.
+	@# Still the gate: the sweep above deletes only detached, PVC-named volumes,
+	@# so anything else it left alone still fails here.
 	@bash $(SCRIPTS)/verify-teardown.sh $(ENV)
 
 .PHONY: backup-status
@@ -451,6 +469,10 @@ check-secrets: ## Refuse unencrypted secrets anywhere in the repository
 .PHONY: promote
 promote: ## Move a build between environments: make promote SERVICE=all FROM=dev TO=staging
 	@bash $(SCRIPTS)/promote.sh "$(or $(SERVICE),all)" "$(or $(FROM),dev)" "$(or $(TO),staging)"
+
+.PHONY: cold-rebuild
+cold-rebuild: ## THE DRILL: destroy, rebuild, and prove a document survived it (T-7.2)
+	@bash $(SCRIPTS)/cold-rebuild.sh "$(ENV)"
 
 .PHONY: smoke
 smoke: ## Does the DEPLOYED environment actually work? Login, an API call, upload and download

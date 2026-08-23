@@ -108,6 +108,7 @@ reproduces from nothing.
 - Runbooks
   - [Everyday operation](docs/runbooks/everyday-operation.md) — **start here**: `make up`, `make down`, what to check, and when you do not need a cluster at all
   - [Local development](docs/runbooks/local-development.md) — one command, no cluster, no credentials
+  - [Cold rebuild](docs/runbooks/cold-rebuild.md) — the drill, and what to do when the automation itself fails
   - [Disaster recovery](docs/runbooks/disaster-recovery.md) — RPO and RTO per component, measured; scenarios; what is not protected
   - [Secrets](docs/runbooks/secrets.md) — SOPS, age, the one bootstrap key, rotation
   - [Promotion](docs/runbooks/promotion.md) — moving a build between environments, and the gate before production
