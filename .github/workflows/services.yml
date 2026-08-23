@@ -26,7 +26,7 @@ jobs:
   # Replaces the trigger-level path filter. Everything that filter used to name
   # is named here instead, in one place, for both event types.
   changes:
-    name: changed paths
+    name: changed paths (services)
     runs-on: ubuntu-latest
     outputs:
       services: ${{ steps.filter.outputs.services }}

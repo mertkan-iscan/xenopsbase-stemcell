@@ -28,6 +28,33 @@ is how a board stops reflecting reality.
 `main` is protected. No direct pushes. Work happens on a branch and lands through a pull request
 with green checks.
 
+That is enforced, not a convention. Three status checks are required, and a pull request cannot be
+merged until all three are green:
+
+| Required check | Comes from | Covers |
+| --- | --- | --- |
+| `no unencrypted secrets` | `secrets.yml` | Every pull request, no path filter |
+| `Conventional Commits title` | `pr-conventions.yml` | The PR title, which becomes the squashed commit |
+| `services` | `services.yml` | `core`, `gateway` and `generated client`, aggregated |
+
+`services` is one aggregate context rather than the three job names, so renaming a matrix entry
+cannot silently make a required check stop existing. It reports success when nothing under
+`services/`, `clients/` or `docs/api/` changed, so a docs-only pull request is not held up by a
+Maven build it does not need.
+
+`terraform` exists as the same kind of aggregate and is **deliberately not required yet**:
+`plan (cluster)` has been failing since 2026-08-21 for a reason that predates this rule
+([#183](https://github.com/mertkan-iscan/xenopsbase-stemcell/issues/183)). Requiring it today
+would block every infrastructure change rather than review it. It goes on the required list when
+#183 closes.
+
+Administrators are not exempt. `enforce_admins` is on, which on a one-person repository is the
+whole point — the only person who could route around the checks is the person who wrote them.
+
+Reviews are **not** required, because a single maintainer cannot approve their own pull request
+and requiring one would make the repository unusable. Green checks are the gate; review is the
+convention.
+
 Branch names carry the task ID from the [project board](https://github.com/users/mertkan-iscan/projects/5):
 
 ```
@@ -49,7 +76,9 @@ chore(deps): bump spring-boot to 3.5.13
 
 Allowed types: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `build`, `ci`, `perf`, `revert`.
 
-Scopes follow the component: `gateway`, `core`, `infra`, `platform`, `ci`, `adr`, `docs`.
+Scopes follow the component. The full list is the one `pr-conventions.yml` enforces, and now that
+the check is binding a scope missing from here is a blocked merge rather than a wrong document:
+`gateway`, `core`, `infra`, `platform`, `secrets`, `ci`, `adr`, `docs`, `deps`.
 
 A `!` after the scope, or a `BREAKING CHANGE:` footer, marks a breaking change and drives the
 major version bump.

@@ -51,7 +51,7 @@ jobs:
   # is named here instead, in one place, for both event types.
   # ----------------------------------------------------------------------------
   changes:
-    name: changed paths
+    name: changed paths (terraform)
     runs-on: ubuntu-latest
     outputs:
       terraform: ${{ steps.filter.outputs.terraform }}
