@@ -45,10 +45,25 @@ spec:
       # `up` and every series get the pod and namespace, which is what makes a
       # per-replica question answerable at all -- with two gateway replicas,
       # aggregate memory tells you nothing about the one that is leaking.
+      #
+      # `action: replace` is the operator's default and is stated anyway. Left
+      # out, the operator writes it in and Argo reads the difference as drift,
+      # so this Application sat OutOfSync on a healthy cluster -- which is what
+      # T-2.14 (#193) had just finished removing.
+      #
+      # Declared rather than ignored, deliberately. #193 used ServerSideDiff for
+      # CloudNativePG because that defaulting surface is seventeen fields of
+      # operator internals that move with its version. This is one documented
+      # field with a stable default, so saying what we mean is cheaper than
+      # telling the differ to stop looking -- and it keeps the diff honest for
+      # every other field here.
       relabelings:
-        - sourceLabels: [__meta_kubernetes_pod_name]
+        - action: replace
+          sourceLabels: [__meta_kubernetes_pod_name]
           targetLabel: pod
-        - sourceLabels: [__meta_kubernetes_namespace]
+        - action: replace
+          sourceLabels: [__meta_kubernetes_namespace]
           targetLabel: namespace
-        - sourceLabels: [__meta_kubernetes_service_name]
+        - action: replace
+          sourceLabels: [__meta_kubernetes_service_name]
           targetLabel: service
