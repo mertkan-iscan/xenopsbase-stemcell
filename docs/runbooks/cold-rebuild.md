@@ -162,8 +162,11 @@ kubectl -n argocd get applications
 will answer these questions about the wrong cluster, and `wait-for-stack.sh` carries a comment about
 the twenty minutes that cost once.
 
-`postgres` reporting `OutOfSync` while `Healthy` is a known, unrelated drift
-([#193](https://github.com/mertkan-iscan/xenopsbase-stemcell/issues/193)) — not a failed rebuild.
+If an Application reports `OutOfSync` while `Healthy`, check whether an operator owns the resource
+before treating it as a failed rebuild — `postgres` did exactly that until T-2.14 (#193), because
+CloudNativePG defaults the Cluster it is given and Argo's default diff read that as drift. The fix
+was `ServerSideDiff=true` on that Application, and the same annotation is the first thing to reach
+for if another operator-managed Application starts doing it.
 
 ## The rebuild works but the last few minutes of data are missing
 

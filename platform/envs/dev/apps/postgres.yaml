@@ -11,6 +11,38 @@ metadata:
     # failure mode available here, so this ordering is enforced rather than
     # left to chance.
     argocd.argoproj.io/sync-wave: "2"
+    # SERVER-SIDE DIFF, BECAUSE THE OPERATOR WRITES TO THE RESOURCE ARGO OWNS
+    # (T-2.14, #193).
+    #
+    # This Application reported OutOfSync continuously against a perfectly
+    # healthy database, across rebuilds, and a hard refresh never cleared it.
+    # The cause is that CloudNativePG defaults and mutates the Cluster it is
+    # given, and Argo's default diff compares the manifest in git against the
+    # whole live object. Measured on 2026-08-23, the operator adds:
+    #
+    #   17 top-level spec fields    enablePDB, imageName, probes, postgresUID,
+    #                               primaryUpdateStrategy, stopDelay, and so on
+    #   spec.postgresql.parameters  two declared here, ~15 in the live object --
+    #                               archive_mode, archive_timeout, log_directory
+    #   externalClusters[].plugin   enabled: true, isWALArchiver: false
+    #
+    # None of those are drift. They are an operator doing its job, and none of
+    # them are something a human changed.
+    #
+    # ServerSideDiff asks the API server what an apply WOULD change, so
+    # defaulted and webhook-mutated fields stop counting as differences. The
+    # alternative was ignoreDifferences listing those paths, which would work
+    # today and rot: the list is CloudNativePG's internal defaulting surface, it
+    # changes with the operator version, and a path listed there also silences
+    # real drift on the same path -- ignoring spec.postgresql.parameters
+    # wholesale would hide someone changing max_connections.
+    #
+    # Why it matters more than a yellow tile: `make rollout-status` asserts every
+    # Application is Synced before calling a deploy successful, so this one
+    # Application made the whole check fail on a healthy cluster. A gate that
+    # always fails is one people learn to skip, and the next REAL drift here
+    # would have looked exactly like the noise everyone had started ignoring.
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:

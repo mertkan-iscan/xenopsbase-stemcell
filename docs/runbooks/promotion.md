@@ -240,7 +240,4 @@ procedure.
 make rollout-status ENV=dev
 ```
 
-Argo CD polls, so allow a few minutes of lag before treating a stale revision as a failure. Note
-that `postgres` currently reports `OutOfSync` on a healthy cluster
-([#193](https://github.com/mertkan-iscan/xenopsbase-stemcell/issues/193)), so this command fails
-against dev today for a reason unrelated to whatever you just rolled back.
+Argo CD polls, so allow a few minutes of lag before treating a stale revision as a failure.
