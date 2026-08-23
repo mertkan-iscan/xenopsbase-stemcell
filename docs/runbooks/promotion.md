@@ -192,19 +192,47 @@ Empty output means the rollback is a pure image change. Anything else, read it b
 
 ## Measured
 
-Drilled on dev, 2026-08-23. Rolling the gateway back one digest and forward again:
+Drilled on dev, 2026-08-23. The gateway rolled back one digest and forward again, against the
+running cluster.
 
 | Step | Time |
 |---|---|
 | `make rollback` to a reviewable diff | seconds — a local file edit |
-| Pull request checks on a platform-only change | **~20s** — `services` and `terraform` gates skip; only the secret scan and title check run |
-| Merge → Argo CD synced | see below |
-| Argo CD synced → pods Running on the previous digest | see below |
-| **Total, merge to healthy** | see below |
+| Pull request checks | **12 s** |
+| Merge → Argo CD applied the change | 10 s |
+| Argo CD applied → pods Running on the previous digest | 23 s |
+| **Total, merge to healthy** | **33 s** |
+| Roll forward again, same measurement | 36 s |
 
-The cheap-checks property is not luck: T-0.7 moved path filtering from the workflow trigger into
-the jobs, so a change touching only `platform/` skips both Maven builds and every Terraform job. A
-rollback therefore does not wait on a full build of the code it is rolling away from.
+**Against the five-minute target: 33 seconds.** The target was set against roughly three minutes
+elsewhere; the difference is that nothing is built or pushed — a rollback here is one line of YAML
+and a pull of an image that is already in the registry and already in the node's image cache,
+because it was running an hour ago.
+
+The 12-second check time is not luck. T-0.7 moved path filtering from the workflow triggers into
+the jobs, so a change touching only `platform/` skips both Maven builds and every Terraform job.
+A rollback does not wait on a full build of the code it is rolling away from.
+
+### The drill actually verified behaviour, not just labels
+
+A digest changing in `kubectl get deploy` proves a manifest was applied, not that anything is
+different. So the drill asked the rolled-back gateway a question only the newer image answers
+correctly — `smoke-admin` reaching an admin endpoint, which is the T-3.20 (#186) fix:
+
+```
+on the rolled-back digest   smoke-admin -> /management/loggers   403
+after rolling forward       smoke-admin -> /management/loggers   200
+                            smoke       -> /management/loggers   403
+```
+
+The 403 is the #186 defect returning exactly as it should on that digest. Without this step the
+drill would have measured how fast Kubernetes can replace a pod, which was never the question.
+
+### Rolling forward is `git revert`
+
+The roll-forward was not a second mechanism. It was `git revert` on the rollback commit — the same
+operation run backwards, which is the whole reason promotion is a digest in a file rather than a
+procedure.
 
 ## Confirming
 
