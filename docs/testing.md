@@ -28,7 +28,7 @@ something, and against tests that assert a call **returned**.
 | Integration | `mvn verify`, failsafe, `*IT.java` | Testcontainers | `services.yml` on PR |
 | Contract | — | — | none yet (T-5.4, #43) |
 | End-to-end | `make smoke ENV=<env>` | the **deployed** environment | `smoke.yml` after every deploy; gates promotion |
-| Load | — | — | none yet (T-5.6, #45) |
+| Load | `make load ENV=<env>` | k6, **in-cluster** | none yet — CI cannot reach the cluster (#207) |
 | Chaos | — | — | none yet (T-5.7, #46) |
 | Security | partial — secret scan only | GitHub Actions | `secrets.yml` on PR and push |
 
@@ -175,14 +175,31 @@ exactly the gap #175 is still open on.
 
 **Does not cover** performance. A green run says nothing about latency under load.
 
-### Load — not built (T-5.6, #45)
+### Load
 
-**Will cover** a k6 baseline and published SLOs.
+**Covers, since T-5.6 (#45)**, what the application can serve and what it costs, measured rather
+than assumed. `infra/load/baseline.js` run by `make load`, in-cluster against the gateway Service.
 
-**Does not exist yet, and that has already cost something.** Caching was deferred on #127 because
-nobody should guess at a cache without a load baseline; the resilience numbers on #32 — a 2s
-connect, a 10s response timeout, a 12s time limiter, a bulkhead of 50 — are reasoned rather than
-measured. They are written down so they can be reviewed, not because they are known to be right.
+Two scenarios, separated so a regression names its own cause: `gateway_only` isolates the gateway,
+`through_core` adds core, Hibernate and Postgres. The gap between them is the cost of everything
+behind the gateway, and one aggregate number cannot tell you which half moved.
+
+The thresholds are the SLOs and k6 exits non-zero on a breach, so this is a gate rather than a
+report. Numbers and reasoning: [slos.md](slos.md).
+
+**Does not cover the edge.** Cloudflare, the tunnel and ingress-nginx are excluded deliberately —
+the number exists to inform an HPA, which scales on pod CPU, and the edge's variance swamps the
+application's. `smoke.sh` asserts that path works; nobody has measured what it costs.
+
+**Does not cover writes.** Both scenarios are reads. The upload path ends in a presigned PUT
+straight to Hetzner, so a write benchmark would mostly measure Hetzner from a Hetzner node.
+
+**Does not cover sustained load.** 105 seconds per scenario — long enough for JIT and the pool to
+settle, far too short for memory growth or connection leaks.
+
+**Does not run on a schedule** (#207): `make load` drives k6 inside the cluster and CI cannot reach
+the cluster (#195). Running it through the public edge from a runner would work and would measure
+the wrong thing.
 
 ### Chaos — not built (T-5.7, #46)
 

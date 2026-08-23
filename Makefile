@@ -470,6 +470,10 @@ check-secrets: ## Refuse unencrypted secrets anywhere in the repository
 promote: ## Move a build between environments: make promote SERVICE=all FROM=dev TO=staging
 	@bash $(SCRIPTS)/promote.sh "$(or $(SERVICE),all)" "$(or $(FROM),dev)" "$(or $(TO),staging)"
 
+.PHONY: load
+load: ## Load baseline: k6 in-cluster against the gateway, thresholds are the SLOs (T-5.6)
+	@bash $(SCRIPTS)/load-test.sh "$(ENV)"
+
 .PHONY: cold-rebuild
 cold-rebuild: ## THE DRILL: destroy, rebuild, and prove a document survived it (T-7.2)
 	@bash $(SCRIPTS)/cold-rebuild.sh "$(ENV)"
