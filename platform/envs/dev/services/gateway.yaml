@@ -37,6 +37,31 @@ spec:
     metadata:
       labels: {app.kubernetes.io/name: gateway, app.kubernetes.io/part-of: xenopsbase}
     spec:
+      # NO LEGACY SERVICE LINKS (T-2.17, #212).
+      #
+      # Kubernetes injects Docker-link variables for every Service in the pod's
+      # OWN namespace: a Service named `valkey` produces, among others,
+      #
+      #   VALKEY_PORT=tcp://10.43.247.109:6379
+      #
+      # and this container reads ${VALKEY_PORT} as spring.data.redis.port. It
+      # gets that string where an int belongs and dies during context refresh:
+      #
+      #   NumberFormatException: For input string: "tcp://10.43.247.109:6379"
+      #
+      # naming neither Kubernetes nor the link, so it reads as a bad config
+      # value rather than an injected one. Observed in the T-2.8 local
+      # rehearsal, which puts Valkey in `apps` for simplicity.
+      #
+      # This cluster escapes it only because Valkey lives in `cache` and links
+      # are same-namespace only -- an accident of layout that nothing states as
+      # a requirement, and that anyone consolidating namespaces would undo.
+      #
+      # Switched off rather than audited: the variables are a compatibility
+      # feature from before cluster DNS, nothing here uses one, and disabling
+      # them removes the whole class instead of requiring a check every time an
+      # environment variable is added.
+      enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
         seccompProfile: {type: RuntimeDefault}

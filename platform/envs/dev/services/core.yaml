@@ -17,6 +17,9 @@ spec:
     metadata:
       labels: {app.kubernetes.io/name: core, app.kubernetes.io/part-of: xenopsbase}
     spec:
+      # No legacy Docker-link variables; see services/gateway.yaml for why
+      # (T-2.17, #212). Not currently exposed, switched off as the default.
+      enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
         seccompProfile: {type: RuntimeDefault}

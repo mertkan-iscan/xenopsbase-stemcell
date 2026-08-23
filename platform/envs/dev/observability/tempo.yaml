@@ -109,6 +109,9 @@ spec:
         # to serve a configuration that no longer matched what was committed.
         checksum/config: "otlp-grpc-only-s3-168h-v1"
     spec:
+      # No legacy Docker-link variables; see services/gateway.yaml for why
+      # (T-2.17, #212). Not currently exposed, switched off as the default.
+      enableServiceLinks: false
       securityContext:
         runAsUser: 10001
         runAsGroup: 10001

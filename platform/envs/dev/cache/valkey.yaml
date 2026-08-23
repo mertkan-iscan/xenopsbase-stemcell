@@ -79,6 +79,9 @@ spec:
     metadata:
       labels: {app.kubernetes.io/name: valkey, app.kubernetes.io/part-of: xenopsbase}
     spec:
+      # No legacy Docker-link variables; see services/gateway.yaml for why
+      # (T-2.17, #212). Not currently exposed, switched off as the default.
+      enableServiceLinks: false
       # NOTE: there is no checksum annotation over the config or the Secret, so
       # editing either does NOT restart this pod. A rotated password sits in the
       # Secret while the running process keeps the old one, and the mismatch
