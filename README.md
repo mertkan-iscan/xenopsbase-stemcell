@@ -110,6 +110,7 @@ reproduces from nothing.
   - [Local development](docs/runbooks/local-development.md) — one command, no cluster, no credentials
   - [Disaster recovery](docs/runbooks/disaster-recovery.md) — RPO and RTO per component, measured; scenarios; what is not protected
   - [Secrets](docs/runbooks/secrets.md) — SOPS, age, the one bootstrap key, rotation
+  - [Promotion](docs/runbooks/promotion.md) — moving a build between environments, and the gate before production
   - [Terraform CI](docs/runbooks/terraform-ci.md) — lint, checkov, plan-on-PR, manual apply
   - [Edge](docs/runbooks/edge.md) — Cloudflare tunnel, DNS, and the shared-zone hazard
   - [Network access](docs/runbooks/network-access.md) — exposure model, SSH policy, escape hatch
