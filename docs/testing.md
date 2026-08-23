@@ -32,7 +32,7 @@ something, and against tests that assert a call **returned**.
 | Chaos | — | — | none yet (T-5.7, #46) |
 | Security | partial — secret scan only | GitHub Actions | `secrets.yml` on PR and push |
 
-Counted on 2026-08-22: gateway 8 unit and 5 integration classes, core 9 unit and 7 integration.
+Counted on 2026-08-23: gateway 8 unit and 6 integration classes, core 9 unit and 8 integration.
 
 ### Unit
 
@@ -88,8 +88,31 @@ audience enforcement, the `roles` client scope and realm-role-to-authority mappi
 Every authorization failure this project has hit — the missing `aud` claim, the dropped `roles`
 scope, the absent `offline_access` role — would now be caught here.
 
-**Does not cover identity in the gateway.** Its ITs still mock `ReactiveJwtDecoder`. The harness
-exists and the pattern is proven; extending it to the gateway's reactive stack has not been done.
+**Covers the interactive login, since T-5.3 (#42).** `OidcLoginFlowIT` walks the authorization-code
+flow the way a browser does: the gateway's redirect out, Keycloak's login form, the credential
+POST, and the callback carrying a real code back to a session that has to still be holding the
+authorization request. It does not import `TestSecurityConfiguration`, so the decoder, the code
+exchange and the claim mapping are all real. This is the flow that produced #175, #176 and #180 —
+each found in production, by a person, on the third or fourth attempt.
+
+Two things it asserts that are easy to lose: that the state coming back is the state that went out,
+and that the session identifier changes on authentication, which is the difference between a login
+and session fixation.
+
+It also found #186 on its first complete run — realm roles never reach a session principal, so
+every `hasAuthority(ROLE_ADMIN)` rule on the browser path denies everyone including the admin. That
+is recorded as a characterization test asserting the current, wrong behaviour, so fixing #186 is
+what makes it fail.
+
+**Covers the migrations themselves, since T-5.3.** `FlywayMigrationIT` asserts that every committed
+migration has a successful row in `flyway_schema_history`, in version order, and that the first one
+applied was the baseline. `ddl-auto: validate` already fails startup on a schema mismatch, which
+proves the schema Hibernate needs exists — not that these migrations produced it, on a database
+that started empty.
+
+**Does not cover the gateway's bearer-token path against a real Keycloak.** `OidcLoginFlowIT` drives
+the session path. The gateway is also a resource server on `/services/**`, and that half still runs
+through `TestSecurityConfiguration`'s mocked decoder.
 
 **Does not cover** anything outside one service. The gateway's ITs do not start core, and core's do
 not start the gateway.
