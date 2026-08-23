@@ -105,6 +105,7 @@ reproduces from nothing.
 - [CHANGELOG.md](CHANGELOG.md) — what moved away from the generated defaults, and why
 - [services/README.md](services/README.md) — package conventions and the tech.jhipster exit path
 - [CONTRIBUTING.md](CONTRIBUTING.md) — branching, commits, and the no-manual-configuration rule
+- [Service level objectives](docs/slos.md) — measured latency and throughput, and what they say about autoscaling
 - Runbooks
   - [Everyday operation](docs/runbooks/everyday-operation.md) — **start here**: `make up`, `make down`, what to check, and when you do not need a cluster at all
   - [Local development](docs/runbooks/local-development.md) — one command, no cluster, no credentials
