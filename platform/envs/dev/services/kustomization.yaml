@@ -35,19 +35,19 @@ images:
     # Carries 1c81e0d (infra usage endpoint with node placement, T-3.16).
     digest: sha256:1da312ddd92e22272f55d62df61ce16b2e9ec3a61ed3709ea568ab463d1364d8
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway
-    # Commit f7ef7d7 -- the access and refresh tokens now live in the WebSession,
-    # which is in Valkey, instead of one pod's heap (T-3.19). Until this, the
-    # replica that had not handled the login found the session but no authorized
-    # client and answered EVERY request -- page, stylesheet, XHR alike -- with a
-    # 302 into the Keycloak authorization endpoint, so roughly half of each
-    # page's requests failed against style-src and connect-src. This is the
-    # change that makes `replicas: 2` in gateway.yaml true rather than intended.
-    # Also stops a refused refresh escaping as a 500 with no way out of it, and
-    # ungates POST /api/logout from that refresh.
-    # Carries 5efdc48 (asset requests are not navigation, T-3.18),
+    # Commit 2e44a9e -- a logged-in administrator finally holds the role they
+    # were granted (T-3.20, #186). Two defects, either of which alone made
+    # every hasAuthority rule on the session path refuse everyone: the
+    # authorities were built from the UserInfo response, where Keycloak never
+    # puts realm roles, and AuthoritiesConstants still named ROLE_ADMIN, which
+    # no token this realm issues has ever contained. /api/admin/**,
+    # /management/**, /v3/api-docs/** and health show-details were all dead.
+    # Carries f7ef7d7 (tokens in the WebSession, T-3.19), which is what makes
+    # `replicas: 2` in gateway.yaml true rather than intended,
+    # 5efdc48 (asset requests are not navigation, T-3.18),
     # d861dbf (trusted-proxies reverted to '.*', T-3.15),
     # 1dbbfe5 (failed login restarts at /, T-3.17),
     # e7acc9b (correlation id on spans, T-3.8), 4ccd88f (sessions in Valkey,
     # T-2.11), 6d965b8 (CSP without 'unsafe-inline'/'unsafe-eval'), 806e8be
     # (logout origin from the request) and f430d36.
-    digest: sha256:be372cca7be2c90af4c22f864023f6b0386d942a88de1cb9500043e043a7b3df
+    digest: sha256:b660717dc35fd8e4ce8ec77a66b146dab81dcbdcad3feb45655cd63fcfc0408b
