@@ -28,9 +28,19 @@ jobs:
             ci
             perf
             revert
+          # Conventional Commits allows exactly ONE scope. A change spanning
+          # components therefore takes the broader scope or none -- not a comma
+          # list, which is why `fix(gateway,core)` and `fix(gateway,platform)`
+          # were rejected and then landed on main anyway (T-0.10, #215).
+          #
+          # `services` is the broader scope for a change touching both the
+          # gateway and core. It was added because that combination kept being
+          # written as a comma pair, which is a signal that the list was missing
+          # something rather than that people were careless.
           scopes: |
             gateway
             core
+            services
             infra
             platform
             secrets
