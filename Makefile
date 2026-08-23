@@ -452,6 +452,10 @@ check-secrets: ## Refuse unencrypted secrets anywhere in the repository
 promote: ## Move a build between environments: make promote SERVICE=all FROM=dev TO=staging
 	@bash $(SCRIPTS)/promote.sh "$(or $(SERVICE),all)" "$(or $(FROM),dev)" "$(or $(TO),staging)"
 
+.PHONY: rollback
+rollback: ## Back to the digest this environment ran before: make rollback ENV=dev SERVICE=gateway
+	@bash $(SCRIPTS)/rollback.sh "$(ENV)" "$(or $(SERVICE),all)"
+
 .PHONY: rollout-status
 rollout-status: ## Did the deploy land? Every Argo CD app Synced and Healthy, on the expected commit
 	@# Not a CI job, and that is a limitation rather than a preference: the

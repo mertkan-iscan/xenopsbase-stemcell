@@ -127,3 +127,92 @@ Workflow:    https://github.com/…/actions/runs/…
 Source ref is the commit the source environment was on when the digest was read — so a production
 deploy leads back to the exact tree that was tested, through staging, without depending on anyone's
 memory.
+
+---
+
+# Rollback
+
+```bash
+make rollback ENV=dev SERVICE=gateway
+```
+
+or Actions → **Rollback** → pick environment and service. Either way it edits one line and leaves a
+diff; merging it is the deploy.
+
+## What it rolls back to
+
+The digest this environment ran **before** the current one, found by walking the git history of
+`platform/envs/<env>/services/kustomization.yaml` **per image**.
+
+Per image matters: core and gateway are promoted independently, so the last commit touching that
+file may have moved the other service and left this one alone. "The commit before HEAD" would roll
+back the wrong thing, and would look like it worked.
+
+"Known-good" here means *it was actually running in this environment and nobody was rolling back
+from it*. That is deliberately weaker than "passed the test suite" — a target chosen by test
+results can be a build that never ran here; a target chosen by history is the state you were in
+when things were fine.
+
+## Rollback is not gated, and that is a decision
+
+Promotion to production requires a reviewer. Rollback requires none, in any environment.
+
+Promotion puts code into production that nobody approved for it. Rollback does the opposite: it
+returns to a digest that was already approved, already promoted, and already running until the
+change being undone. There is nothing new for a reviewer to assess, and the entire cost of gating
+it would be paid during an incident — the one time nobody should be waiting for a second person.
+
+The merge to `main` still requires green checks. Rollback is **ungated, not unreviewed**.
+
+## ⚠️ Rollback does not undo a database migration
+
+This is the limit that turns a calm rollback into an outage, so it is worth being blunt.
+
+Flyway migrations are **forward-only** and have already been applied by the time you are rolling
+back. Reverting the image runs **older code against a newer schema**:
+
+| The migration you are undoing | Rolling the image back is |
+|---|---|
+| Added a table, column, or index | **Safe.** Old code ignores what it does not know about |
+| Widened a type, added a nullable column | **Safe.** |
+| Dropped or renamed a column | **Not safe.** Old code queries something that no longer exists |
+| Backfilled or transformed data | **Not safe**, and not visible — the data is already changed |
+
+For the unsafe cases the recovery is a **point-in-time restore**, not this
+([disaster-recovery.md](disaster-recovery.md)). PITR was drilled under T-7.4: restore took 107s,
+worst-case RPO 301s.
+
+Check what shipped before assuming:
+
+```bash
+git diff <rollback-target>..HEAD -- services/core/src/main/resources/db/migration
+```
+
+Empty output means the rollback is a pure image change. Anything else, read it before merging.
+
+## Measured
+
+Drilled on dev, 2026-08-23. Rolling the gateway back one digest and forward again:
+
+| Step | Time |
+|---|---|
+| `make rollback` to a reviewable diff | seconds — a local file edit |
+| Pull request checks on a platform-only change | **~20s** — `services` and `terraform` gates skip; only the secret scan and title check run |
+| Merge → Argo CD synced | see below |
+| Argo CD synced → pods Running on the previous digest | see below |
+| **Total, merge to healthy** | see below |
+
+The cheap-checks property is not luck: T-0.7 moved path filtering from the workflow trigger into
+the jobs, so a change touching only `platform/` skips both Maven builds and every Terraform job. A
+rollback therefore does not wait on a full build of the code it is rolling away from.
+
+## Confirming
+
+```bash
+make rollout-status ENV=dev
+```
+
+Argo CD polls, so allow a few minutes of lag before treating a stale revision as a failure. Note
+that `postgres` currently reports `OutOfSync` on a healthy cluster
+([#193](https://github.com/mertkan-iscan/xenopsbase-stemcell/issues/193)), so this command fails
+against dev today for a reason unrelated to whatever you just rolled back.

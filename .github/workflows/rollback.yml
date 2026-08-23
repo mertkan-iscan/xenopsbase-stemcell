@@ -1,0 +1,117 @@
+name: Rollback
+
+# One dispatch, back to the digest this environment ran before the current one
+# (T-6.4).
+#
+# Deliberately the same shape as Promote: it edits one line and pushes a branch.
+# A rollback that works differently from a deploy is a rollback nobody has
+# exercised, and an incident is the worst time to discover that.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to roll back'
+        required: true
+        default: dev
+        type: choice
+        options: [dev, staging, prod]
+      service:
+        description: 'What to roll back'
+        required: true
+        default: all
+        type: choice
+        options: [all, core, gateway]
+
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    name: rollback ${{ inputs.service }} in ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+
+    # NO `environment:` GATE, AND THAT IS A DECISION.
+    #
+    # Promote gates production behind a required reviewer, because it puts code
+    # into production that nobody has approved for it. Rollback does the
+    # opposite: it returns to a digest that was already approved, already
+    # promoted, and already running in this environment until the change being
+    # undone. There is nothing new for a reviewer to assess.
+    #
+    # The cost of gating it is paid entirely during an incident, which is the
+    # one time nobody should be waiting for a second person. The merge to `main`
+    # still requires green checks, so this is not unreviewed -- it is ungated,
+    # which is different.
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+          # The rollback target is found by walking this file's history, so a
+          # shallow clone would find nothing to roll back to and report that
+          # the environment is on its first version.
+          fetch-depth: 0
+
+      - name: Find and apply the previous digest
+        id: rollback
+        run: |
+          bash infra/scripts/rollback.sh "${{ inputs.environment }}" "${{ inputs.service }}" | tee rollback.log
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push the rollback branch
+        if: steps.rollback.outputs.changed == 'true'
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          branch="rollback/${{ inputs.environment }}-$(date -u +%Y%m%dT%H%M%SZ)"
+
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+          git checkout -b "${branch}"
+          git add platform/envs
+          git commit -F - <<EOF
+          fix(platform): roll ${{ inputs.service }} back in ${{ inputs.environment }}
+
+          $(sed -n '/^  [a-z]*:$/,/^$/p' rollback.log | sed 's/^/  /')
+
+          Rolled back by: ${{ github.actor }}
+          Workflow:       ${RUN_URL}
+
+          Does NOT undo a database migration. Flyway is forward-only, so this
+          runs older code against a newer schema. Safe for an additive
+          migration; a destructive one needs a point-in-time restore instead.
+          EOF
+
+          git push origin "${branch}"
+
+          {
+            echo "### Rollback ready — open and merge"
+            echo ""
+            echo "${{ github.server_url }}/${{ github.repository }}/compare/main...${branch}?expand=1"
+            echo ""
+            echo '```'
+            cat rollback.log
+            echo '```'
+            echo ""
+            echo "Then confirm it landed:"
+            echo ""
+            echo '```bash'
+            echo "make rollout-status ENV=${{ inputs.environment }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Nothing to roll back to
+        if: steps.rollback.outputs.changed != 'true'
+        run: |
+          {
+            echo "### Nothing to roll back"
+            echo ""
+            cat rollback.log
+          } >> "$GITHUB_STEP_SUMMARY"
