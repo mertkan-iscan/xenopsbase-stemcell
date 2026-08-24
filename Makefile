@@ -351,6 +351,10 @@ java-home: ## Report which JDK the build will use, and why
 	@echo "JAVA_HOME: $${JAVA_HOME:-<unset>}"
 	@printf "selected:  "; bash $(SCRIPTS)/java-home.sh
 
+.PHONY: golden-image
+golden-image: ## Build the image every node boots from: pinned k3s, Tailscale, SELinux (T-1.18)
+	@bash $(SCRIPTS)/build-golden-image.sh
+
 .PHONY: api-spec
 api-spec: ## Regenerate docs/api/*.json from the services
 	@JH="$$(bash $(SCRIPTS)/java-home.sh)" && cd services/core && JAVA_HOME="$$JH" ./mvnw --batch-mode verify -DskipITs=false -Dit.test=OpenApiSpecIT -DfailIfNoTests=false -Dtest=SchemaOwnershipTest
