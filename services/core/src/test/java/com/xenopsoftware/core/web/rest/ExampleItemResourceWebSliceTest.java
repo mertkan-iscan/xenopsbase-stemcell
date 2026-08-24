@@ -62,8 +62,7 @@ class ExampleItemResourceWebSliceTest {
     void listReturnsRepositoryContents() throws Exception {
         when(repository.findAll()).thenReturn(List.of(item(1L, "first"), item(2L, "second")));
 
-        mvc
-            .perform(get("/api/example-items"))
+        mvc.perform(get("/api/example-items"))
             .andExpect(status().isOk())
             .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$", org.hamcrest.Matchers.hasSize(2)))
@@ -92,13 +91,10 @@ class ExampleItemResourceWebSliceTest {
     void invalidBodyIsAClientError() throws Exception {
         when(repository.save(any())).thenReturn(item(1L, "x"));
 
-        mvc
-            .perform(
-                org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                    .post("/api/example-items")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"name\":\"\"}")
-            )
-            .andExpect(status().is4xxClientError());
+        mvc.perform(
+            org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/example-items")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"\"}")
+        ).andExpect(status().is4xxClientError());
     }
 }

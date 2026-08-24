@@ -4,10 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.util.DefaultIndenter;
 import com.fasterxml.jackson.core.util.DefaultPrettyPrinter;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.xenopsoftware.core.IntegrationTest;
 import java.nio.charset.StandardCharsets;
@@ -68,12 +68,7 @@ class OpenApiSpecIT {
 
     @Test
     void theSpecIsServedAndDescribesTheApiThatExists() throws Exception {
-        String json = mockMvc
-            .perform(get("/v3/api-docs"))
-            .andExpect(status().isOk())
-            .andReturn()
-            .getResponse()
-            .getContentAsString();
+        String json = mockMvc.perform(get("/v3/api-docs")).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
 
         JsonNode spec = objectMapper.readTree(json);
 
@@ -89,10 +84,7 @@ class OpenApiSpecIT {
             .as("springdoc must see the actual controllers, not just whatever else is mapped")
             .contains("/api/documents", "/api/documents/{id}");
 
-        assertThat(paths.path("/api/documents").fieldNames())
-            .toIterable()
-            .as("both operations on the collection")
-            .contains("get", "post");
+        assertThat(paths.path("/api/documents").fieldNames()).toIterable().as("both operations on the collection").contains("get", "post");
 
         // The spec is captured from a TEST context, so anything mapped in the test source set is
         // a candidate for leaking into the published contract. It did: eight

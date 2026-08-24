@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+#
+# Pre-commit: secret scanning and formatting (T-4.3, #37).
+#
+# Install with `make hooks`. Bypass one commit with `git commit --no-verify`.
+#
+# WHAT THIS IS, AND WHAT IT IS NOT
+#
+# It is a fast local echo of two checks that already run in CI. It is NOT the
+# enforcement. The enforcement is `spotless:check`, bound to the `validate`
+# phase so it runs on every build, and the `no unencrypted secrets` workflow --
+# both of which run whether or not anybody remembered `make hooks`. A hook that
+# is the only thing between a secret and the remote fails the first time
+# somebody clones without installing it.
+#
+# So this exists to move the failure from "minutes, in CI, on a pushed branch"
+# to "seconds, before the commit exists". The difference matters most for
+# secrets: once one reaches a public remote it is disclosed, and rewriting
+# history does not undo that -- it must be rotated.
+#
+# It reuses the SAME scripts CI runs rather than reimplementing them. A hook
+# with its own weaker copy of a check is how local and CI drift apart, and the
+# drift is only discovered when CI rejects something the hook passed.
+set -uo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+fail=0
+
+# ---------------------------------------------------------------------------
+# 1. Secrets, first: it is the check whose failure cannot be undone by a
+#    follow-up commit. check-secrets.sh reads the index, so `git add`-ed files
+#    are covered.
+if [ -f infra/scripts/check-secrets.sh ]; then
+  if ! out="$(bash infra/scripts/check-secrets.sh 2>&1)"; then
+    echo "$out"
+    echo ""
+    echo "pre-commit: secret scan FAILED."
+    fail=1
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# 2. Formatting, only when Java is actually staged. Starting Maven for a
+#    documentation commit is how a hook earns the reputation that makes people
+#    reach for --no-verify by reflex.
+java_staged="$(git diff --cached --name-only --diff-filter=ACM -- '*.java' || true)"
+if [ -n "$java_staged" ]; then
+  for m in core gateway; do
+    if echo "$java_staged" | grep -q "^services/$m/"; then
+      printf 'pre-commit: formatting services/%s ... ' "$m"
+      if ( cd "services/$m" && ./mvnw -q --offline --batch-mode spotless:check >/dev/null 2>&1 ); then
+        echo "ok"
+      else
+        echo "VIOLATIONS"
+        echo "           run: make format"
+        fail=1
+      fi
+    fi
+  done
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo ""
+  echo "pre-commit failed. Fix the above, or use --no-verify if you know the"
+  echo "check is wrong for this commit -- CI will still run it."
+  exit 1
+fi

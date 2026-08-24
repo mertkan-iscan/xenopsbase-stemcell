@@ -368,6 +368,6 @@ public class InfraUsageService {
     /** Prometheus wants {@code 5m}; {@link Duration#toString()} gives {@code PT5M}. */
     private static String toPromDuration(Duration duration) {
         long seconds = Math.max(1, duration.toSeconds());
-        return seconds % 60 == 0 ? (seconds / 60) + "m" : seconds + "s";
+        return seconds % 60 == 0 ? seconds / 60 + "m" : seconds + "s";
     }
 }

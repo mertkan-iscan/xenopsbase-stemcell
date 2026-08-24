@@ -17,8 +17,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.test.context.support.WithAnonymousUser;
 import org.springframework.security.test.context.support.WithMockUser;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -46,13 +46,11 @@ import org.springframework.test.web.servlet.MockMvc;
 //
 // A security slice that does not load the security configuration is worse than no security slice.
 // It reports green against rules it has never seen.
-@Import(
-    {
-        SecurityConfiguration.class,
-        tech.jhipster.config.JHipsterProperties.class,
-        com.xenopsoftware.core.web.rest.errors.SecurityProblemSupport.class,
-    }
-)
+@Import({
+    SecurityConfiguration.class,
+    tech.jhipster.config.JHipsterProperties.class,
+    com.xenopsoftware.core.web.rest.errors.SecurityProblemSupport.class,
+})
 @TestPropertySource(properties = "spring.security.oauth2.client.provider.oidc.issuer-uri=http://localhost/realms/test")
 @WebMvcTest(controllers = ExampleItemResource.class)
 class SecurityRulesSliceTest {

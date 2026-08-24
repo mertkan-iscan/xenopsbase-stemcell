@@ -78,8 +78,7 @@ class TrustedProxiesTest {
         // connection, which is the fact the two previous attempts guessed at.
         AtomicReference<String> seen = new AtomicReference<>();
 
-        DisposableServer server = HttpServer
-            .create()
+        DisposableServer server = HttpServer.create()
             .host("127.0.0.1")
             .port(0)
             .handle((req, res) -> {
@@ -90,8 +89,7 @@ class TrustedProxiesTest {
             .bindNow();
 
         try {
-            HttpClient
-                .create()
+            HttpClient.create()
                 .get()
                 .uri("http://127.0.0.1:" + server.port() + "/")
                 .responseContent()
@@ -106,14 +104,15 @@ class TrustedProxiesTest {
 
         // The two things that actually matter, stated as properties rather than
         // as a literal, because the literal is environment-specific:
-        assertThat(observed).as("carries no port -- the reverted hypothesis").doesNotContain(":" + server.port());
+        assertThat(observed)
+            .as("carries no port -- the reverted hypothesis")
+            .doesNotContain(":" + server.port());
 
         // And the pattern this task lands must accept whatever form that is.
         assertThat(TrustedProxies.from(loopbackPattern()).isTrusted(observed))
             .as("observed form %s must be matched by the pattern shape we ship", observed)
             .isTrue();
     }
-
 
     @Test
     @DisplayName("an untrusted remote address strips EVERY X-Forwarded-* header")
@@ -132,8 +131,7 @@ class TrustedProxiesTest {
         incoming.add("X-Forwarded-Proto", "https");
         incoming.add("Accept", "application/json");
 
-        MockServerHttpRequest request = MockServerHttpRequest
-            .get("/services/core/api/documents")
+        MockServerHttpRequest request = MockServerHttpRequest.get("/services/core/api/documents")
             .remoteAddress(new InetSocketAddress("192.0.2.10", 44444))
             .headers(incoming)
             .build();
@@ -153,8 +151,7 @@ class TrustedProxiesTest {
         incoming.add("X-Forwarded-Host", "app-dev.xenopsoftware.com");
         incoming.add("X-Forwarded-Proto", "https");
 
-        MockServerHttpRequest request = MockServerHttpRequest
-            .get("/services/core/api/documents")
+        MockServerHttpRequest request = MockServerHttpRequest.get("/services/core/api/documents")
             .remoteAddress(new InetSocketAddress("10.42.3.26", 44444))
             .headers(incoming)
             .build();

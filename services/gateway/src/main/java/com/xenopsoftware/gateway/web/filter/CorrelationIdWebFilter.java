@@ -50,13 +50,15 @@ public class CorrelationIdWebFilter implements WebFilter, Ordered {
         // instead of everyone searching logs by timestamp.
         exchange.getResponse().getHeaders().set(CorrelationId.HEADER, id);
 
-        return chain
-            .filter(exchange.mutate().request(request).build())
-            .contextWrite(Context.of(CorrelationId.MDC_KEY, id))
-            // The context is gone by the time this runs, so the id is captured by the lambda.
-            // Without it the completion line -- the one carrying status and duration -- is the
-            // single most useful log line and the only one missing its correlation id.
-            .doFinally(signal -> MDC.remove(CorrelationId.MDC_KEY));
+        return (
+            chain
+                .filter(exchange.mutate().request(request).build())
+                .contextWrite(Context.of(CorrelationId.MDC_KEY, id))
+                // The context is gone by the time this runs, so the id is captured by the lambda.
+                // Without it the completion line -- the one carrying status and duration -- is the
+                // single most useful log line and the only one missing its correlation id.
+                .doFinally(signal -> MDC.remove(CorrelationId.MDC_KEY))
+        );
     }
 
     /**

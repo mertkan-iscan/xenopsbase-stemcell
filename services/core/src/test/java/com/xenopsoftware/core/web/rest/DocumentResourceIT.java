@@ -23,9 +23,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
-import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 /**
@@ -83,9 +83,7 @@ class DocumentResourceIT {
                 post("/api/documents")
                     .with(asUser(sub))
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(
-                        "{\"filename\":\"" + filename + "\",\"contentType\":\"" + contentType + "\",\"sizeBytes\":" + sizeBytes + "}"
-                    )
+                    .content("{\"filename\":\"" + filename + "\",\"contentType\":\"" + contentType + "\",\"sizeBytes\":" + sizeBytes + "}")
             )
             .andExpect(status().isCreated())
             .andReturn();
@@ -155,7 +153,9 @@ class DocumentResourceIT {
             .perform(post("/api/documents/{id}/complete", ticket.get("id").asLong()).with(asUser(OWNER_SUB)))
             .andExpect(status().isNotFound());
 
-        assertThat(documentRepository.findAll()).singleElement().satisfies(d -> assertThat(d.getStatus()).isEqualTo(Document.Status.PENDING));
+        assertThat(documentRepository.findAll())
+            .singleElement()
+            .satisfies(d -> assertThat(d.getStatus()).isEqualTo(Document.Status.PENDING));
     }
 
     @Test

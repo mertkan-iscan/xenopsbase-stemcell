@@ -61,7 +61,10 @@ class FlywayMigrationIT {
             .as("a failed migration leaves a row behind with success = false")
             .allSatisfy(row -> assertThat(row.get("success")).isEqualTo(Boolean.TRUE));
 
-        List<String> applied = history.stream().map(row -> String.valueOf(row.get("version"))).toList();
+        List<String> applied = history
+            .stream()
+            .map(row -> String.valueOf(row.get("version")))
+            .toList();
 
         // The committed files, read from disk rather than listed here. A list in this file would
         // have to be updated by whoever adds a migration, and the one thing certain about such a
@@ -73,9 +76,7 @@ class FlywayMigrationIT {
         // assertions in the T-5.2 security slice, so it is worth one line to make impossible.
         assertThat(committed).as("no migration files were found, so the comparison below proves nothing").isNotEmpty();
 
-        assertThat(applied)
-            .as("the migrations on disk and the migrations in the database disagree")
-            .containsAll(committed);
+        assertThat(applied).as("the migrations on disk and the migrations in the database disagree").containsAll(committed);
 
         // Ordering, not just membership. Flyway applies by version, and a database that received
         // them in a different order is one where an earlier migration saw a later schema.

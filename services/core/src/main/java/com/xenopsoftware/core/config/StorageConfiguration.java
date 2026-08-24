@@ -72,12 +72,14 @@ public class StorageConfiguration {
      * at compile time rather than silently falling back.
      */
     private Apache5HttpClient.Builder httpClient() {
-        return Apache5HttpClient.builder()
-            .connectionTimeout(Duration.ofSeconds(2))
-            .socketTimeout(Duration.ofSeconds(10))
-            // Bounded on purpose. An unbounded pool turns a slow object store into unbounded
-            // memory and socket use, which takes down the parts of the service that were healthy.
-            .maxConnections(50);
+        return (
+            Apache5HttpClient.builder()
+                .connectionTimeout(Duration.ofSeconds(2))
+                .socketTimeout(Duration.ofSeconds(10))
+                // Bounded on purpose. An unbounded pool turns a slow object store into unbounded
+                // memory and socket use, which takes down the parts of the service that were healthy.
+                .maxConnections(50)
+        );
     }
 
     @Bean

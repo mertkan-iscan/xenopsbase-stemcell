@@ -1,7 +1,7 @@
 package com.xenopsoftware.core.service.storage;
 
-import com.xenopsoftware.core.config.ConditionalOnDocumentStorage;
 import com.xenopsoftware.core.config.ApplicationProperties;
+import com.xenopsoftware.core.config.ConditionalOnDocumentStorage;
 import java.net.URI;
 import java.time.Duration;
 import java.util.Optional;

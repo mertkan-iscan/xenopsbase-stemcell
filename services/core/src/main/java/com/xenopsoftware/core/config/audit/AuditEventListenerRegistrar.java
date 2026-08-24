@@ -99,9 +99,7 @@ public class AuditEventListenerRegistrar {
 
             String[] names = event.getPersister().getPropertyNames();
             String payload = IntStream.of(dirty)
-                .mapToObj(i ->
-                    quote(names[i]) + ":{\"from\":" + literal(old(event, i)) + ",\"to\":" + literal(event.getState()[i]) + "}"
-                )
+                .mapToObj(i -> quote(names[i]) + ":{\"from\":" + literal(old(event, i)) + ",\"to\":" + literal(event.getState()[i]) + "}")
                 .collect(Collectors.joining(",", "{", "}"));
 
             writer.record(new AuditLogWriter.AuditEntry(name(event.getEntity()), String.valueOf(event.getId()), "UPDATE", payload));

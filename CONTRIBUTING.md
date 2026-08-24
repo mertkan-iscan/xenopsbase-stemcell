@@ -109,6 +109,34 @@ What each layer is for, what it deliberately does not cover, and the coverage ta
 reasoning behind the number: [docs/testing.md](docs/testing.md). Read it before adding a test at a
 new level — the boundaries exist so layers do not quietly duplicate each other.
 
+## Code style
+
+Settled mechanically, so it is never an argument in review.
+
+```bash
+make format          # reformat every Java file
+make format-check    # fail if anything is unformatted (what the build runs)
+make hooks           # install the pre-commit hook, once per clone
+```
+
+The formatter is **prettier** with `prettier-plugin-java`, driven by Spotless. Prettier rather than
+a native Java formatter because the code was already in that style — only 25 of core's 99 files had
+drifted — so adopting it cost a 42-file diff instead of rewriting all 174 and making `git blame`
+useless.
+
+`spotless:check` is bound to Maven's `validate` phase, so **any** build fails on a formatting
+violation. It is `check`, never `apply`: a formatter that rewrites your tree during a build makes a
+dirty checkout look like your own change. `make format` is the only thing that rewrites.
+
+The pre-commit hook runs the secret scan and, when Java is staged, the formatter check. It is a
+convenience, not the enforcement — both checks run in CI whether or not anyone installed it. Bypass
+a single commit with `git commit --no-verify`; CI will still run them.
+
+Two style files exist and both are needed. `.prettierrc` is the repository-wide config;
+`.prettierrc-java` is what Spotless reads, because Spotless's prettier bridge does not apply
+`.prettierrc`'s `overrides` section and would otherwise format Java at tabWidth 2. Each file says so
+at the top. They must agree on Java: `printWidth 140`, `tabWidth 4`.
+
 ## Architecture decisions
 
 Anything that constrains future work gets an ADR before the code. See

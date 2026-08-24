@@ -74,16 +74,15 @@ public class DocumentResource {
             currentOwner()
         );
 
-        return ResponseEntity.status(HttpStatus.CREATED)
-            .body(
-                new UploadTicket(
-                    upload.document().getId(),
-                    upload.uploadUrl(),
-                    upload.expiresInSeconds(),
-                    upload.contentLength(),
-                    request.contentType()
-                )
-            );
+        return ResponseEntity.status(HttpStatus.CREATED).body(
+            new UploadTicket(
+                upload.document().getId(),
+                upload.uploadUrl(),
+                upload.expiresInSeconds(),
+                upload.contentLength(),
+                request.contentType()
+            )
+        );
     }
 
     /**
@@ -104,9 +103,11 @@ public class DocumentResource {
      */
     @PostMapping("/{id}/complete")
     public ResponseEntity<DocumentView> complete(@PathVariable Long id) {
-        return documentService.completeUpload(id, currentOwner()).map(DocumentView::of).map(ResponseEntity::ok).orElseGet(() ->
-                ResponseEntity.notFound().build()
-            );
+        return documentService
+            .completeUpload(id, currentOwner())
+            .map(DocumentView::of)
+            .map(ResponseEntity::ok)
+            .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     /**
@@ -132,10 +133,7 @@ public class DocumentResource {
         @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
     ) {
         Page<Document> page = documentService.listAvailable(currentOwner(), capped(pageable));
-        HttpHeaders headers = PaginationUtil.generatePaginationHttpHeaders(
-            ServletUriComponentsBuilder.fromCurrentRequest(),
-            page
-        );
+        HttpHeaders headers = PaginationUtil.generatePaginationHttpHeaders(ServletUriComponentsBuilder.fromCurrentRequest(), page);
         return ResponseEntity.ok().headers(headers).body(page.getContent().stream().map(DocumentView::of).toList());
     }
 
@@ -200,7 +198,14 @@ public class DocumentResource {
 
     public record DocumentView(Long id, String filename, String contentType, Long sizeBytes, String status, Instant createdAt) {
         static DocumentView of(Document d) {
-            return new DocumentView(d.getId(), d.getFilename(), d.getContentType(), d.getSizeBytes(), d.getStatus().name(), d.getCreatedAt());
+            return new DocumentView(
+                d.getId(),
+                d.getFilename(),
+                d.getContentType(),
+                d.getSizeBytes(),
+                d.getStatus().name(),
+                d.getCreatedAt()
+            );
         }
     }
 }

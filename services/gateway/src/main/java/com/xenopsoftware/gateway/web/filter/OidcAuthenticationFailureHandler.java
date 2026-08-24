@@ -93,8 +93,7 @@ public class OidcAuthenticationFailureHandler implements ServerAuthenticationFai
     }
 
     private static ResponseCookie retryCookie(Duration maxAge) {
-        return ResponseCookie
-            .from(RETRY_COOKIE, "1")
+        return ResponseCookie.from(RETRY_COOKIE, "1")
             .path("/")
             .maxAge(maxAge)
             .httpOnly(true)

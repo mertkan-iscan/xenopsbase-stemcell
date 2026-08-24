@@ -1,7 +1,7 @@
 package com.xenopsoftware.gateway.web.filter;
 
-import java.nio.charset.StandardCharsets;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -56,8 +56,7 @@ public class ProblemDetailAuthenticationEntryPoint implements ServerAuthenticati
         response.getHeaders().set(HttpHeaders.WWW_AUTHENTICATE, "Bearer realm=\"api\"");
 
         String instance = exchange.getRequest().getPath().value();
-        String body =
-            """
+        String body = """
             {"type":"%s",\
             "title":"Unauthorized",\
             "status":401,\

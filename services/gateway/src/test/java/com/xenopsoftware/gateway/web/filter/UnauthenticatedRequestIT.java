@@ -80,13 +80,7 @@ class UnauthenticatedRequestIT {
         // Each of those MINTED A NEW AUTHORIZATION REQUEST, replacing the one the user's actual
         // navigation was carrying, so the callback came back with a superseded state and failed
         // with authorization_request_not_found. One page load could create several.
-        webTestClient
-            .get()
-            .uri("/app.css")
-            .header(HttpHeaders.ACCEPT, "text/css,*/*;q=0.1")
-            .exchange()
-            .expectStatus()
-            .isUnauthorized();
+        webTestClient.get().uri("/app.css").header(HttpHeaders.ACCEPT, "text/css,*/*;q=0.1").exchange().expectStatus().isUnauthorized();
     }
 
     @Test
@@ -104,7 +98,9 @@ class UnauthenticatedRequestIT {
             .expectStatus()
             .isFound()
             .expectHeader()
-            .value(HttpHeaders.LOCATION, location -> org.assertj.core.api.Assertions.assertThat(location).contains("/oauth2/authorization"));
+            .value(HttpHeaders.LOCATION, location ->
+                org.assertj.core.api.Assertions.assertThat(location).contains("/oauth2/authorization")
+            );
     }
 
     @Test

@@ -43,8 +43,7 @@ public class RealClientRegistrationConfiguration {
 
     @Bean
     ReactiveClientRegistrationRepository clientRegistrationRepository() {
-        ClientRegistration oidc = ClientRegistrations
-            .fromIssuerLocation(KeycloakTestcontainer.issuerUri())
+        ClientRegistration oidc = ClientRegistrations.fromIssuerLocation(KeycloakTestcontainer.issuerUri())
             .registrationId("oidc")
             .clientId(KeycloakTestcontainer.CLIENT_ID)
             .clientSecret(KeycloakTestcontainer.TEST_GATEWAY_CLIENT_SECRET)
