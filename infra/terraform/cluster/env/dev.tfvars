@@ -77,6 +77,9 @@ autoscaler_nodepools = [
     location    = "fsn1"
     min_nodes   = 0
     max_nodes   = 2
+    # Required by the module under tailscale transport, same as the static
+    # agent pools above.
+    network_scope = "primary"
   }
 ]
 
