@@ -1,0 +1,162 @@
+# Horizontal autoscaling for the two application services (T-2.8, #22).
+#
+# ---------------------------------------------------------------------------
+# THE NUMBER THAT DECIDES EVERYTHING: WHAT THE TARGET IS A PERCENTAGE **OF**
+# ---------------------------------------------------------------------------
+#
+# An HPA divides observed CPU by the pod's CPU **request**. The request here is
+# 500m, and it is a SCHEDULING FLOOR rather than an estimate of what the service
+# uses -- deliberately, because requests reserve capacity and reserving what a
+# JVM peaks at would let two pods fill a node.
+#
+# T-5.6 measured what they actually use, under a saturating k6 load on this
+# exact sizing (docs/slos.md):
+#
+#     gateway pod 1   1.99 cores      = 398% of its request
+#     gateway pod 2   1.50 cores      = 300%
+#     core            1.72 cores      = 344%
+#
+# So the conventional `averageUtilization: 70` would mean "scale up when a pod
+# exceeds 350 millicores" -- roughly a sixth of what one pod demonstrably
+# handles. Every HPA in this file would sit pinned at maxReplicas from the first
+# real request onward, and the autoscaler would look like it was working.
+#
+# That is the trap this repository keeps finding in a new costume: a control
+# that reports success and does not govern the thing it names. An HPA glued to
+# its ceiling is not autoscaling, it is a fixed replica count with extra steps
+# and a graph that makes it look considered.
+#
+# The targets below are therefore expressed against measured capability, not
+# against convention. 200% of a 500m request is 1 core, which is about half of
+# what one pod was shown to sustain -- so a replica is added while the existing
+# ones still have headroom to absorb the traffic during the ~15s a new JVM needs
+# before it is worth having.
+#
+# IF THE REQUESTS CHANGE, THESE TARGETS ARE WRONG. They are a ratio to 500m and
+# nothing enforces the relationship. Re-derive them from a fresh T-5.6 run
+# rather than scaling the number by eye.
+#
+# ---------------------------------------------------------------------------
+# WHY THERE IS NO MEMORY METRIC
+# ---------------------------------------------------------------------------
+#
+# A JVM does not return heap to the OS when load falls, so memory utilisation
+# ratchets upward and never comes back down. An HPA on memory therefore scales
+# up on the first busy period and can never scale down -- it is a one-way
+# valve wearing the shape of an autoscaler. Memory is protected by the limit on
+# the container instead, where the failure is a deterministic OOM kill of one
+# pod rather than a slow, invisible climb to maxReplicas.
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gateway
+  namespace: apps
+  labels: {app.kubernetes.io/name: gateway, app.kubernetes.io/part-of: xenopsbase}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gateway
+
+  # TWO IS A FLOOR WITH A REASON, not a starting point. It is what makes a
+  # rollout survivable -- the old pod keeps serving while the new one starts --
+  # and it is what the session-in-Valkey work (T-2.11, T-3.19) was for. An HPA
+  # that could scale to 1 would silently undo that during any quiet period.
+  minReplicas: 2
+
+  # Four, from node capacity rather than ambition. Dev is 2x cx33 = 8 vCPU
+  # total, shared with Postgres, Keycloak, Prometheus, Loki, Argo and the
+  # ingress. Four gateway pods that can each pull 2 cores already exceed the
+  # cluster on their own; beyond this the useful lever is cluster-autoscaler
+  # adding a node, not more pods contending for the same ones.
+  maxReplicas: 4
+
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          # 200% of a 500m request = 1 core. See the header: this is a ratio to
+          # the request, and the request is a floor, not a usage estimate.
+          averageUtilization: 200
+
+  behavior:
+    scaleUp:
+      # No stabilisation window. Latency is the SLO, and the cost of adding a
+      # pod that turns out not to be needed is a few cents; the cost of waiting
+      # is p95 for every user in the meantime.
+      stabilizationWindowSeconds: 0
+      policies:
+        # Whichever is larger, capped by maxReplicas. Doubling is the useful
+        # policy at 2 replicas; the flat +2 is what matters at 3, where
+        # doubling would overshoot the ceiling anyway.
+        - {type: Percent, value: 100, periodSeconds: 60}
+        - {type: Pods, value: 2, periodSeconds: 60}
+      selectPolicy: Max
+    scaleDown:
+      # Five minutes of sustained quiet before removing anything. Traffic here
+      # is bursty by construction -- the cluster exists in working sessions --
+      # and a shorter window trades a few cents of idle capacity for dropping
+      # replicas between two bursts a minute apart, then rebuilding them cold.
+      stabilizationWindowSeconds: 300
+      policies:
+        # One at a time. Removing two at once from a scaled-out state can take
+        # the remaining pod straight back over the target and start a cycle.
+        - {type: Pods, value: 1, periodSeconds: 120}
+      selectPolicy: Min
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: core
+  namespace: apps
+  labels: {app.kubernetes.io/name: core, app.kubernetes.io/part-of: xenopsbase}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: core
+
+  # ONE, AND THIS IS A COST DECISION RATHER THAN AN AVAILABILITY ONE.
+  #
+  # core is a stateless resource server; nothing prevents running two. At one
+  # replica it is the availability floor of the whole stack -- a gateway scaled
+  # to four still has a single core pod behind it, and losing that pod is an
+  # outage no gateway replica count can absorb.
+  #
+  # Left at 1 for dev because the cluster is destroyed between sessions and the
+  # second pod would be paid for continuously to protect against a failure mode
+  # that a `make up` fixes. PROD SHOULD SET 2. That is not a detail to discover
+  # during the first incident, and it is why this is written here rather than
+  # assumed.
+  minReplicas: 1
+  maxReplicas: 3
+
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          # Same derivation as the gateway: 200% of a 500m request = 1 core,
+          # against a measured 1.72-core peak.
+          averageUtilization: 200
+
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - {type: Percent, value: 100, periodSeconds: 60}
+        - {type: Pods, value: 2, periodSeconds: 60}
+      selectPolicy: Max
+    scaleDown:
+      # Longer than the gateway's. Scaling core down closes database
+      # connections and discards a warm Hibernate cache and JIT profile, and
+      # T-5.6 measured what that costs: 35% worse p95 cold against warm. The
+      # extra five minutes of a spare pod is cheaper than paying that twice.
+      stabilizationWindowSeconds: 600
+      policies:
+        - {type: Pods, value: 1, periodSeconds: 180}
+      selectPolicy: Min

@@ -47,7 +47,38 @@ agent_nodepools = [
   }
 ]
 
-autoscaler_nodepools = []
+# Cluster autoscaler (T-2.8, #22).
+#
+# min_nodes = 0 is the whole point. The two fixed cx33 workers above carry the
+# platform and the services at their floor; this pool is empty and costs
+# nothing until the HPAs ask for replicas that will not fit, and it drains back
+# to empty afterwards. A pool with min_nodes = 1 would be a third worker billed
+# continuously to be ready for a load that arrives during working sessions --
+# which is the cost model ADR-0002 exists to avoid.
+#
+# max_nodes = 2 comes from what the HPAs can actually ask for. Their ceilings
+# are 4 gateway and 3 core; at a 500m request that is 3.5 cores of NEW demand
+# beyond the current floor, and one extra cx33 (4 vCPU) absorbs it. The second
+# node is headroom for the platform growing underneath -- Loki and Prometheus
+# are the ones that move -- not for more application replicas, because nothing
+# can ask for those.
+#
+# cx33 to match the fixed workers. A smaller type would schedule pods that then
+# cannot get the CPU the HPA sized them against, and the autoscaler would keep
+# adding nodes that do not fix it.
+#
+# NOT YET DEMONSTRATED. Criterion 1 of T-2.8 requires seeing nodes added and
+# removed under load, and that needs a live cluster. This is the configuration;
+# the evidence is still owed.
+autoscaler_nodepools = [
+  {
+    name        = "autoscaled"
+    server_type = "cx33"
+    location    = "fsn1"
+    min_nodes   = 0
+    max_nodes   = 2
+  }
+]
 
 cni_plugin          = "flannel"
 ingress_controller  = "none"

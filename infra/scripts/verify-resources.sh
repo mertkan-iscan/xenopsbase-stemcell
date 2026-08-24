@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Every workload this repository owns must declare CPU and memory requests
+# Every workload this repository owns must declare CPU and memory requests,
+# and a memory limit, and no CPU limit
 # (T-2.15, #209).
 #
 # WHY REQUESTS AND NOT LIMITS
@@ -38,7 +39,7 @@ TOTAL_FILE="$(mktemp)"
 trap 'rm -f "$TOTAL_FILE"' EXIT INT TERM
 
 echo "=================================================================="
-echo " Every workload we own declares CPU and memory requests"
+echo " Every workload we own declares requests, a memory limit, and no CPU limit"
 echo "=================================================================="
 echo ""
 
@@ -77,10 +78,26 @@ for doc in docs:
     containers = tmpl.get("spec", {}).get("containers", []) or []
     for c in containers:
         found += 1
-        req = (c.get("resources") or {}).get("requests") or {}
+        resources = c.get("resources") or {}
+        req = resources.get("requests") or {}
+        lim = resources.get("limits") or {}
         missing = [k for k in ("cpu", "memory") if k not in req]
         if missing:
             bad.append(f"{doc.get('kind')}/{name} container {c.get('name')} has no {' or '.join(missing)} request")
+        # A MEMORY LIMIT IS REQUIRED; a CPU limit is required to be ABSENT.
+        # Both halves are the same decision, stated in T-2.15 and restated in
+        # the HPA manifests (T-2.8): memory is incompressible, so without a
+        # limit one leaking pod takes the node and everything on it; CPU is
+        # compressible, so a limit buys nothing and costs tail latency to CFS
+        # throttling. Checking only the first half would let a well-meaning
+        # change add CPU limits back and quietly undo the reasoning.
+        if "memory" not in lim:
+            bad.append(f"{doc.get('kind')}/{name} container {c.get('name')} has no memory limit")
+        if "cpu" in lim:
+            bad.append(
+                f"{doc.get('kind')}/{name} container {c.get('name')} sets a CPU limit — "
+                "deliberately not used here, see the comment in this script"
+            )
 
 if found:
     print(f"  {'FAIL' if bad else 'ok  '}  {path}  ({found} container(s))")
@@ -112,9 +129,9 @@ fi
 echo ""
 echo "=================================================================="
 if [ "$FAILED" -eq 0 ]; then
-  echo "PASSED — ${TOTAL} container(s) across platform/envs, all declaring requests."
+  echo "PASSED — ${TOTAL} container(s) across platform/envs: requests and memory limits set, no CPU limits."
 else
-  echo "FAILED — a workload declares no CPU or memory request."
+  echo "FAILED — a workload violates the resource policy. See the lines above."
   echo "         Without one it is BestEffort: invisible to the scheduler and"
   echo "         first to be evicted. Size it from measurement if there is any"
   echo "         (docs/slos.md), and from a guess you write down if there is not."

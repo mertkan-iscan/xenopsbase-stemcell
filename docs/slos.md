@@ -70,29 +70,46 @@ Resource cost at that rate:
 
 ## What this says about autoscaling (T-2.8, #22)
 
-This is the number #22 has been waiting for, and it is not the one anyone expected.
+This is the number #22 was waiting for, and it was not the one anyone expected.
 
-**CPU requests are 200m. Real usage under load is 1.5–2.0 cores.** That is a 7–10× overshoot, and
-there are **no CPU limits at all**, so pods burst freely into whatever the node has spare.
+**Real usage under load is 1.5–2.0 cores per pod.** There are **no CPU limits at all**, so pods
+burst freely into whatever the node has spare, and the requests are a scheduling floor rather than
+an estimate of demand.
 
-A HorizontalPodAutoscaler targeting CPU utilisation computes `usage / request`. At these values:
+A HorizontalPodAutoscaler computes `usage / request`. When this was first measured the requests
+were 200m, which made the arithmetic absurd:
 
 ```
 1990m / 200m  =  995% utilisation
 ```
 
-An HPA with the conventional 70% target would see 995% and scale to its maximum instantly, on load
-the current two replicas absorb comfortably. **CPU-based autoscaling is meaningless here until the
-requests describe reality**, and fixing the requests is a prerequisite for #22 rather than part of
-it.
+An HPA with the conventional 70% target would have seen 995% and pinned itself to maxReplicas on
+load that two replicas absorbed comfortably.
 
-Two workers with 4 vCPU each is 8 cores total. Peak observed demand across gateway, core and the
-load generator was about 5.8 cores, so this run was using most of the cluster — worth knowing
-before anyone reads 568 req/s as headroom.
+**Requests were raised to 500m in T-2.15**, which changes the arithmetic but not the shape of the
+problem:
 
-The honest recommendation for #22: **set requests from these measurements first**, then pick an HPA
-target, then re-measure. Do not pick a target against requests that are wrong by an order of
-magnitude.
+```
+1990m / 500m  =  398% utilisation
+```
+
+Still nothing like 70%. The conclusion that mattered survived the change: **the request is a floor,
+not a forecast, so an HPA target expressed as a percentage of it cannot use a conventional number.**
+
+### What #22 did with this
+
+Targets are set at **`averageUtilization: 200`** — 200% of a 500m request is 1 core, about half of
+what one pod was measured sustaining. A replica is added while the existing ones still have headroom
+to cover the ~15 s a new JVM needs before it is worth having.
+
+The ceilings come from this page too. Two workers with 4 vCPU each is 8 cores total, and peak
+observed demand across gateway, core and the load generator was about 5.8 — so this run was already
+using most of the cluster. `maxReplicas` is 4 for the gateway and 3 for core because beyond that the
+useful lever is cluster-autoscaler adding a node, not more pods contending for the same ones.
+
+**These targets are a ratio to a 500m request and nothing enforces that relationship.** If the
+requests change again, re-derive them from a fresh run of this page rather than scaling the number
+by eye. That is the mistake this section exists to prevent, and it has now nearly been made twice.
 
 **Done, in T-2.15 (#209).** gateway and core now request `500m` — about 55 req/s of booked capacity
 each, at the measured ~110 req/s per core. Not the idle figure, which would have the scheduler treat

@@ -194,32 +194,16 @@ metadata:
 spec:
   selector: {app.kubernetes.io/name: gateway}
   ports: [{name: http, port: 8080, targetPort: http}]
----
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata: {name: gateway, namespace: apps}
-spec:
-  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: gateway}
-  minReplicas: 2
-  maxReplicas: 6
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target: {type: Utilization, averageUtilization: 70}
-  behavior:
-    # Up fast, down slow, and the asymmetry is the whole design.
-    #
-    # Scaling up late costs latency for real users. Scaling down early costs a
-    # second scale-up a minute later, and with a JVM that means another cold
-    # start -- so the cheap mistake is to stay scaled out slightly too long.
-    scaleUp:
-      stabilizationWindowSeconds: 0
-      policies:
-        - {type: Percent, value: 100, periodSeconds: 30}
-    scaleDown:
-      # Five minutes of sustained low CPU before giving a replica back. The
-      # default is 300s and it is right here for the reason above.
-      stabilizationWindowSeconds: 300
-      policies:
-        - {type: Pods, value: 1, periodSeconds: 60}
+# THE HPA IS NOT DEFINED HERE.
+#
+# It used to be, with its own minReplicas, maxReplicas and target -- and those
+# numbers drifted from the ones that actually ship the moment the real HPA was
+# written (T-2.8). A rehearsal of a spec nobody deploys answers a question
+# nobody asked.
+#
+# hpa-local.sh now applies the gateway HorizontalPodAutoscaler out of
+# platform/envs/dev/services/hpa.yaml, so what is rehearsed here is the object
+# that goes to the cluster, byte for byte. The requests on the Deployment above
+# are the deployed ones too, which is what makes the target meaningful: the HPA
+# divides by the request, so rehearsing against a different request would
+# rehearse a different autoscaler.

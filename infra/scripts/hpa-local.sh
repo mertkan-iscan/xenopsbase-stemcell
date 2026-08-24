@@ -105,6 +105,21 @@ rm -f "${ROOT}/.hpa-realm.json"
 echo "  applying gateway, Valkey, Keycloak and the HPA…"
 sed "s|GATEWAY_IMAGE_PLACEHOLDER|${IMAGE}|" infra/load/hpa-local/manifests.yaml | kubectl apply -f - >/dev/null
 
+# The HPA comes from the DEPLOYED manifest, not from a copy kept next to this
+# script. A rehearsal of numbers that differ from the ones that ship is a
+# rehearsal of nothing, and a local copy drifts the first time the real one is
+# tuned. Only the gateway object: there is no core Deployment in this cluster,
+# and an HPA pointing at a missing target reports <unknown> for ever and makes
+# the output look broken.
+"${PYTHON:-python3}" - <<'EXTRACT' | kubectl apply -f - >/dev/null
+import sys, yaml
+docs = [d for d in yaml.safe_load_all(open("platform/envs/dev/services/hpa.yaml", encoding="utf-8")) if d]
+gateway = [d for d in docs if d.get("metadata", {}).get("name") == "gateway"]
+if len(gateway) != 1:
+    sys.exit("expected exactly one gateway HPA in platform/envs/dev/services/hpa.yaml, found %d" % len(gateway))
+yaml.safe_dump(gateway[0], sys.stdout)
+EXTRACT
+
 echo "  waiting for the gateway to be ready (JVM start plus OIDC discovery)…"
 kubectl -n apps rollout status deploy/keycloak --timeout=300s >/dev/null 2>&1
 if ! kubectl -n apps rollout status deploy/gateway --timeout=420s; then
