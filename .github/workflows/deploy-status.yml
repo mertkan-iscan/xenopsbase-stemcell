@@ -154,11 +154,33 @@ jobs:
           # script says which.
           ROLLOUT_TIMEOUT: "600"
         run: |
-          if bash infra/scripts/rollout-status.sh "${ENVIRONMENT}" "${GITHUB_SHA}"; then
-            echo "::notice::${GITHUB_SHA} is live in ${ENVIRONMENT}."
+          # The expected SHA is only meaningful when this commit CHANGED
+          # something Argo CD watches. On a push touching platform/envs/** it
+          # is the whole point: "Synced and Healthy" says the cluster matches
+          # some revision, and only the SHA says it matches the one that just
+          # merged.
+          #
+          # On a manual run it is the wrong question. Argo CD advances an
+          # application's recorded revision when it reconciles that
+          # application's path, so a commit touching only .github/ leaves most
+          # applications reporting an older SHA -- correctly, because nothing
+          # about them changed. Demanding the new SHA there reports a failure
+          # for applications that are working exactly as intended, which is how
+          # a check earns a reputation for crying wolf.
+          if [ "${{ github.event_name }}" = "push" ]; then
+            EXPECT="${GITHUB_SHA}"
+            echo "Checking that ${GITHUB_SHA} reached ${ENVIRONMENT}."
+          else
+            EXPECT=""
+            echo "Manual run: checking every application is Synced and Healthy."
+            echo "Not asserting a revision — this commit may not touch anything Argo CD watches."
+          fi
+
+          if bash infra/scripts/rollout-status.sh "${ENVIRONMENT}" "${EXPECT}"; then
+            echo "::notice::${ENVIRONMENT} is Synced and Healthy${EXPECT:+ at ${GITHUB_SHA}}."
           else
             echo ""
-            echo "::error::${GITHUB_SHA} is not live in ${ENVIRONMENT} after 10 minutes."
+            echo "::error::${ENVIRONMENT} did not reach a Synced and Healthy state within 10 minutes."
             echo "Argo CD polls about every 3 minutes, so this is longer than lag."
             echo "The output above names which application is not Synced or not Healthy."
             echo "To force one:"
