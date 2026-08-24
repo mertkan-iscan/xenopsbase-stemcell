@@ -1,0 +1,114 @@
+name: Cost
+
+# Notices a cluster that was left running, and anything billable that nothing
+# is using (T-8.4, #62).
+#
+# WHY THIS EXISTS
+#
+# ADR-0002's whole argument is "near zero when idle", and until now nothing
+# checked it. The lifecycle is `make up` at the start of a session and
+# `make down` at the end, which works exactly as well as remembering does.
+#
+# It has already failed in practice: on 2026-08-24 the dev cluster ran for
+# hours after work on it had finished, and the reason nobody noticed is that
+# the only way to look was to go and look.
+#
+# WHAT IT DOES NOT DO, AND WHY
+#
+# It does not destroy anything. Two reasons, and the second is the real one:
+#
+#   1. `make down` needs the cluster's Kubernetes API to flush the WAL before
+#      destroying (T-7.2), and CI cannot reach it over Tailscale (#195). A
+#      teardown that skipped that step would silently widen the database RPO
+#      the DR runbook publishes.
+#
+#   2. Destroying someone's cluster on a timer is a decision they should make
+#      once, deliberately, rather than one that arrives as a surprise during a
+#      long debugging session. The card asks for auto-destroy; this reports
+#      instead, and the difference is stated on the issue rather than quietly
+#      substituted.
+#
+# WHY AGE RATHER THAN EXISTENCE
+#
+# Alerting on "a cluster exists" would fire on every working day, and a check
+# that fires when nothing is wrong is one people stop reading -- a shape this
+# repository has now found four times. It fires when the oldest server has
+# been up longer than a working session.
+on:
+  schedule:
+    # 06:00 UTC, which is early morning in Europe/Istanbul: late enough that a
+    # cluster left up overnight has been up long enough to trip the threshold,
+    # early enough that seeing it costs a morning rather than a day.
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      max_hours:
+        description: 'Hours a cluster may run before this fails.'
+        required: false
+        default: '12'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  cost:
+    name: cost and orphans
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Report
+        id: report
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: |
+          if [ -z "${HCLOUD_TOKEN}" ]; then
+            echo "::error::HCLOUD_TOKEN is not set — this check cannot see the project."
+            exit 1
+          fi
+          bash infra/scripts/cost-report.sh | tee /tmp/report.txt || true
+          bash infra/scripts/cost-report.sh --json > /tmp/report.json
+          cat /tmp/report.json
+
+      - name: Fail if something was left running, or is orphaned
+        env:
+          MAX_HOURS: ${{ inputs.max_hours || '12' }}
+        run: |
+          python3 - "$MAX_HOURS" <<'PY'
+          import json, os, sys
+
+          limit = float(sys.argv[1])
+          with open("/tmp/report.json", encoding="utf-8") as fh:
+              r = json.load(fh)
+
+          failed = False
+
+          # Orphans first: they cost money and nothing is using them, which is
+          # true regardless of whether a cluster is meant to be up.
+          if r["orphans"]:
+              print("::error::%d orphaned billable resource(s)" % len(r["orphans"]))
+              for o in r["orphans"]:
+                  print("  %s %s (%s)" % (o["kind"], o["name"], o["detail"]))
+              print("")
+              print("These are what a failed teardown leaves behind. `make down` runs")
+              print("verify-teardown.sh, which would have caught them at the time.")
+              failed = True
+
+          hours = r["oldest_server_hours"]
+          if r["servers"] and hours > limit:
+              print("::error::a cluster has been running for %.1f hours (limit %.0f)" % (hours, limit))
+              print("  spent so far      EUR %.2f" % r["spent_so_far"])
+              print("  per day if left   EUR %.2f" % r["daily_total"])
+              print("")
+              print("If this was deliberate, ignore it. If it was not:")
+              print("  source ~/.xenopsbase.env && make down ENV=dev")
+              failed = True
+          elif r["servers"]:
+              print("%d server(s), oldest %.1f h — within the %.0f h limit." % (
+                  r["servers"], hours, limit))
+          else:
+              print("Nothing billable is running. EUR %.4f/h for what survives teardown." % r["hourly_idle"])
+
+          sys.exit(1 if failed else 0)
+          PY

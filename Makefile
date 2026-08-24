@@ -580,6 +580,10 @@ hooks: ## Install the git pre-commit hook (formatting + secret scanning)
 	@echo "pre-commit will now run formatting and the secret scan."
 	@echo "To disable for one commit: git commit --no-verify"
 
+.PHONY: cost
+cost: ## What the Hetzner project is costing right now, priced from the API (T-8.4)
+	@bash $(SCRIPTS)/cost-report.sh
+
 .PHONY: validate
 validate: ## Validate every Terraform root module without touching remote state
 	@set -e; for d in $(STORAGE_DIR) $(EDGE_DIR) $(CLUSTER_DIR); do \
