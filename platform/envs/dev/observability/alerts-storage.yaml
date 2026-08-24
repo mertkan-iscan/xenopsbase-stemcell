@@ -23,6 +23,40 @@
 # symptom arrives long after the actual fault. That is why the archiving alerts
 # exist and why these are not a substitute for them.
 #
+# THESE OVERLAP WITH kube-prometheus-stack's BUILT-IN RULES, DELIBERATELY
+#
+# The chart already ships KubePersistentVolumeFillingUp, and this file was first
+# written without noticing -- a grep of platform/envs/dev/observability found
+# nothing, because the built-ins arrive with the Helm release rather than from
+# this repository. Worth recording, because "I searched and found nothing" and
+# "there is nothing" are different statements and only one of them was true.
+#
+# What the chart already does:
+#
+#   KubePersistentVolumeFillingUp   < 3% free,  for 1m,  critical
+#   KubePersistentVolumeFillingUp   < 15% free AND predicted to fill in 4 days,
+#                                                for 1h,  warning
+#   KubePersistentVolumeInodesFillingUp, KubePersistentVolumeErrors
+#
+# Those are good general rules and they are kept. The rules below exist because
+# a database volume is not a general volume:
+#
+#   3% free on a 10Gi disk is 300MB. Postgres does not slow down at 300MB, it
+#   stops accepting writes, and by then the decision has been made for you.
+#   VolumeAlmostFull at 90% leaves a gigabyte, which is the difference between
+#   expanding calmly and expanding during an outage.
+#
+#   4 days of runway is the right horizon for a volume that grows with data.
+#   It is the wrong one for a volume where WAL accumulates because archiving
+#   stalled -- that fills at the write rate, and four days of warning is not
+#   available. VolumeFillingWithinFourHours is the same idea at the timescale
+#   this failure actually happens on.
+#
+#   Nothing in the chart notices the metric disappearing.
+#
+# So the overlap is real and the thresholds are not redundant: the built-ins
+# catch a disk filling, these catch it early enough to choose what to do.
+#
 # Written against metrics verified to exist on this cluster, not guessed:
 #
 #   kubelet_volume_stats_used_bytes       3 series
