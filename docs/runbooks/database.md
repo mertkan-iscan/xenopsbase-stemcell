@@ -233,6 +233,53 @@ kubectl -n database get secret postgres-app -o jsonpath='{.data.password}' | bas
 Use **`postgres-rw`** for writes: it follows the primary across a failover. Pointing an application
 at a pod name survives exactly until the first promotion.
 
+## The disk is filling
+
+`VolumeFillingUp` at 80%, `VolumeAlmostFull` at 90%, and `VolumeFillingWithinFourHours`
+extrapolating from the last six hours. Volumes are 10Gi per instance and in dev the **WAL shares
+the data volume**, which is what makes this more than a capacity question.
+
+**Find out why before expanding.** A disk fills two ways here and they need opposite responses:
+
+```bash
+kubectl -n database exec postgres-1 -c postgres -- df -h /var/lib/postgresql/data
+kubectl -n database exec postgres-1 -c postgres -- du -sh /var/lib/postgresql/data/pgdata/pg_wal
+```
+
+If `pg_wal` is a large share of the total, the cause is archiving, not data. Postgres cannot recycle
+a WAL segment until it has been archived, so a stalled archive fills the disk at whatever rate the
+database writes — and expanding only buys time before the same outage. `PostgresArchivingStalled`
+and `PostgresWALFilesPilingUp` should be firing too; if they are, fix those first and the disk
+recovers on its own.
+
+That failure has happened here: #113 was an archive that reported healthy while archiving nothing.
+
+**If it is genuinely data**, expand. `hcloud-volumes` has `allowVolumeExpansion: true`, and CNPG
+takes the new size from the Cluster rather than the PVC:
+
+```bash
+kubectl -n database patch cluster postgres --type merge   -p '{"spec":{"storage":{"size":"20Gi"}}}'
+```
+
+Two things to know before you run it:
+
+**A volume cannot be shrunk.** Kubernetes has no path back. Expanding is a permanent cost increase —
+€0.0572 per GB per month — so pick a size you would have chosen deliberately, not the next round
+number.
+
+**Whether it needs a restart is untested here.** The CSI driver advertises expansion and recent
+Hetzner CSI supports it online for ext4, but this project has never done it, so treat a brief
+restart as possible rather than assume otherwise. Watch the PVC condition:
+
+```bash
+kubectl -n database get pvc postgres-1 -o jsonpath='{.status.conditions}'
+```
+
+**Why WAL is not on its own volume**, and when it should be: splitting `walStorage` bounds the blast
+radius, so an archiving problem stops being a data-volume problem. It costs a second volume per
+instance to manage and to pay for. In dev the single volume is deliberate; a production tree should
+revisit it, because there the outage matters more than the volume.
+
 ## Known gaps
 
 **No separate WAL volume in dev.** Hetzner volumes have a 10 Gi minimum, so a separate `walStorage`

@@ -1,0 +1,128 @@
+# Alerts for volumes filling up (T-2.21, #267).
+#
+# WHY A SEPARATE FILE FROM alerts-backups.yaml
+#
+# The WAL side is already covered there -- PostgresWALArchivingFailing,
+# PostgresWALFilesPilingUp, PostgresArchivingStalled. Those watch whether WAL is
+# LEAVING for object storage. These watch whether the disk it sits on is running
+# out. They fail together often and for different reasons, and a stalled archive
+# is the most likely way this disk fills, so the two sets reference each other
+# rather than being merged.
+#
+# WHY A FULL DISK IS WORSE THAN IT SOUNDS
+#
+# Postgres does not degrade when a volume fills. It stops accepting writes. And
+# in dev the WAL shares the data volume (no walStorage, deliberately -- see
+# platform/envs/dev/database/cluster.yaml), so there are two independent routes
+# to the same outage:
+#
+#   1. data grows, which is gradual and predictable
+#   2. WAL accumulates because archiving stalled, which is neither
+#
+# The second turns a broken backup into a total outage, and the disk-full
+# symptom arrives long after the actual fault. That is why the archiving alerts
+# exist and why these are not a substitute for them.
+#
+# Written against metrics verified to exist on this cluster, not guessed:
+#
+#   kubelet_volume_stats_used_bytes       3 series
+#   kubelet_volume_stats_capacity_bytes   3 series
+#
+# Verify with:
+#   curl $PROM/api/v1/label/__name__/values | tr ',' '\n' | grep volume_stats
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: storage
+  namespace: observability
+  labels:
+    # Picked up by the ruleSelector; the stack sets
+    # ruleSelectorNilUsesHelmValues: false so rules outside its own release are
+    # still discovered.
+    app.kubernetes.io/part-of: xenopsbase
+spec:
+  groups:
+    - name: volumes
+      rules:
+        # THE ONE THAT BUYS TIME. 80% on a 10Gi volume leaves 2Gi, which at any
+        # plausible write rate here is hours rather than minutes -- enough to
+        # decide between expanding the volume and fixing whatever is filling it.
+        #
+        # `for: 30m` because volume stats are sampled by the kubelet and a
+        # single scrape landing during a checkpoint or a base backup can spike.
+        # An alert that fires on one sample teaches people to wait and see,
+        # which is exactly the habit that makes the next one useless.
+        - alert: VolumeFillingUp
+          expr: >-
+            100 * kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes > 80
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.persistentvolumeclaim }} is {{ $value | printf \"%.0f\" }}% full"
+            description: >-
+              The volume has been over 80% for half an hour. If this is a
+              Postgres volume, WAL shares it with the data in dev, so check
+              WHY before expanding: a stalled archive fills a disk at the write
+              rate and expanding only buys time. Look at
+              PostgresWALFilesPilingUp and PostgresArchivingStalled first --
+              if either is also firing, the disk is a symptom.
+              Runbook: docs/runbooks/database.md
+
+        # Critical rather than warning, and deliberately close to the wall. By
+        # 90% the decision is no longer "which fix" -- it is "expand now" -- and
+        # the alert should say so rather than repeating the warning louder.
+        - alert: VolumeAlmostFull
+          expr: >-
+            100 * kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes > 90
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $labels.persistentvolumeclaim }} is {{ $value | printf \"%.0f\" }}% full"
+            description: >-
+              Over 90%. A Postgres volume that fills stops accepting writes;
+              it does not slow down first. Expand it now and diagnose after:
+              kubectl -n database patch cluster postgres --type merge
+                -p '{"spec":{"storage":{"size":"20Gi"}}}'
+              Runbook: docs/runbooks/database.md
+
+        # Growth rate, not level. A volume climbing fast enough to fill within
+        # four hours is worth knowing about at 40% just as much as at 80% --
+        # and this is the shape a stalled archive produces, because WAL
+        # accumulates at a steady rate that a level-based alert only notices
+        # once most of the runway is gone.
+        #
+        # predict_linear over 6h rather than a shorter window: Postgres volumes
+        # move in steps at checkpoints, and a narrow window extrapolates a step
+        # into a cliff.
+        - alert: VolumeFillingWithinFourHours
+          expr: >-
+            predict_linear(kubelet_volume_stats_available_bytes[6h], 4 * 3600) < 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.persistentvolumeclaim }} is on course to fill within 4 hours"
+            description: >-
+              Extrapolated from the last six hours. This fires before the
+              level alerts do and is the one that catches a stalled WAL
+              archive early, because that fills a disk at a constant rate.
+              Check PostgresArchivingStalled before expanding anything.
+              Runbook: docs/runbooks/database.md
+
+        # A volume whose metrics stop arriving is not a healthy volume, it is an
+        # unmonitored one -- and every alert above silently stops meaning
+        # anything. This project has met that shape often enough to spend a rule
+        # on it (#113, #155).
+        - alert: VolumeMetricsMissing
+          expr: absent(kubelet_volume_stats_capacity_bytes)
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "No volume metrics are reaching Prometheus"
+            description: >-
+              kubelet_volume_stats_capacity_bytes has no series at all. Every
+              disk alert above is now inert and will report nothing whatever
+              happens. Check that the kubelet scrape job is up.
