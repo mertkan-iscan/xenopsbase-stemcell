@@ -42,6 +42,7 @@ need TF_VAR_hetzner_s3_access_key
 need TF_VAR_hetzner_s3_secret_key
 need HCLOUD_TOKEN
 need TF_VAR_cloudflare_api_token
+need TF_VAR_tailscale_auth_key
 need TF_VAR_firewall_source_cidrs
 
 if [ "$MISSING" -ne 0 ]; then
@@ -75,6 +76,9 @@ set_secret FIREWALL_SOURCE_CIDRS  "$TF_VAR_firewall_source_cidrs"
 
 # Cloudflare (DNS and tunnel)
 set_secret CLOUDFLARE_API_TOKEN   "$TF_VAR_cloudflare_api_token"
+# Required for `plan (cluster)` to run at all under tailscale transport. Its
+# absence is not a degraded plan, it is no plan (T-1.17).
+set_secret TAILSCALE_AUTH_KEY     "$TF_VAR_tailscale_auth_key"
 set_secret CLOUDFLARE_ACCOUNT_ID  "$CLOUDFLARE_ACCOUNT_ID_VALUE"
 set_secret CLOUDFLARE_ZONE_ID     "$CLOUDFLARE_ZONE_ID_VALUE"
 
