@@ -139,6 +139,7 @@ reproduces from nothing.
   - [ADR-0008](docs/adr/0008-durable-state-outside-terraform.md) — durable state Terraform does not create; amends ADR-0002
   - [ADR-0009](docs/adr/0009-in-memory-store.md) — Valkey is the in-memory store, and it is disposable
   - [ADR-0010](docs/adr/0010-user-identity-durability.md) — user identity is durable; declared users carry explicit ids
+  - [ADR-0012](docs/adr/0012-database-scaling.md) — how the database scales, and the evidence required first
 - Spikes
   - [T-3.1 JHipster](docs/spikes/t-3.1-jhipster.md) — what it generates, what gets deleted, and why
 - [CHANGELOG.md](CHANGELOG.md) — what moved away from the generated defaults, and why
