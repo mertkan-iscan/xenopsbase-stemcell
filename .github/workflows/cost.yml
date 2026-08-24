@@ -71,6 +71,16 @@ jobs:
           bash infra/scripts/cost-report.sh --json > /tmp/report.json
           cat /tmp/report.json
 
+      # Reported, never deleted. Snapshot growth is slow and steady, so the
+      # useful thing is seeing the plan regularly rather than having images
+      # disappear on a timer -- and a snapshot is durable state (ADR-0008),
+      # so an automated deletion that got it wrong would break a cold rebuild
+      # rather than cost a few cents.
+      - name: Snapshot retention plan (dry run)
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: bash infra/scripts/prune-snapshots.sh
+
       - name: Fail if something was left running, or is orphaned
         env:
           MAX_HOURS: ${{ inputs.max_hours || '12' }}

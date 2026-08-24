@@ -197,6 +197,12 @@ for kind, name, detail, h in sorted(lines, key=lambda x: -x[3]):
 print("")
 print("  %-46s € %.4f/h" % ("running (goes away on `make down`)", running))
 print("  %-46s € %.4f/h" % ("idle (survives it, by design — ADR-0008)", idle))
+# Snapshot storage called out separately because it is the one line that grows
+# on its own: T-1.18 produces an image per build, and nothing deletes one
+# unless `make prune-snapshots` is run (T-1.21).
+snapshot_gb = sum(float(im.get("image_size") or 0) for im in images)
+if images:
+    print("  %-46s %.1f GB in %d snapshot(s)" % ("  of which snapshot storage", snapshot_gb, len(images)))
 print("  " + "-" * 62)
 print("  %-46s € %.4f/h" % ("total", total))
 print("  %-46s € %.2f" % ("per day, if left up", total * 24))

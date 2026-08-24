@@ -584,6 +584,10 @@ hooks: ## Install the git pre-commit hook (formatting + secret scanning)
 	@echo "pre-commit will now run formatting and the secret scan."
 	@echo "To disable for one commit: git commit --no-verify"
 
+.PHONY: prune-snapshots
+prune-snapshots: ## Show which golden images could be deleted (add ARGS=--delete to do it)
+	@bash $(SCRIPTS)/prune-snapshots.sh $(ARGS)
+
 .PHONY: cost
 cost: ## What the Hetzner project is costing right now, priced from the API (T-8.4)
 	@bash $(SCRIPTS)/cost-report.sh
