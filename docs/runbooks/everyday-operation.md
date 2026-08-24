@@ -9,8 +9,20 @@ make up ENV=dev               # build the cluster and wait until it serves
 make down ENV=dev             # destroy everything billable, and prove it
 ```
 
-Run them from the repository root, in **Git Bash** — not PowerShell and not cmd. The Makefile is a
-POSIX makefile and the scripts it calls are bash.
+Run them from the repository root, in **Git Bash**. The Makefile is a POSIX makefile and the
+scripts it calls are bash.
+
+The Makefile now resolves Git Bash itself on Windows, so running `make` from PowerShell no longer
+dies with `The system cannot find the file $(date.` — that was Make silently falling back to
+`cmd.exe`, and it named neither make nor the shell nor the real problem. Targets that need no
+credentials (`make help`, `make format`, `make format-check`, `make java-home`, `make hooks`) work
+from PowerShell.
+
+**`make up` and `make down` still need Git Bash**, and not because of the Makefile. They need the
+credentials in `~/.xenopsbase.env`, and putting them into the environment means `source`-ing that
+file — which PowerShell cannot do. From PowerShell you will now get the Makefile's own
+"run: source ~/.xenopsbase.env" guard instead of a cryptic one, which is an improvement and not a
+fix.
 
 `ENV=dev` is the default, so `make up` alone does the same thing. Write it out anyway: the day you
 have a staging environment, the habit is what stops you destroying the wrong one.
