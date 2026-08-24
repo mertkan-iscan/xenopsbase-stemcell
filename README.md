@@ -49,6 +49,31 @@ They were added by [ADR-0008](docs/adr/0008-durable-state-outside-terraform.md),
 ADR-0002 after an audit found the original table had been assembled by asking what lives *in* the
 cluster — a question that cannot find state living outside it.
 
+### What it actually costs
+
+Priced from Hetzner's own API rather than a figure typed once and left to rot — `make cost` reads
+the project and prints this live, including anything orphaned.
+
+| | € / hour | € / day |
+|---|---|---|
+| 1 × cx23 control plane | 0.0088 | 0.21 |
+| 2 × cx33 workers | 0.0272 | 0.65 |
+| 3 primary IPv4 | 0.0024 | 0.06 |
+| 3 × 10 GB volumes | 0.0023 | 0.06 |
+| **running total** | **0.0408** | **0.98** |
+| OS snapshot, 1.5 GB — survives `make down` | 0.00003 | 0.0007 |
+
+**About €1 a day while up, and about €0.02 a month while down.** The second number is the one
+ADR-0002 is about: what survives a teardown is the snapshot and the object storage, and neither is
+billed by the hour.
+
+Measured 2026-08-24 at the dev sizing. It is not a promise — server prices change and the sizing
+will — which is why `make cost` exists and this table does not need to be trusted.
+
+A scheduled check fails if a cluster has been running longer than twelve hours, or if anything
+billable is attached to nothing. It does not destroy anything: `make down` needs the cluster's API
+to flush the WAL first, and CI cannot reach it (#195).
+
 The payoff: **cold rebuild from nothing is the everyday path, not a rare fire drill.** The DR test
 and the deploy pipeline are the same code, exercised every time work starts.
 
