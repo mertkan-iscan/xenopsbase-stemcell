@@ -31,6 +31,26 @@ spec:
   # pipeline (T-6.1), at which point this becomes true again.
   startOptimized: false
 
+  # THE DATABASE POOL, PINNED (T-2.18, #259).
+  #
+  # Keycloak sets no pool size by default, which means the Quarkus/Agroal
+  # default of 100 -- exactly max_connections on the CNPG cluster. So Keycloak
+  # alone was entitled to every connection Postgres has, and the only reason
+  # that never happened is that its pool never filled.
+  #
+  # A limit nothing enforces is not a limit. These are counted by
+  # infra/scripts/check-connection-budget.sh alongside core's Hikari pool and
+  # the HPA ceiling.
+  additionalOptions:
+    - name: db-pool-max-size
+      value: "15"
+    # Small and non-zero: Keycloak's database work is bursty around login, and
+    # a cold pool adds connection setup to the first authentication after idle.
+    - name: db-pool-initial-size
+      value: "2"
+    - name: db-pool-min-size
+      value: "2"
+
   db:
     vendor: postgres
     # The -rw service follows the primary across a failover. Pointing at a pod

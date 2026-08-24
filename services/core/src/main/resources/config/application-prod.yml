@@ -130,8 +130,24 @@ spring:
       # timeout, long after the request that owned it gave up.
       max-lifetime: 600000
       idle-timeout: 300000
-      maximum-pool-size: 20
-      minimum-idle: 5
+      # SIZED AGAINST THE DATABASE, NOT AGAINST THIS SERVICE (T-2.18, #259).
+      #
+      # This number is multiplied by the HPA's maxReplicas. At 20 and three
+      # replicas that is 60 of the database's 100 connections, from core alone,
+      # before Keycloak or CNPG's own. The pool is not a local decision.
+      #
+      # The budget is asserted by infra/scripts/check-connection-budget.sh,
+      # which fails when this, the HPA ceiling and max_connections stop adding
+      # up. Change this and the check tells you what else has to move.
+      #
+      # 12 is generous for the work core does: measured usage is 5 per pod at
+      # idle, queries are short, and connection-timeout below bounds the wait
+      # when a burst exceeds the pool rather than failing immediately.
+      maximum-pool-size: 12
+      # Two rather than five. minimum-idle is held PER REPLICA, so five meant
+      # fifteen connections sitting idle across a scaled-out deployment purely
+      # to save a few milliseconds of connection setup inside the same cluster.
+      minimum-idle: 2
       data-source-properties:
         # THE important one. Postgres will run a query until it finishes or the
         # client disconnects -- there is no default limit. A single pathological

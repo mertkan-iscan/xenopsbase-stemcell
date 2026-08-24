@@ -546,6 +546,10 @@ rollout-status: ## Did the deploy land? Every Argo CD app Synced and Healthy, on
 	@# no GitHub-hosted runner can ask. Tracked as T-6.7 (#195).
 	@bash $(SCRIPTS)/rollout-status.sh "$(ENV)" "$(SHA)"
 
+.PHONY: connection-budget
+connection-budget: ## Do the HPA ceiling, the pools and max_connections add up? (T-2.18)
+	@bash $(SCRIPTS)/check-connection-budget.sh $(ENV)
+
 .PHONY: verify-resources
 verify-resources: ## Every workload we own declares CPU and memory requests (T-2.15)
 	@bash $(SCRIPTS)/verify-resources.sh
