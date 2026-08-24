@@ -1,8 +1,11 @@
 package com.xenopsoftware.core.web.rest.errors;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.AccessDeniedException;
@@ -25,12 +28,28 @@ import org.springframework.stereotype.Component;
  * problem document for every failure except the two most common ones, and has to special-case
  * "empty body" for exactly the cases where knowing why would help most.
  *
- * <p>The body is written by hand for the same reason — there is no advice in scope to serialise
- * one, and reaching for the {@code ObjectMapper} here would add a dependency on the very layer
- * that is not running yet.
+ * <h2>Why the body is serialised with Jackson</h2>
+ *
+ * <p>It used to be assembled by string formatting, on the reasoning that reaching for the
+ * {@code ObjectMapper} would "add a dependency on the very layer that is not running yet". That
+ * conflated two different things: the layer that is not running is {@code @RestControllerAdvice},
+ * and {@code ObjectMapper} is not part of it. It is an ordinary bean, usable from a servlet filter
+ * like any other.
+ *
+ * <p>The cost of the conflation was a hand-rolled escaper for the one attacker-controlled field,
+ * which handled backslash, quote, LF and CR and nothing else — leaving every other control
+ * character to land unescaped inside a JSON string literal, where it is illegal. Serialising the
+ * document removes the whole class of defect rather than adding the next missing character to a
+ * list (T-5.12, #232).
  */
 @Component
 public class SecurityProblemSupport implements AuthenticationEntryPoint, AccessDeniedHandler {
+
+    private final ObjectMapper objectMapper;
+
+    public SecurityProblemSupport(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
+    }
 
     @Override
     public void commence(HttpServletRequest request, HttpServletResponse response, AuthenticationException e) throws IOException {
@@ -54,23 +73,20 @@ public class SecurityProblemSupport implements AuthenticationEntryPoint, AccessD
         write(response, HttpStatus.FORBIDDEN, "Forbidden", "Authenticated, but not permitted to perform this operation.", request);
     }
 
-    private static void write(HttpServletResponse response, HttpStatus status, String title, String detail, HttpServletRequest request)
+    private void write(HttpServletResponse response, HttpStatus status, String title, String detail, HttpServletRequest request)
         throws IOException {
         response.setStatus(status.value());
         response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
-        response.getWriter().write(
-            """
-            {"type":"about:blank","title":"%s","status":%d,"detail":"%s","instance":"%s"}""".formatted(
-                title,
-                status.value(),
-                detail,
-                escape(request.getRequestURI())
-            )
-        );
-    }
 
-    /** The path is attacker-controlled and lands inside a JSON string literal. */
-    private static String escape(String value) {
-        return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "").replace("\r", "");
+        // LinkedHashMap, not Map.of: RFC 9457 does not require an order, but a stable one keeps
+        // the golden-file assertions in the API tests from failing on a rehash.
+        Map<String, Object> problem = new LinkedHashMap<>();
+        problem.put("type", "about:blank");
+        problem.put("title", title);
+        problem.put("status", status.value());
+        problem.put("detail", detail);
+        problem.put("instance", request.getRequestURI() == null ? "" : request.getRequestURI());
+
+        objectMapper.writeValue(response.getWriter(), problem);
     }
 }

@@ -41,6 +41,26 @@ public class SecurityConfiguration {
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) {
+        // CSRF IS DISABLED DELIBERATELY, AND THIS COMMENT IS THE REASON (T-5.12, #232).
+        //
+        // CodeQL flags `java/spring-disabled-csrf-protection` as high severity, and for most
+        // applications it is right. It is not right here, and the difference is worth stating
+        // because "someone disabled CSRF" is exactly the shape of a real incident.
+        //
+        // CSRF attacks work by making a victim's BROWSER send a request that carries the victim's
+        // AMBIENT credentials — a cookie the browser attaches on its own. This service has no
+        // ambient credential to forge with:
+        //
+        //   - it is a stateless OAuth2 resource server. Every authenticated request must carry
+        //     an `Authorization: Bearer` header, which a cross-site form or image cannot set;
+        //   - it issues no session cookie. The session lives in the gateway (ADR-0001), which is
+        //     the component where CSRF protection would actually mean something;
+        //   - `SessionCreationPolicy.STATELESS` below means nothing is remembered between
+        //     requests to hijack.
+        //
+        // If any of those three stops being true — a cookie-authenticated path, a session, a
+        // browser-submitted form handled here — this must be re-enabled, and the corresponding
+        // CodeQL dismissal reopened.
         http.csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(authz ->
                 // prettier-ignore
