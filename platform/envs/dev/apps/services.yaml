@@ -31,3 +31,26 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
+
+  # ARGO MUST NOT OWN replicas ONCE AN HPA DOES (T-2.8, #22).
+  #
+  # `selfHeal: true` above reverts any live state that differs from git. The
+  # Deployments declare `replicas`, and the HPA's entire job is to change it.
+  # Without this block the two write the same field against each other: the HPA
+  # scales to 4, Argo sees drift and sets it back to 2, the HPA scales up again.
+  #
+  # The visible symptom is not "autoscaling is broken". It is a service that
+  # never has enough replicas under load while the HPA reports the correct
+  # desired count, and an Application that flips between Synced and OutOfSync
+  # for reasons no commit explains.
+  #
+  # `replicas` stays in the Deployments deliberately rather than being deleted
+  # in favour of minReplicas. It is the count a fresh cluster starts at, before
+  # metrics-server has produced a reading for the HPA to act on -- and for the
+  # gateway that initial value being 2 rather than 1 is what keeps a rollout
+  # survivable during the first minute of a cold rebuild.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
