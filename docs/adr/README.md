@@ -61,4 +61,5 @@ than a clean file that hides the fact a mistake was ever made.
 | [0007](0007-postgres-backup-mechanism.md) | Postgres backs up through the Barman Cloud plugin | Accepted |
 | [0008](0008-durable-state-outside-terraform.md) | The durable-state boundary includes things Terraform does not create | Accepted |
 | [0009](0009-in-memory-store.md) | Valkey is the in-memory store, and it is disposable | Accepted |
+| [0012](0012-database-scaling.md) | How the database scales, and the evidence required before it does | Accepted |
 | [0010](0010-user-identity-durability.md) | User identity is durable; declared users carry explicit ids | Accepted |
