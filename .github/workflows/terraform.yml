@@ -196,6 +196,16 @@ jobs:
       TF_VAR_hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
       TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       TF_VAR_firewall_source_cidrs: ${{ secrets.FIREWALL_SOURCE_CIDRS }}
+      # Without this the cluster module cannot even PLAN: node_transport_mode is
+      # "tailscale" and a variable validation rejects an absent key at plan time,
+      # on purpose (a missing key produces nodes that boot, never join, and hang
+      # rather than failing). So `plan (cluster)` has been red since 2026-08-21
+      # and no terraform change has been validated by CI since (T-1.17, #183).
+      #
+      # Must be REUSABLE. A single-use key registers the first node and the rest
+      # wait forever, which presents as a rebuild that never converges rather
+      # than as an error.
+      TF_VAR_tailscale_auth_key: ${{ secrets.TAILSCALE_AUTH_KEY }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
