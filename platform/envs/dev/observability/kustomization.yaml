@@ -4,5 +4,8 @@ kind: Kustomization
 resources:
   - alerts-backups.yaml
   - alerts-application-metrics.yaml
+  # Disk. The WAL side is in alerts-backups.yaml; these watch the volume it
+  # sits on, which had no alert of any kind before T-2.21.
+  - alerts-storage.yaml
   - dashboard-platform.yaml
   - tempo.yaml
