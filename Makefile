@@ -1,6 +1,35 @@
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
+# WHY THE SHELL IS RE-RESOLVED ON WINDOWS
+#
+# Every recipe in this file is POSIX shell — 47 of them use $$(...), `for`,
+# `if [`, or `&&`. `SHELL := /bin/bash` above is correct and, on Windows,
+# ineffective: /bin/bash is not a path the OS can resolve, so GNU Make silently
+# falls back to cmd.exe and the first recipe line fails with
+#
+#     The system cannot find the file $(date.
+#
+# which names neither make, nor the shell, nor the real problem. `make down`
+# is documented in the runbooks as the way to stop paying for a cluster, so it
+# failing in the shell people actually have open is not a papercut.
+#
+# NOT plain `bash.exe`. On a default Windows install that resolves to
+# C:\Windows\System32ash.exe, which is WSL — a different filesystem, with a
+# different terraform, hcloud and gh than the ones this repository is
+# configured against. That is a worse failure than cmd.exe, because it would
+# sometimes appear to work.
+#
+# If Git Bash is not found, SHELL is left as-is: running make FROM Git Bash
+# already works, and guessing further would be less predictable than the
+# documented fallback.
+ifeq ($(OS),Windows_NT)
+  GIT_BASH := $(firstword $(wildcard C:/PROGRA~1/Git/bin/bash.exe C:/PROGRA~2/Git/bin/bash.exe))
+  ifneq ($(GIT_BASH),)
+    SHELL := $(GIT_BASH)
+  endif
+endif
+
 # Two root modules, deliberately separated by durability (ADR-0002).
 #   storage/ - buckets holding everything durable. Applied rarely, destroyed never.
 #   cluster/ - the K3s cluster. Built and destroyed as a routine operation.
