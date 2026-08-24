@@ -137,6 +137,45 @@ Two style files exist and both are needed. `.prettierrc` is the repository-wide 
 `.prettierrc`'s `overrides` section and would otherwise format Java at tabWidth 2. Each file says so
 at the top. They must agree on Java: `printWidth 140`, `tabWidth 4`.
 
+## Releases
+
+```bash
+bash infra/scripts/next-version.sh --explain   # what would be cut, and why
+bash infra/scripts/release-notes.sh v1.2.3     # what the notes would say
+```
+
+Cutting one is the **Release** workflow, run by hand from the Actions tab. It defaults to a dry run;
+uncheck `dry_run` to actually tag and publish.
+
+Nothing releases on a push, deliberately. A release is a judgement about what is fit to depend on,
+and the commit at the head of `main` on a Tuesday afternoon is not that judgement. The mechanics are
+automated so they are repeatable; the decision is not.
+
+The version comes from the commit messages: `feat` → minor, `fix`/`perf` → patch, `!` or
+`BREAKING CHANGE` → major. `docs`, `ci`, `chore`, `test`, `build` and `refactor` cut nothing at all,
+because a version number that increments for a typo carries no information. While the major version
+is 0, a breaking change bumps the minor instead (semver clause 4) — the move to 1.0.0 is a decision,
+and it is [#63](../../issues/63).
+
+That derivation is only trustworthy because two other controls make the history trustworthy: PR
+titles are linted, and `squash_merge_commit_title` is `PR_TITLE`, so the linted string is the one
+that lands. Without both, a version derived from commit messages looks authoritative and is
+arbitrary.
+
+**`CHANGELOG.md` is written by hand and stays that way.** The release body carries the generated
+list of what changed; the file explains what it means for a fork, which no generator produces. The
+workflow does not touch it — it cannot push to protected `main`, and a PR opened with
+`GITHUB_TOKEN` never triggers its own required checks, so it could never merge.
+
+## Dependencies
+
+Dependabot opens grouped PRs on Mondays — Spring as one PR rather than forty, tests as another,
+everything else as a third. Configured in `.github/dependabot.yml`, which also records why this is
+Dependabot and not the Renovate the card asked for.
+
+Its PRs face exactly the same required checks as yours: verified on the live one, which ran the full
+`core`, `gateway` and `generated client` jobs before it could merge.
+
 ## Architecture decisions
 
 Anything that constrains future work gets an ADR before the code. See

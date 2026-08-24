@@ -1,0 +1,118 @@
+name: Release
+
+# Cut a release: derive the version from conventional commits, generate the
+# notes, tag, publish (T-6.5, #52).
+#
+# MANUAL ONLY, AND THAT IS THE DESIGN
+#
+# Nothing here runs on a push. A release is a decision about what is fit to be
+# depended on, and the commit that happens to be at the head of main on a
+# Tuesday afternoon is not that decision. Automating the MECHANICS so they are
+# repeatable is the goal; automating the JUDGEMENT would mean every merge cuts
+# a version, which is how version numbers stop meaning anything.
+#
+# WHAT THIS DOES NOT DO, deliberately
+#
+#   It does not commit CHANGELOG.md. main is protected with enforce_admins, so
+#   the workflow cannot push to it, and opening a pull request instead is a
+#   trap this repository has already documented: a PR opened with GITHUB_TOKEN
+#   does not trigger workflows, so its required checks never run and report
+#   "expected" for ever. The release body carries the generated notes; the
+#   CHANGELOG.md prose is written by a person, in a normal pull request,
+#   because the valuable half of that file is the reasoning and no generator
+#   produces it.
+#
+#   It does not build or push images. services.yml already publishes on merge
+#   to main, tagged with the commit SHA and the pom version. Re-building here
+#   would ship a DIFFERENT artefact from the one that was tested.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to cut, e.g. v1.0.0. Leave blank to derive it from the commits since the last tag. Required for the first release, which is a decision rather than a derivation (T-8.5).'
+        required: false
+        type: string
+      dry_run:
+        description: 'Print what would happen and stop. Nothing is tagged or published.'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: cut release
+    runs-on: ubuntu-latest
+    permissions:
+      # Creating a tag and a release.
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # The whole history, because the version is derived from it.
+          fetch-depth: 0
+
+      # Before the scripts are trusted to decide a version number. A version
+      # derivation that has quietly stopped working produces a plausible number
+      # rather than an error, and nobody checks a number that looks right.
+      - name: Self-test the version rules
+        run: bash infra/scripts/next-version.sh --self-test
+
+      - name: Decide the version
+        id: version
+        run: |
+          requested="${{ inputs.version }}"
+          if [ -n "$requested" ]; then
+            case "$requested" in
+              v[0-9]*.[0-9]*.[0-9]*) ;;
+              *)
+                echo "::error::'$requested' is not a vMAJOR.MINOR.PATCH tag."
+                exit 1
+                ;;
+            esac
+            if git rev-parse "$requested" >/dev/null 2>&1; then
+              echo "::error::tag $requested already exists. A released version is immutable."
+              exit 1
+            fi
+            echo "version=$requested" >> "$GITHUB_OUTPUT"
+            echo "chose $requested (explicit)"
+          else
+            if ! derived="$(bash infra/scripts/next-version.sh --explain 2>/tmp/why)"; then
+              cat /tmp/why
+              echo "::error::could not derive a version. Pass one explicitly, or there is nothing releasable."
+              exit 1
+            fi
+            cat /tmp/why
+            echo "version=$derived" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate the release notes
+        id: notes
+        run: |
+          bash infra/scripts/release-notes.sh "${{ steps.version.outputs.version }}" > /tmp/notes.md
+          echo "--- notes ---"
+          cat /tmp/notes.md
+
+      - name: Stop here (dry run)
+        if: inputs.dry_run
+        run: |
+          echo "::notice::Dry run. ${{ steps.version.outputs.version }} was NOT tagged or published."
+          echo "Re-run with dry_run unchecked to cut it."
+
+      - name: Tag and publish
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Annotated, so the tag carries its own message and date rather than
+          # inheriting the commit's.
+          git tag -a "$VERSION" -m "Release $VERSION"
+          git push origin "$VERSION"
+          gh release create "$VERSION" --title "$VERSION" --notes-file /tmp/notes.md
+          echo "::notice::Published $VERSION"
+          echo "Remember: CHANGELOG.md is updated by hand, in a pull request."
