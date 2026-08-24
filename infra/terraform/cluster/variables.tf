@@ -120,6 +120,13 @@ variable "autoscaler_nodepools" {
     location    = string
     min_nodes   = number
     max_nodes   = number
+    # REQUIRED under node_transport_mode = "tailscale", and the module rejects
+    # the plan without it: it keeps primary/external network intent known at
+    # plan time even though network_id comes from a resource in the same root.
+    # Same reason agent_nodepools carries it. Discovered by planning against a
+    # live cluster (T-2.8) -- the type was written before any autoscaler pool
+    # existed, so nothing had ever exercised this path.
+    network_scope = optional(string, "primary")
   }))
   default = []
 }
