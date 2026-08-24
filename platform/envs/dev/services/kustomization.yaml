@@ -39,9 +39,20 @@ resources:
 # two no longer move together.
 images:
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/core
-    # Commit e7acc9b -- the correlation id reaches spans, not just logs (T-3.8).
-    # Carries 1c81e0d (infra usage endpoint with node placement, T-3.16).
-    digest: sha256:6b4e1b13100454c413d9f6df8db105b00a4b8d0a60aed29809bcdaef665dd38e
+    # Commit e841ae1 -- the Hikari pool is sized against the DATABASE rather
+    # than against this service (T-2.18, #259). maximum-pool-size 20 -> 12 and
+    # minimum-idle 5 -> 2, because both are multiplied by the HPA's replica
+    # count: at 20 and three replicas core alone claimed 60 of the database's
+    # 100 connections, and minimum-idle is held per replica.
+    #
+    # The other half of that fix -- pinning Keycloak's pool, which defaulted to
+    # 100 and was the larger problem -- deployed immediately through the
+    # Keycloak CR. This is the half that needed an image.
+    #
+    # Carries e7acc9b (correlation id on spans, T-3.8), 1c81e0d (infra usage
+    # endpoint, T-3.16), and 1329471 (the RFC 9457 problem document is
+    # serialised rather than string-formatted, T-5.12).
+    digest: sha256:95b746fd4085d0cfe85342b00f94764c48c054da8312cdf076241c031a2a32bb
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway
     # Commit 2e44a9e -- a logged-in administrator finally holds the role they
     # were granted (T-3.20, #186). Two defects, either of which alone made
