@@ -143,6 +143,27 @@ source "hcloud" "golden" {
     most_recent   = true
   }
 
+  # Cloud-init for the BUILD instance only. None of this ends up in the
+  # snapshot -- the cleanup provisioner removes cloud-init's state at the end.
+  #
+  # WHY IT IS NEEDED AT ALL
+  #
+  # The base snapshot ships root's authorized_keys wrapped in a forced command
+  # that refuses the session:
+  #
+  #   Error uploading script: lease login as the user "root" rather than the
+  #   user "root".
+  #
+  # Packer connects, and then every upload dies on that banner. kube-hetzner
+  # never sees it because their own cloud-init sets `disable_root: false`,
+  # which makes cloud-init write the key without the guard -- so the guard is
+  # invisible to anyone booting these snapshots the normal way, and unavoidable
+  # for anyone booting one directly.
+  user_data = <<-EOT
+    #cloud-config
+    disable_root: false
+  EOT
+
   snapshot_name   = "xenopsbase-golden-${var.k3s_version}"
   snapshot_labels = local.snapshot_labels
 }
@@ -208,14 +229,18 @@ build {
       "set -euo pipefail",
       "echo '==> compiling SELinux policy'",
       "cd /root",
-      "checkmodule -M -m -o kube-hetzner-selinux.mod kube-hetzner-selinux.te",
-      "semodule_package -o kube-hetzner-selinux.pp -m kube-hetzner-selinux.mod",
-      "semodule -i kube-hetzner-selinux.pp",
-      "checkmodule -M -m -o k8s-custom-policies.mod k8s-custom-policies.te",
-      "semodule_package -o k8s-custom-policies.pp -m k8s-custom-policies.mod",
-      "semodule -i k8s-custom-policies.pp",
-      "semodule -l | grep -E 'kube-hetzner-selinux|k8s-custom-policies'",
-      "rm -f /root/kube-hetzner-selinux.te /root/k8s-custom-policies.te /root/*.mod /root/*.pp",
+      # The output basename MUST match the module name inside the .te, or
+      # checkmodule refuses. These are the same names kube-hetzner writes into
+      # cloud-init, so `semodule -l` reads identically on a node built either
+      # way.
+      "checkmodule -M -m -o kube_hetzner_selinux.mod kube_hetzner_selinux.te",
+      "semodule_package -o kube_hetzner_selinux.pp -m kube_hetzner_selinux.mod",
+      "semodule -i kube_hetzner_selinux.pp",
+      "checkmodule -M -m -o k8s_custom_policies.mod k8s_custom_policies.te",
+      "semodule_package -o k8s_custom_policies.pp -m k8s_custom_policies.mod",
+      "semodule -i k8s_custom_policies.pp",
+      "semodule -l | grep -E 'kube_hetzner_selinux|k8s_custom_policies'",
+      "rm -f /root/kube_hetzner_selinux.te /root/k8s_custom_policies.te /root/*.mod /root/*.pp",
     ]
   }
 

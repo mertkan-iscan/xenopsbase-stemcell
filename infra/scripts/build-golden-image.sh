@@ -83,15 +83,29 @@ tar -xzf "$WORK/src.tar.gz" -C "$WORK" --strip-components=1 \
 
 POLICY_DIR="$WORK/selinux"
 mkdir -p "$POLICY_DIR"
-for f in kube-hetzner-selinux.te k8s-custom-policies.te; do
-  if [ ! -f "$WORK/templates/$f" ]; then
-    echo "error: $f not found in module v${MODULE_VERSION}." >&2
+# Renamed to underscores on the way out, and that is not cosmetic:
+# `checkmodule` refuses to compile unless the OUTPUT BASENAME matches the
+# module name declared on the first line of the .te --
+#
+#   module kube_hetzner_selinux 1.0;
+#   module k8s_custom_policies 1.0;
+#
+# The module ships them hyphenated as templates and writes them underscored
+# into cloud-init, so the underscored names are also what a node built the
+# normal way ends up with. Using the same names means `semodule -l` reads
+# identically on a golden-image node and a conventionally built one.
+copy_policy() {
+  src="$WORK/templates/$1"
+  if [ ! -f "$src" ]; then
+    echo "error: $1 not found in module v${MODULE_VERSION}." >&2
     echo "       The module reorganised its templates; this script needs updating." >&2
     exit 1
   fi
-  cp "$WORK/templates/$f" "$POLICY_DIR/$f"
-done
-echo "==> selinux policy : $(wc -c < "$POLICY_DIR/kube-hetzner-selinux.te") + $(wc -c < "$POLICY_DIR/k8s-custom-policies.te") bytes"
+  cp "$src" "$POLICY_DIR/$2"
+}
+copy_policy kube-hetzner-selinux.te kube_hetzner_selinux.te
+copy_policy k8s-custom-policies.te  k8s_custom_policies.te
+echo "==> selinux policy : $(wc -c < "$POLICY_DIR/kube_hetzner_selinux.te") + $(wc -c < "$POLICY_DIR/k8s_custom_policies.te") bytes"
 
 # ---------------------------------------------------------------------------
 echo "==> initializing packer plugins"
@@ -104,13 +118,18 @@ packer build \
   -var "selinux_policy_dir=$POLICY_DIR" \
   "$PACKER_DIR/golden-image.pkr.hcl"
 
+# python3 on Linux, python on Windows -- resolved by RUNNING each candidate,
+# because Windows ships a python3 App Execution Alias that satisfies `command -v`
+# and then exits 49 printing an advert for the Microsoft Store.
+PY_BIN="$(python3 -c '' >/dev/null 2>&1 && echo python3 || echo python)"
+
 echo ""
 echo "=================================================================="
 echo " Golden image built"
 echo "=================================================================="
 curl -sS -H "Authorization: Bearer ${HCLOUD_TOKEN}" \
   "https://api.hetzner.cloud/v1/images?type=snapshot&label_selector=xenopsbase-golden%3Dyes" \
-  | python3 -c '
+  | "$PY_BIN" -c '
 import json, sys
 images = json.load(sys.stdin).get("images", [])
 images.sort(key=lambda i: i["created"], reverse=True)
