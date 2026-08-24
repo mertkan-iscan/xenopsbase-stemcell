@@ -43,13 +43,18 @@ wal_level = logical
 
 Corroborated by the bucket — WAL segments land at 12:21, 12:26, 12:31, 12:36.
 
-**`archive_timeout` is not pinned anywhere in `platform/`.** 300s is CNPG's default, not a value
-this project chose. The stated RPO therefore rests on an upstream default that could change under a
-chart bump, silently, and the first sign would be a worse RPO nobody asked for. Filed as T-2.13
-(#164).
+**`archive_timeout` is pinned in `platform/envs/dev/database/cluster.yaml`** (T-2.13, #164). It
+holds the same 300s that CNPG defaults to, so pinning it changed no behaviour — it changed who owns
+the number. Before, the published RPO rested on an upstream default: a chart bump could have moved
+it with no manifest differing, no alert firing, and the first evidence being more data lost than
+expected during a real recovery. The setting now carries a comment naming this runbook and ADR-0002,
+so it cannot be changed without the documents that quote it surfacing.
 
-Note also that 300s is a *ceiling*: it bounds how long a quiet database waits before forcing a
-segment. A busy one archives sooner, so 5 minutes is the worst case rather than the typical one.
+**5 minutes is a worst case, not the typical loss.** `archive_timeout` is a *ceiling*: it bounds how
+long a **quiet** database waits before forcing a WAL segment. A busy one fills segments and archives
+sooner, so actual loss is usually well under the figure. The worst case is the only number safe to
+publish, and it is the one quoted here and in ADR-0002 — but do not read it as an estimate of what a
+given incident will cost.
 
 **Worst-case RPO, measured (T-7.4, #56): 301 seconds.**
 
@@ -315,9 +320,9 @@ Listed so the next person inherits the reasoning, not just the gap.
 | No offsite replication to a second provider | #57 | The largest gap here. Cost and complexity were deferred while the project was pre-v1 |
 | No automated restore drill | #55 | Must assert a pre-rebuild document is downloadable by its owner afterwards, not just that Postgres came back |
 | ~~PITR never proven~~ | **closed** | Demonstrated 2026-08-22, #56. `infra/drills/pitr-cluster.yaml` reproduces it |
+| ~~`archive_timeout` not pinned~~ | **closed** | Pinned 2026-08-24, #164. Same value, but now this project's rather than CNPG's |
 | Backup age is not observable | #145 | `LastBackupSucceeded: True` while `lastSuccessfulBackup` is empty — see below |
 | No application metrics reach Prometheus | #155 | So alerting on backup age cannot be built even if the field were populated |
-| `archive_timeout` not pinned | #164 | The stated 5-minute RPO depends on a CNPG default |
 | Lifecycle rules are shared across environments | #151 | A retention change for dev would apply to prod |
 | Both age keys held by one person | #191 | Two recipients removes the single object, not the single person |
 | Rollback not measured | #51 | Blocked on T-6.3 (#50) |
