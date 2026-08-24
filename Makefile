@@ -40,6 +40,14 @@ MAIL_DIR    := infra/terraform/mail-dns
 CLUSTER_DIR := infra/terraform/cluster
 SCRIPTS     := infra/scripts
 
+# python3 on Linux and macOS, python on Windows.
+#
+# Resolved by RUNNING each candidate, not by `command -v`. Windows ships a
+# `python3` App Execution Alias that exists on PATH, satisfies `command -v`,
+# and then exits 49 printing an advert for the Microsoft Store. Testing for
+# presence finds it; testing that it executes does not.
+PYTHON      := $(shell python3 -c '' >/dev/null 2>&1 && echo python3 || { python -c '' >/dev/null 2>&1 && echo python; })
+
 # Git for Windows sets core.autocrlf=true at SYSTEM level. Terraform fetches
 # registry modules with `git clone`, so that setting rewrites every module file
 # to CRLF, including the shell heredocs kube-hetzner uploads to nodes. Those
@@ -351,6 +359,14 @@ api-spec: ## Regenerate docs/api/*.json from the services
 	@cp services/core/target/openapi/core.json docs/api/core.json
 	@cp services/gateway/target/openapi/gateway.json docs/api/gateway.json
 	@echo "docs/api updated. Commit the diff -- an API change should be visible in review."
+
+.PHONY: api-spec-check
+api-spec-check: ## Fail if docs/api/*.json no longer describes what the services serve
+	@set -e; for m in core gateway; do 		bash $(SCRIPTS)/check-api-drift.sh "services/$$m/target/openapi/$$m.json" "docs/api/$$m.json"; 	done
+
+.PHONY: api-compat
+api-compat: ## Classify this branch's API changes against main as breaking or not
+	@set -e; 	base=$$(git merge-base HEAD origin/main 2>/dev/null || git rev-parse origin/main); 	for m in core gateway; do 		echo "==> $$m"; 		if git cat-file -e "$$base:docs/api/$$m.json" 2>/dev/null; then 			git show "$$base:docs/api/$$m.json" > "$${TMPDIR:-/tmp}/$$m-base.json"; 			$(PYTHON) $(SCRIPTS)/check-api-breaking.py "$${TMPDIR:-/tmp}/$$m-base.json" "docs/api/$$m.json"; 		else 			echo "  no docs/api/$$m.json on the base — nothing to compare"; 		fi; 	done
 
 .PHONY: api-client
 api-client: ## Generate the typed Java client from the committed spec and compile it

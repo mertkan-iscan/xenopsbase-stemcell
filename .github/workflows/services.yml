@@ -130,14 +130,55 @@ jobs:
       # The committed spec is what the client generator and code review both read. If it drifts
       # from what the service actually serves, every consumer is working from a document that
       # describes an API that no longer exists -- and nothing else would notice.
+      #
+      # The comparison moved into a script (T-5.4) so it can be run BEFORE pushing --
+      # `make api-spec-check`. It was previously inline here, which meant the only way to
+      # discover the spec was stale was to open a pull request and wait.
       - name: Fail if the committed spec is stale
         run: |
-          generated="services/${{ matrix.service }}/target/openapi/${{ matrix.service }}.json"
-          committed="docs/api/${{ matrix.service }}.json"
-          if ! diff -u "$committed" "$generated"; then
+          bash infra/scripts/check-api-drift.sh             "services/${{ matrix.service }}/target/openapi/${{ matrix.service }}.json"             "docs/api/${{ matrix.service }}.json"
+
+  api-compat:
+    name: API compatibility
+    runs-on: ubuntu-latest
+    needs: changes
+    # Pull requests only: it compares this branch's contract against the base's. On a push to
+    # main there is no "before" that means anything -- main IS the contract.
+    if: github.event_name == 'pull_request' && needs.changes.outputs.services == 'true'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # Both sides of the comparison have to exist locally.
+          fetch-depth: 0
+
+      # Proves the gate can still fail. A compatibility check that has quietly stopped detecting
+      # anything reports success on every breaking change ever made, and this repository has now
+      # found that shape four times (#2, #113, #155, #211). Ten synthetic cases, five that must
+      # break and five that must not.
+      - name: Self-test the checker
+        run: python3 infra/scripts/check-api-breaking.py --self-test
+
+      - name: Compare the contract against the base branch
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          failed=0
+          for service in core gateway; do
+            committed="docs/api/${service}.json"
+            echo "=================================================================="
+            echo " ${service}"
+            echo "=================================================================="
+            if ! git cat-file -e "${base}:${committed}" 2>/dev/null; then
+              echo "  no ${committed} on the base branch -- nothing to compare against."
+              continue
+            fi
+            git show "${base}:${committed}" > "/tmp/${service}-base.json"
+            if ! python3 infra/scripts/check-api-breaking.py "/tmp/${service}-base.json" "${committed}"; then
+              failed=1
+            fi
             echo ""
-            echo "::error::docs/api/${{ matrix.service }}.json is out of date."
-            echo "Regenerate it with: make api-spec"
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::This pull request breaks the published API contract."
             exit 1
           fi
 
@@ -259,7 +300,10 @@ jobs:
     # the default `success()` would skip the gate too, and a skipped gate is
     # fine for protection but tells nobody anything.
     if: always()
-    needs: [changes, build, client]
+    # api-compat is in this list deliberately. `services` is the REQUIRED status check on main,
+    # so a job missing from here can fail while the gate still reports success -- which is the
+    # exact failure T-0.7 found in branch protection itself.
+    needs: [changes, build, api-compat, client]
     steps:
       - name: Fail if any services job did not succeed
         env:
