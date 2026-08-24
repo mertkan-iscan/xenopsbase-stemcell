@@ -354,13 +354,46 @@ spring:
           # way nobody has yet looked at, and THAT is the open question -- not
           # which regex to write.
           #
-          # HOW TO SETTLE IT IN ONE READ, no deploy and no config change. While
-          # this value is '.*' the gateway already appends what it sees as the
-          # peer to X-Forwarded-For before forwarding (XForwardedHeadersFilter,
-          # isForEnabled/isForAppend). So the LAST entry of the X-Forwarded-For
-          # that CORE receives is literally the string this pattern must match.
-          # Make one request through the public hostname and read it at core.
-          # Do not narrow this until that string is known.
+          # SETTLED ON THE LIVE CLUSTER, 2026-08-24. IT CANNOT BE NARROWED.
+          #
+          # `trusted-proxies` is read by TWO layers that see DIFFERENT addresses,
+          # and one value has to serve both:
+          #
+          #   1. gatewayNettyServerCustomizer, gated on
+          #      `httpserver.customizer-enabled`. It matches the REAL TCP peer,
+          #      and decides whether Netty applies the forwarded headers to the
+          #      gateway's own view of the request.
+          #
+          #   2. XForwardedHeadersFilter and ForwardedHeadersFilter. They match
+          #      `request.getRemoteAddress()` -- which layer 1 has ALREADY
+          #      rewritten to the client's address -- and decide what is
+          #      forwarded on to core.
+          #
+          # Measured, with the customizer on and this set to the pod CIDR:
+          #
+          #   layer 1 saw  10.42.2.9      the ingress-nginx pod: trusted, correct
+          #   layer 2 saw  81.214.48.36   the browser: NOT trusted, headers stripped
+          #
+          # and core immediately produced
+          #
+          #   <http://core:8081/api/documents?page=1&size=1>; rel="next"
+          #
+          # which is #170's regression exactly. The new smoke check caught it in
+          # four seconds; in August it took a person reading a header and a day
+          # to revert.
+          #
+          # So the two layers cannot be satisfied by one pattern:
+          #   narrow  -> layer 1 right, layer 2 strips every forwarded header
+          #   '.*'    -> both trust everything, which is where this sits
+          #
+          # THE TRUST DECISION THEREFORE LIVES AT THE EDGE, and already does:
+          # Cloudflare overwrites X-Forwarded-Host, and the ingress strips
+          # X-Forwarded-Prefix (platform/envs/dev/apps/ingress-nginx.yaml). This
+          # value is not the control it looks like, and changing it is not the
+          # improvement it looks like.
+          #
+          # Three attempts have now been made here. The first two were
+          # inferences; this one was measured, and the measurement says stop.
           #
           # See alternatives in https://github.com/spring-cloud/spring-cloud-gateway/issues/3818
           trusted-proxies: '.*'

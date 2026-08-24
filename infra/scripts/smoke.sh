@@ -67,7 +67,8 @@ ok()   { echo "  PASS  $1"; PASSED=$((PASSED + 1)); }
 # a page of markup -- which is how a failing suite becomes one nobody reads.
 bad() {
   echo "  FAIL  $1"
-  echo "        $(printf '%s' "$2" | tr -d '' | tr '
+  echo "        $(printf '%s' "$2" | tr -d '
+' | tr '
 ' ' ' | tr -s ' ' | cut -c1-160)"
   FAILED=$((FAILED + 1))
 }
@@ -180,6 +181,40 @@ if [ "$code" = "200" ]; then
   ok "an authenticated call reaches core through the gateway"
 else
   bad "an authenticated call reaches core" "got ${code}: $(head -c 200 "$WORK/list.json")"
+fi
+
+# ---------------------------------------------------------------------------
+# 4b. The absolute URLs core hands back point at the PUBLIC hostname over https
+#
+# This is the check that was missing when it was most needed. T-3.15 narrowed
+# `trusted-proxies`, the gateway stopped forwarding X-Forwarded-* to core, and
+# core built its pagination Link header from its own in-cluster address:
+#
+#   <http://core:8081/api/documents?page=1&size=2>; rel="next"
+#
+# The whole suite passed. Every check above still passes with the forwarded
+# headers stripped entirely -- verified deliberately on 2026-08-24 -- because
+# nothing looked at a URL core generated. The regression was caught by a human
+# reading a header, and reverted a day later (#170).
+#
+# A client following that Link leaves the public hostname for a name that does
+# not resolve outside the cluster, over plaintext. That is a broken API
+# contract (T-3.8) and it is invisible to every other assertion here.
+#
+# Paged deliberately: RFC 8288 Link headers only appear when there is another
+# page, so `size=1` is what makes the header exist at all.
+links="$(curl -s -D - -o /dev/null --max-time 30   "${AUTHED[@]}" "${APP}/services/core/api/documents?page=0&size=1"   | tr -d '' | sed -n 's/^[Ll]ink: //p')"
+
+if [ -z "$links" ]; then
+  # Not a failure: with fewer than two documents there is no next page and no
+  # header. Saying so is better than a pass that inspected nothing.
+  ok "pagination Link header absent (fewer than 2 documents to page over)"
+elif printf '%s' "$links" | grep -q "http://"; then
+  bad "core builds absolute https URLs" "Link contains a plaintext URL: ${links}"
+elif printf '%s' "$links" | grep -q "${APP#https://}"; then
+  ok "core builds absolute https URLs at the public hostname"
+else
+  bad "core builds absolute https URLs" "Link does not name ${APP#https://}: ${links}"
 fi
 
 # ---------------------------------------------------------------------------
