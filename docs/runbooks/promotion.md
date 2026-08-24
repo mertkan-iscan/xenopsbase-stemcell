@@ -78,10 +78,21 @@ failure only if it persists.
 
 ### Two things to know before you trust it
 
-**It is not in CI, and it cannot be.** The Kubernetes API is a tailnet address with 6443 closed on
-every public IP (T-1.5), so no GitHub-hosted runner can reach it. Nothing automatic fails when a
-deploy does not land — somebody has to run the command and look. **The loop is open**, deliberately
-recorded as [#195](https://github.com/mertkan-iscan/xenopsbase-stemcell/issues/195).
+**It is now also in CI, and the loop is closed.** The `Deploy status` workflow runs on any merge
+touching `platform/envs/**` and asks this same question automatically, so a promotion that fails to
+reconcile is no longer indistinguishable from one that worked (T-6.7, #195).
+
+It works by having the runner **join the tailnet for the length of the job**. That does not widen
+the public surface — 6443 stays closed to the internet and the runner is a peer, not a hole — but it
+does put a GitHub-hosted machine briefly inside the private network, which is the honest cost.
+
+Two things it deliberately does not treat as failures. **No cluster is a pass**: `make down` between
+sessions is the intended lifecycle, so most merges land with nothing to reconcile against, and a
+check that failed every time would be ignored within a week. And **"not yet" is not "failed"**: Argo
+CD polls git about every three minutes, so the workflow waits ten before concluding a commit never
+arrived.
+
+Running it by hand still works and is still the faster answer when you are already at a terminal.
 
 **`postgres` currently reports OutOfSync on a healthy cluster**, so `rollout-status` fails against
 dev today. That is the check working — the drift is real — but a check that always fails is one

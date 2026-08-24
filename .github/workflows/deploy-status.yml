@@ -1,0 +1,149 @@
+name: Deploy status
+
+# Did the commit that just merged actually reach the cluster? (T-6.7, #195)
+#
+# THE LOOP THIS CLOSES
+#
+# Promotion is a git operation with an approval gate (T-6.3). The commit merges,
+# the workflow goes green, and whether Argo CD ever applied it was observed by
+# nobody: a promotion that silently failed to reconcile looked exactly like one
+# that worked. `make rollout-status` asked the right question, from a machine
+# that could reach the answer, and only when somebody remembered.
+#
+# WHY THIS CAN RUN AT ALL NOW
+#
+# The Kubernetes API is a tailnet address and 6443 is closed on every public IP
+# (T-1.5, ADR-0006). A GitHub-hosted runner is not on the tailnet, which is why
+# T-6.3 could not do this.
+#
+# The runner now JOINS the tailnet for the duration of the job. That does not
+# widen the public surface -- 6443 stays closed to the internet, and the runner
+# is a peer rather than a hole. It does widen who is briefly inside the private
+# network, which is the honest cost and is recorded on #195.
+#
+# The auth key is the one added for terraform in T-1.17, and it is EPHEMERAL:
+# verified by observing that the previous cluster's three nodes disappeared from
+# the tailnet after a rebuild rather than accumulating. So a runner registers,
+# does its work, and is removed when it disconnects. A non-ephemeral key would
+# leave a device per CI run for ever, and that check is worth repeating if the
+# key is ever replaced.
+#
+# THE CLUSTER IS USUALLY DOWN, AND THAT IS NOT A FAILURE
+#
+# `make down` at the end of a session is the intended lifecycle (ADR-0002), so
+# most merges land with no cluster at all. A deploy check that failed every time
+# would be noise within a week, and a noisy check is one people learn to ignore
+# -- the shape this repository keeps finding. So the absence of a cluster is
+# detected first, reported, and passes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'platform/envs/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to check'
+        required: false
+        default: 'dev'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # One at a time. Two of these racing would ask Argo CD about different
+  # commits and disagree, and the older one could report a failure that the
+  # newer one has already fixed.
+  group: deploy-status-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  reached:
+    name: did the deploy land
+    runs-on: ubuntu-latest
+    env:
+      ENVIRONMENT: ${{ inputs.environment || 'dev' }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # Before joining anything. If there is no cluster there is nothing to
+      # verify, and no reason to put a runner on the tailnet to find that out.
+      - name: Is there a cluster at all?
+        id: cluster
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: |
+          count="$(curl -sS -H "Authorization: Bearer ${HCLOUD_TOKEN}" \
+            'https://api.hetzner.cloud/v1/servers?per_page=1' \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["meta"]["pagination"]["total_entries"])')"
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+          if [ "${count}" -eq 0 ]; then
+            echo "::notice::No cluster is running, so there is nothing to reconcile against."
+            echo "This is the normal state between working sessions (ADR-0002)."
+          else
+            echo "${count} server(s) running — checking whether ${GITHUB_SHA} reached them."
+          fi
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        if: steps.cluster.outputs.count != '0'
+        with:
+          terraform_version: 1.14.8
+
+      # From Terraform state in R2, over the public internet -- this does not
+      # need the tailnet, only the kubectl calls below do.
+      - name: Read the kubeconfig out of Terraform state
+        if: steps.cluster.outputs.count != '0'
+        working-directory: infra/terraform/cluster
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          terraform init -input=false -reconfigure \
+            -backend-config=backend.hcl \
+            -backend-config="key=${ENVIRONMENT}/cluster.tfstate"
+          terraform output -raw kubeconfig > kubeconfig
+          chmod 600 kubeconfig
+          test -s kubeconfig
+
+      - name: Join the tailnet
+        if: steps.cluster.outputs.count != '0'
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          # Hostname only, deliberately no --advertise-tags. A tag has to be
+          # authorised for the key in the tailnet ACL, and this is the untagged
+          # node key from T-1.17: advertising tag:ci with it fails the join
+          # outright rather than degrading. Tagging is the better end state --
+          # it would let ACLs treat a runner differently from a cluster node --
+          # and it needs an ACL change and a key minted for it, which is a
+          # decision rather than plumbing.
+          #
+          # The hostname still makes the device identifiable while it exists,
+          # and it exists only for the length of the job.
+          args: --hostname=gh-runner-${{ github.run_id }}
+
+      - name: Did the cluster reach this commit?
+        if: steps.cluster.outputs.count != '0'
+        env:
+          # rollout-status.sh polls internally until this expires, so it does
+          # the waiting rather than a retry loop here. Ten minutes because Argo
+          # CD polls git roughly every three: "not yet" is the expected answer
+          # for the first couple of attempts and must not read as a failure,
+          # which is the distinction #195 asked for. A timeout means it never
+          # arrived; a Degraded application means it arrived and broke. The
+          # script says which.
+          ROLLOUT_TIMEOUT: "600"
+        run: |
+          if bash infra/scripts/rollout-status.sh "${ENVIRONMENT}" "${GITHUB_SHA}"; then
+            echo "::notice::${GITHUB_SHA} is live in ${ENVIRONMENT}."
+          else
+            echo ""
+            echo "::error::${GITHUB_SHA} is not live in ${ENVIRONMENT} after 10 minutes."
+            echo "Argo CD polls about every 3 minutes, so this is longer than lag."
+            echo "The output above names which application is not Synced or not Healthy."
+            echo "To force one:"
+            echo "  kubectl -n argocd patch application <name> --type merge -p '{\"operation\":{\"sync\":{}}}'"
+            exit 1
+          fi
