@@ -38,6 +38,16 @@ a pet**: nothing that matters may live inside it, and no state may be created by
 | Keycloak realm definition (git) | Issued sessions and tokens |
 | All manifests and Helm values (git, GitOps) | Grafana dashboards at runtime |
 | Container images (GHCR) | Loki index — chunks go to object storage |
+| OS snapshot (Packer-built, Hetzner) | |
+| Cloudflare edge — tunnel, DNS, Access, rulesets | |
+| Object storage buckets, policies and lifecycle rules | |
+| Mail DNS — Brevo, DMARC | |
+| The age private keys — without them nothing decrypts | |
+
+The bottom five rows survive `make down` because it destroys the cluster module and nothing else.
+They were added by [ADR-0008](docs/adr/0008-durable-state-outside-terraform.md), which amends
+ADR-0002 after an audit found the original table had been assembled by asking what lives *in* the
+cluster — a question that cannot find state living outside it.
 
 The payoff: **cold rebuild from nothing is the everyday path, not a rare fire drill.** The DR test
 and the deploy pipeline are the same code, exercised every time work starts.
@@ -100,6 +110,10 @@ reproduces from nothing.
   - [ADR-0004](docs/adr/0004-gitops-engine.md) — Argo CD, app-of-apps
   - [ADR-0005](docs/adr/0005-terraform-state-backend.md) — Terraform state in Cloudflare R2
   - [ADR-0006](docs/adr/0006-tailscale-node-transport.md) — Tailscale transport, no public API endpoint
+  - [ADR-0007](docs/adr/0007-postgres-backup-mechanism.md) — Postgres backs up through the Barman Cloud plugin
+  - [ADR-0008](docs/adr/0008-durable-state-outside-terraform.md) — durable state Terraform does not create; amends ADR-0002
+  - [ADR-0009](docs/adr/0009-in-memory-store.md) — Valkey is the in-memory store, and it is disposable
+  - [ADR-0010](docs/adr/0010-user-identity-durability.md) — user identity is durable; declared users carry explicit ids
 - Spikes
   - [T-3.1 JHipster](docs/spikes/t-3.1-jhipster.md) — what it generates, what gets deleted, and why
 - [CHANGELOG.md](CHANGELOG.md) — what moved away from the generated defaults, and why
