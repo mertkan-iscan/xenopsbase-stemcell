@@ -135,7 +135,12 @@ jobs:
           #
           # The hostname still makes the device identifiable while it exists,
           # and it exists only for the length of the job.
-          args: --hostname=gh-runner-${{ github.run_id }}
+          # The action's own input, NOT `args: --hostname=...`. The action
+          # builds the `tailscale up` command itself, so passing the flag
+          # through args conflicts with it and `tailscale up` exits printing
+          # its usage -- which reads like a broken key rather than a duplicated
+          # argument.
+          hostname: gh-runner-${{ github.run_id }}
 
       - name: Did the cluster reach this commit?
         if: steps.cluster.outputs.count != '0'
