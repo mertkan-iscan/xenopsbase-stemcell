@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.Properties;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.config.YamlPropertiesFactoryBean;
@@ -90,6 +91,65 @@ class GatewayRouteConfigurationTest {
         assertThat(config.stringPropertyNames())
             .as("management exposure must include prometheus")
             .anyMatch(key -> key.startsWith("management.endpoints.web.exposure.include") && "prometheus".equals(config.getProperty(key)));
+    }
+
+    // -----------------------------------------------------------------------
+    // The path contract between this gateway and core (T-5.4, #43).
+    //
+    // These two values together decide the URL every consumer calls and the URL core receives.
+    // The gateway does not hold a typed client for core -- it proxies -- so this route table IS
+    // the whole gateway-side contract, and it is expressed in configuration where nothing
+    // compiles against it.
+    //
+    // Changing either silently relocates the entire API. docs/api/core.json would not move,
+    // because core still serves the same paths; it is the public prefix that changed, and no
+    // spec in this repository describes that mapping. The drift and compatibility checks on
+    // core's spec cannot see it.
+
+    @Test
+    void coreIsExposedUnderTheDocumentedPublicPrefix() {
+        // /services/core/** is baked into every consumer's base URL, the Cloudflare Access
+        // application path, and the smoke tests.
+        assertThat(shorthand("predicates", "Path")).as("the public prefix consumers depend on").isEqualTo("/services/core/**");
+    }
+
+    @Test
+    void exactlyTwoSegmentsAreStrippedBeforeCoreSeesTheRequest() {
+        // /services/core/api/documents -> /api/documents. One too few and core receives
+        // /core/api/documents and answers 404; one too many and it receives /documents. Both are
+        // total outages of every route through this gateway, from a single digit.
+        assertThat(shorthand("filters", "StripPrefix")).as("StripPrefix must remove exactly /services/core").isEqualTo("2");
+    }
+
+    @Test
+    void thePublicPrefixAndTheStripCountAgree() {
+        // The real invariant, asserted as a relationship rather than as two literals: the number
+        // of fixed segments in the pattern must equal the number stripped. Written this way the
+        // test keeps holding if the prefix is renamed, and keeps failing if only one of the two is
+        // changed -- which is the mistake that actually gets made.
+        String pattern = shorthand("predicates", "Path");
+        long fixedSegments = Arrays.stream(pattern.split("/"))
+            .filter(part -> !part.isEmpty() && !part.contains("*"))
+            .count();
+
+        assertThat(shorthand("filters", "StripPrefix"))
+            .as("pattern %s has %d fixed segments, so StripPrefix must remove that many", pattern, fixedSegments)
+            .isEqualTo(String.valueOf(fixedSegments));
+    }
+
+    /**
+     * Reads the shorthand route syntax, {@code - Path=/services/core/**}, which is a plain string
+     * rather than the {@code name:}/{@code args:} form the resilience filters use. Both are valid
+     * and this route table contains both.
+     */
+    private String shorthand(String kind, String name) {
+        for (int i = 0; i < 20; i++) {
+            String value = config.getProperty(ROUTE + "." + kind + "[" + i + "]");
+            if (value != null && value.startsWith(name + "=")) {
+                return value.substring(name.length() + 1);
+            }
+        }
+        return null;
     }
 
     private String filterNames() {
