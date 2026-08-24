@@ -1,11 +1,11 @@
 package com.xenopsoftware.core.domain;
 
 import jakarta.persistence.*;
-import org.hibernate.annotations.SoftDelete;
-import org.hibernate.annotations.TenantId;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import java.time.Instant;
+import org.hibernate.annotations.SoftDelete;
+import org.hibernate.annotations.TenantId;
 
 /**
  * ============================================================================

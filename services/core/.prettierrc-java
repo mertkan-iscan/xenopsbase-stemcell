@@ -1,0 +1,25 @@
+# Java formatting, used by Spotless (T-4.3, #37).
+#
+# WHY THIS FILE EXISTS SEPARATELY FROM .prettierrc
+#
+# .prettierrc sets tabWidth 2 and raises it to 4 for "*.java" through its
+# `overrides` section. Spotless's prettier bridge does NOT apply `overrides`:
+# it hands prettier the file content without the path context the override
+# matches on, so Java comes back indented at 2.
+#
+# Measured, because the failure is silent and total:
+#
+#   Spotless -> .prettierrc        87 of 99 files "need changes"
+#   Spotless -> this file          25 of 99, matching `npx prettier --check`
+#
+# So pointing Spotless at .prettierrc would have reindented the whole codebase
+# and reported success. This file states the Java values flatly, with no
+# overrides to lose.
+#
+# .prettierrc remains the config for everything else and for `npx prettier`
+# run by hand. The two must agree on Java: printWidth 140, tabWidth 4.
+printWidth: 140
+tabWidth: 4
+useTabs: false
+plugins:
+  - prettier-plugin-java

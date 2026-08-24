@@ -66,8 +66,12 @@ class GatewayRouteConfigurationTest {
     void everyOutboundCallHasAnExplicitTimeout() {
         // Reactor Netty's defaults are effectively unbounded. Unset here does not mean "sensible
         // default", it means a downstream that stops answering holds connections indefinitely.
-        assertThat(config.getProperty(HTTPCLIENT + ".connect-timeout")).as("connect timeout").isNotBlank();
-        assertThat(config.getProperty(HTTPCLIENT + ".response-timeout")).as("response timeout").isNotBlank();
+        assertThat(config.getProperty(HTTPCLIENT + ".connect-timeout"))
+            .as("connect timeout")
+            .isNotBlank();
+        assertThat(config.getProperty(HTTPCLIENT + ".response-timeout"))
+            .as("response timeout")
+            .isNotBlank();
     }
 
     @Test
@@ -85,9 +89,7 @@ class GatewayRouteConfigurationTest {
         // actually read them: instrumentation nothing scrapes is instrumentation nobody sees.
         assertThat(config.stringPropertyNames())
             .as("management exposure must include prometheus")
-            .anyMatch(key ->
-                key.startsWith("management.endpoints.web.exposure.include") && "prometheus".equals(config.getProperty(key))
-            );
+            .anyMatch(key -> key.startsWith("management.endpoints.web.exposure.include") && "prometheus".equals(config.getProperty(key)));
     }
 
     private String filterNames() {

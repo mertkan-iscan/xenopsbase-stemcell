@@ -39,8 +39,9 @@ class InfraUsageResourceIT {
     void anOrdinaryUserCannotReadInfrastructureUsage() throws Exception {
         mockMvc
             .perform(
-                get(PATH)
-                    .with(SecurityMockMvcRequestPostProcessors.jwt().authorities(new SimpleGrantedAuthority(AuthoritiesConstants.USER)))
+                get(PATH).with(
+                    SecurityMockMvcRequestPostProcessors.jwt().authorities(new SimpleGrantedAuthority(AuthoritiesConstants.USER))
+                )
             )
             .andExpect(status().isForbidden());
     }
@@ -58,8 +59,9 @@ class InfraUsageResourceIT {
     void anUnconfiguredPrometheusIsReportedRatherThanRenderedAsZero() throws Exception {
         mockMvc
             .perform(
-                get(PATH)
-                    .with(SecurityMockMvcRequestPostProcessors.jwt().authorities(new SimpleGrantedAuthority(AuthoritiesConstants.ADMIN)))
+                get(PATH).with(
+                    SecurityMockMvcRequestPostProcessors.jwt().authorities(new SimpleGrantedAuthority(AuthoritiesConstants.ADMIN))
+                )
             )
             .andExpect(status().isNotImplemented())
             .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("prometheus-url")));

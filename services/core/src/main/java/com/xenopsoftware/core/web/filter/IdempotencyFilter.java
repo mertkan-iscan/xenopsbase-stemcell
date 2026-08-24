@@ -233,12 +233,10 @@ public class IdempotencyFilter extends OncePerRequestFilter {
     private static void problem(HttpServletResponse response, HttpStatus status, String title, String detail) throws IOException {
         response.setStatus(status.value());
         response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
-        response
-            .getWriter()
-            .write(
-                """
-                {"type":"about:blank","title":"%s","status":%d,"detail":"%s"}""".formatted(title, status.value(), detail)
-            );
+        response.getWriter().write(
+            """
+            {"type":"about:blank","title":"%s","status":%d,"detail":"%s"}""".formatted(title, status.value(), detail)
+        );
     }
 
     /**
@@ -288,7 +286,9 @@ public class IdempotencyFilter extends OncePerRequestFilter {
 
         @Override
         public java.io.BufferedReader getReader() {
-            return new java.io.BufferedReader(new java.io.InputStreamReader(new java.io.ByteArrayInputStream(body), StandardCharsets.UTF_8));
+            return new java.io.BufferedReader(
+                new java.io.InputStreamReader(new java.io.ByteArrayInputStream(body), StandardCharsets.UTF_8)
+            );
         }
     }
 

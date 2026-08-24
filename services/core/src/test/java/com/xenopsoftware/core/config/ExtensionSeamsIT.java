@@ -78,7 +78,7 @@ class ExtensionSeamsIT {
         // to String throws -- which reads as an audit failure rather than as a JDBC type detail.
         List<Map<String, Object>> entries = jdbcTemplate.queryForList(
             "select entity_type, entity_id, action, actor, actor_name, payload::text as payload " +
-            "from audit_log where entity_type = 'ExampleItem'"
+                "from audit_log where entity_type = 'ExampleItem'"
         );
 
         assertThat(entries).as("an entity with no audit annotation must still be audited").hasSize(1);
@@ -106,18 +106,16 @@ class ExtensionSeamsIT {
     @Test
     void auditEntriesRollBackWithTheChangeTheyDescribe() {
         assertThatThrownBy(() ->
-                transactionTemplate.execute(status -> {
-                    exampleItemRepository.save(newItem("doomed"));
-                    exampleItemRepository.flush();
-                    throw new IllegalStateException("forced rollback");
-                })
-            ).hasMessageContaining("forced rollback");
+            transactionTemplate.execute(status -> {
+                exampleItemRepository.save(newItem("doomed"));
+                exampleItemRepository.flush();
+                throw new IllegalStateException("forced rollback");
+            })
+        ).hasMessageContaining("forced rollback");
 
         // The alternative -- writing audit rows after commit -- would leave this entry describing
         // a change that never happened. An audit log that records fiction is worse than none.
-        assertThat(jdbcTemplate.queryForObject("select count(*) from audit_log", Integer.class))
-            .as("no change, no audit entry")
-            .isZero();
+        assertThat(jdbcTemplate.queryForObject("select count(*) from audit_log", Integer.class)).as("no change, no audit entry").isZero();
     }
 
     @Test
@@ -189,22 +187,24 @@ class ExtensionSeamsIT {
             return saved;
         });
 
-        assertThat(outboxRepository.findAll()).singleElement().satisfies(message -> {
-            assertThat(message.getMessageType()).isEqualTo("example.created");
-            assertThat(message.getPublishedAt()).as("recorded, not yet published").isNull();
-            assertThat(message.getPayload()).contains("published");
-        });
+        assertThat(outboxRepository.findAll())
+            .singleElement()
+            .satisfies(message -> {
+                assertThat(message.getMessageType()).isEqualTo("example.created");
+                assertThat(message.getPublishedAt()).as("recorded, not yet published").isNull();
+                assertThat(message.getPayload()).contains("published");
+            });
     }
 
     @Test
     void aRolledBackChangeAnnouncesNothing() {
         assertThatThrownBy(() ->
-                transactionTemplate.execute(status -> {
-                    ExampleItem saved = exampleItemRepository.save(newItem("never"));
-                    outboxService.record("example.created", "ExampleItem", String.valueOf(saved.getId()), Map.of());
-                    throw new IllegalStateException("forced rollback");
-                })
-            ).hasMessageContaining("forced rollback");
+            transactionTemplate.execute(status -> {
+                ExampleItem saved = exampleItemRepository.save(newItem("never"));
+                outboxService.record("example.created", "ExampleItem", String.valueOf(saved.getId()), Map.of());
+                throw new IllegalStateException("forced rollback");
+            })
+        ).hasMessageContaining("forced rollback");
 
         // The failure this pattern exists to prevent: an event announcing something that did not
         // happen. Publishing to a broker inline could not offer this.
@@ -217,8 +217,9 @@ class ExtensionSeamsIT {
         // Propagation.MANDATORY. Without it this would open its own transaction and commit the
         // message independently of any change -- silently removing the only guarantee the outbox
         // provides, while appearing to work.
-        assertThatThrownBy(() -> outboxService.record("orphan", "None", "1", Map.of()))
-            .isInstanceOf(org.springframework.transaction.IllegalTransactionStateException.class);
+        assertThatThrownBy(() -> outboxService.record("orphan", "None", "1", Map.of())).isInstanceOf(
+            org.springframework.transaction.IllegalTransactionStateException.class
+        );
 
         assertThat(outboxRepository.findAll()).isEmpty();
     }

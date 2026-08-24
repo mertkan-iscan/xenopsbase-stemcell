@@ -73,20 +73,13 @@ class RealTokenAuthorizationIT {
     /** A real password grant against the realm's own automation client. */
     private static String tokenFor(String username) throws Exception {
         String body =
-            "grant_type=password&client_id=" +
-            KeycloakTestcontainer.TEST_CLIENT_ID +
-            "&username=" +
-            username +
-            "&password=" +
-            PASSWORD;
+            "grant_type=password&client_id=" + KeycloakTestcontainer.TEST_CLIENT_ID + "&username=" + username + "&password=" + PASSWORD;
 
-        HttpResponse<String> response = HttpClient
-            .newBuilder()
+        HttpResponse<String> response = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build()
             .send(
-                HttpRequest
-                    .newBuilder(URI.create(KeycloakTestcontainer.issuerUri() + "/protocol/openid-connect/token"))
+                HttpRequest.newBuilder(URI.create(KeycloakTestcontainer.issuerUri() + "/protocol/openid-connect/token"))
                     .header("Content-Type", "application/x-www-form-urlencoded")
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build(),
@@ -132,25 +125,23 @@ class RealTokenAuthorizationIT {
     @Test
     @DisplayName("a real user token reaches an authenticated endpoint")
     void realUserTokenIsAccepted() throws Exception {
-        mvc
-            .perform(get("/api/example-items").header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenFor("smoke")))
-            .andExpect(status().isOk());
+        mvc.perform(get("/api/example-items").header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenFor("smoke"))).andExpect(status().isOk());
     }
 
     @Test
     @DisplayName("a real user token is REFUSED the admin endpoint")
     void realUserTokenIsRefusedAdmin() throws Exception {
-        mvc
-            .perform(get("/api/admin/example-items").header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenFor("smoke")))
-            .andExpect(status().isForbidden());
+        mvc.perform(get("/api/admin/example-items").header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenFor("smoke"))).andExpect(
+            status().isForbidden()
+        );
     }
 
     @Test
     @DisplayName("a real admin token reaches the admin endpoint, so the rule is not denying everyone")
     void realAdminTokenReachesAdmin() throws Exception {
-        mvc
-            .perform(get("/api/admin/example-items").header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenFor("smoke-admin")))
-            .andExpect(status().isOk());
+        mvc.perform(get("/api/admin/example-items").header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenFor("smoke-admin"))).andExpect(
+            status().isOk()
+        );
     }
 
     @Test
@@ -158,8 +149,8 @@ class RealTokenAuthorizationIT {
     void forgedTokenIsRefused() throws Exception {
         String forged = tokenFor("smoke-admin") + "tampered";
 
-        mvc
-            .perform(get("/api/admin/example-items").header(HttpHeaders.AUTHORIZATION, "Bearer " + forged))
-            .andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/admin/example-items").header(HttpHeaders.AUTHORIZATION, "Bearer " + forged)).andExpect(
+            status().isUnauthorized()
+        );
     }
 }

@@ -19,11 +19,14 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.core.convert.converter.Converter;
+import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.config.annotation.method.configuration.EnableReactiveMethodSecurity;
 import org.springframework.security.config.web.server.SecurityWebFiltersOrder;
@@ -47,16 +50,15 @@ import org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.security.oauth2.jwt.*;
 import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtAuthenticationConverter;
-import org.springframework.http.MediaType;
+import org.springframework.security.web.server.DelegatingServerAuthenticationEntryPoint;
 import org.springframework.security.web.server.SecurityWebFilterChain;
 import org.springframework.security.web.server.ServerAuthenticationEntryPoint;
-import org.springframework.security.web.server.DelegatingServerAuthenticationEntryPoint;
 import org.springframework.security.web.server.authentication.RedirectServerAuthenticationEntryPoint;
-import org.springframework.security.web.server.util.matcher.MediaTypeServerWebExchangeMatcher;
 import org.springframework.security.web.server.csrf.CookieServerCsrfTokenRepository;
 import org.springframework.security.web.server.csrf.ServerCsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.server.header.ReferrerPolicyServerHttpHeadersWriter;
 import org.springframework.security.web.server.header.XFrameOptionsServerHttpHeadersWriter.Mode;
+import org.springframework.security.web.server.util.matcher.MediaTypeServerWebExchangeMatcher;
 import org.springframework.security.web.server.util.matcher.NegatedServerWebExchangeMatcher;
 import org.springframework.security.web.server.util.matcher.OrServerWebExchangeMatcher;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -64,8 +66,6 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import tech.jhipster.config.JHipsterProperties;
 import tech.jhipster.web.filter.reactive.CookieCsrfFilter;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 @Configuration
 @EnableReactiveMethodSecurity
@@ -268,10 +268,11 @@ public class SecurityConfiguration {
         // Only an explicit text/html now redirects, which is what the comment above always claimed.
         wantsHtml.setIgnoredMediaTypes(Set.of(MediaType.ALL));
 
-        DelegatingServerAuthenticationEntryPoint.DelegateEntry browserNavigation = new DelegatingServerAuthenticationEntryPoint.DelegateEntry(
-            wantsHtml,
-            new RedirectServerAuthenticationEntryPoint("/oauth2/authorization/oidc")
-        );
+        DelegatingServerAuthenticationEntryPoint.DelegateEntry browserNavigation =
+            new DelegatingServerAuthenticationEntryPoint.DelegateEntry(
+                wantsHtml,
+                new RedirectServerAuthenticationEntryPoint("/oauth2/authorization/oidc")
+            );
 
         DelegatingServerAuthenticationEntryPoint entryPoint = new DelegatingServerAuthenticationEntryPoint(browserNavigation);
         // Anything that did not ask for HTML -- fetch, curl, a service account -- gets the 401.
@@ -372,39 +373,36 @@ public class SecurityConfiguration {
         final Map<String, ReactiveJwtDecoder> accessTokenDecoders = new ConcurrentHashMap<>();
 
         return userRequest ->
-            delegate
-                .loadUser(userRequest)
-                .flatMap(user -> {
-                    ClientRegistration registration = userRequest.getClientRegistration();
-                    ReactiveJwtDecoder decoder = accessTokenDecoders.computeIfAbsent(
-                        registration.getRegistrationId(),
-                        ignored -> accessTokenDecoder(registration)
-                    );
+            delegate.loadUser(userRequest).flatMap(user -> {
+                ClientRegistration registration = userRequest.getClientRegistration();
+                ReactiveJwtDecoder decoder = accessTokenDecoders.computeIfAbsent(registration.getRegistrationId(), ignored ->
+                    accessTokenDecoder(registration)
+                );
 
-                    return decoder
-                        .decode(userRequest.getAccessToken().getTokenValue())
-                        .map(accessToken ->
-                            new DefaultOidcUser(
-                                new LinkedHashSet<>(SecurityUtils.extractAuthorityFromClaims(accessToken.getClaims())),
-                                user.getIdToken(),
-                                user.getUserInfo(),
-                                PREFERRED_USERNAME
-                            )
+                return decoder
+                    .decode(userRequest.getAccessToken().getTokenValue())
+                    .map(accessToken ->
+                        new DefaultOidcUser(
+                            new LinkedHashSet<>(SecurityUtils.extractAuthorityFromClaims(accessToken.getClaims())),
+                            user.getIdToken(),
+                            user.getUserInfo(),
+                            PREFERRED_USERNAME
                         )
-                        .onErrorMap(JwtException.class, e ->
-                            // Named, because the alternative is an authentication failure whose
-                            // cause reads as a generic OAuth error and sends the next person to
-                            // look at the login flow rather than at the token.
-                            new OAuth2AuthenticationException(
-                                new OAuth2Error(
-                                    "invalid_access_token",
-                                    "the access token could not be decoded, so the user's roles are unknown",
-                                    null
-                                ),
-                                e
-                            )
-                        );
-                });
+                    )
+                    .onErrorMap(JwtException.class, e ->
+                        // Named, because the alternative is an authentication failure whose
+                        // cause reads as a generic OAuth error and sends the next person to
+                        // look at the login flow rather than at the token.
+                        new OAuth2AuthenticationException(
+                            new OAuth2Error(
+                                "invalid_access_token",
+                                "the access token could not be decoded, so the user's roles are unknown",
+                                null
+                            ),
+                            e
+                        )
+                    );
+            });
     }
 
     /**

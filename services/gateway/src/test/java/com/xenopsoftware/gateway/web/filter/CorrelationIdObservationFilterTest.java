@@ -36,8 +36,9 @@ class CorrelationIdObservationFilterTest {
     void tagsTheSpanWithTheResponseHeader() {
         Observation.Context mapped = filter.map(context("a1b2c3d4"));
 
-        assertThat(mapped.getHighCardinalityKeyValue(CorrelationIdObservationFilter.SPAN_ATTRIBUTE))
-            .isEqualTo(KeyValue.of(CorrelationIdObservationFilter.SPAN_ATTRIBUTE, "a1b2c3d4"));
+        assertThat(mapped.getHighCardinalityKeyValue(CorrelationIdObservationFilter.SPAN_ATTRIBUTE)).isEqualTo(
+            KeyValue.of(CorrelationIdObservationFilter.SPAN_ATTRIBUTE, "a1b2c3d4")
+        );
     }
 
     @Test
@@ -45,8 +46,9 @@ class CorrelationIdObservationFilterTest {
     void doesNotAddTheIdAsALowCardinalityKeyValue() {
         Observation.Context mapped = filter.map(context("a1b2c3d4"));
 
-        assertThat(mapped.getLowCardinalityKeyValues().stream().map(KeyValue::getKey))
-            .doesNotContain(CorrelationIdObservationFilter.SPAN_ATTRIBUTE);
+        assertThat(mapped.getLowCardinalityKeyValues().stream().map(KeyValue::getKey)).doesNotContain(
+            CorrelationIdObservationFilter.SPAN_ATTRIBUTE
+        );
     }
 
     @Test
@@ -54,8 +56,9 @@ class CorrelationIdObservationFilterTest {
     void addsNothingWhenTheHeaderIsAbsent() {
         Observation.Context mapped = filter.map(context(null));
 
-        assertThat(mapped.getHighCardinalityKeyValues().stream().map(KeyValue::getKey))
-            .doesNotContain(CorrelationIdObservationFilter.SPAN_ATTRIBUTE);
+        assertThat(mapped.getHighCardinalityKeyValues().stream().map(KeyValue::getKey)).doesNotContain(
+            CorrelationIdObservationFilter.SPAN_ATTRIBUTE
+        );
     }
 
     @Test

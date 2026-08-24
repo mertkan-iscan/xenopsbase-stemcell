@@ -24,7 +24,6 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/exception-translator-test")
 public class ExceptionTranslatorTestController {
 
-
     @PostMapping("/method-argument")
     public void methodArgument(@Valid @RequestBody TestDTO testDTO) {
         // empty method

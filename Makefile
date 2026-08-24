@@ -520,6 +520,21 @@ secrets-rekey: ## Re-encrypt every secret to the CURRENT recipient list in .sops
 	done; \
 	bash $(SCRIPTS)/verify-secret-recipients.sh
 
+.PHONY: format
+format: ## Reformat every Java source file in the repository
+	@set -e; for m in core gateway; do 		echo "==> services/$$m"; 		( cd services/$$m && ./mvnw -q --batch-mode spotless:apply ); 	done; 	echo "formatted. `git diff --stat -- services/*/src | tail -1`"
+
+.PHONY: format-check
+format-check: ## Fail if any Java source file is not formatted (what CI runs)
+	@set -e; for m in core gateway; do 		echo "==> services/$$m"; 		( cd services/$$m && ./mvnw -q --batch-mode spotless:check ); 	done; 	echo "every Java file is formatted."
+
+.PHONY: hooks
+hooks: ## Install the git pre-commit hook (formatting + secret scanning)
+	@git config core.hooksPath .githooks
+	@echo "core.hooksPath = .githooks"
+	@echo "pre-commit will now run formatting and the secret scan."
+	@echo "To disable for one commit: git commit --no-verify"
+
 .PHONY: validate
 validate: ## Validate every Terraform root module without touching remote state
 	@set -e; for d in $(STORAGE_DIR) $(EDGE_DIR) $(CLUSTER_DIR); do \

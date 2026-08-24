@@ -765,16 +765,58 @@
                     <artifactId>spotless-maven-plugin</artifactId>
                     <version>${spotless-maven-plugin.version}</version>
                     <configuration>
+                        <!--
+                            THE FORMATTER IS PRETTIER, AND .prettierrc IS THE ONLY PLACE THE
+                            STYLE IS WRITTEN DOWN (T-4.3, #37).
+
+                            Before this, spotless ran `apply` on every build with an EMPTY
+                            <java> block: it rewrote nothing, failed on nothing, and reported
+                            success. Meanwhile .prettierrc declared a Java style that no
+                            command in the repository ever ran. Two halves of a formatter,
+                            neither connected to the other.
+
+                            prettier rather than a native Spotless formatter because the code
+                            is ALREADY in this style — JHipster generated it that way. Only
+                            25 of 99 files in core had drifted. Switching to palantir or
+                            google-java-format would have rewritten every file and made
+                            `git blame` useless across the whole codebase, to settle an
+                            argument nobody was having.
+
+                            `check`, not `apply`. A formatter bound to `apply` inside the
+                            build silently edits the tree while you are reading the output,
+                            so a dirty checkout looks like your own change. `make format`
+                            is the one command that rewrites; the build only ever judges.
+                        -->
                         <java>
-                            <!-- <removeUnusedImports/> -->
+                            <includes>
+                                <include>src/main/java/**/*.java</include>
+                                <include>src/test/java/**/*.java</include>
+                            </includes>
+                            <prettier>
+                                <devDependencies>
+                                    <prettier>3.9.5</prettier>
+                                    <prettier-plugin-java>2.10.2</prettier-plugin-java>
+                                    <prettier-plugin-packagejson>3.0.2</prettier-plugin-packagejson>
+                                </devDependencies>
+<!--
+                                    NOT <configFile>.prettierrc</configFile>. Spotless's prettier
+                                    bridge does not apply that file's `overrides` section, so Java
+                                    would be formatted at tabWidth 2 instead of 4 — 87 of 99 files
+                                    "needing changes" rather than 25. It would have reindented the
+                                    whole codebase and reported success. .prettierrc-java states
+                                    the same Java values flatly, with no overrides to lose, and
+                                    explains itself at the top.
+                                -->
+                                <configFile>${project.basedir}/.prettierrc-java</configFile>
+                            </prettier>
                         </java>
                     </configuration>
                     <executions>
                         <execution>
                             <id>spotless</id>
-                            <phase>process-sources</phase>
+                            <phase>validate</phase>
                             <goals>
-                                <goal>apply</goal>
+                                <goal>check</goal>
                             </goals>
                         </execution>
                     </executions>

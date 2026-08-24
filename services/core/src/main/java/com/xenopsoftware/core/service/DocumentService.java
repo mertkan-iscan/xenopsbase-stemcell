@@ -1,7 +1,7 @@
 package com.xenopsoftware.core.service;
 
-import com.xenopsoftware.core.config.ConditionalOnDocumentStorage;
 import com.xenopsoftware.core.config.ApplicationProperties;
+import com.xenopsoftware.core.config.ConditionalOnDocumentStorage;
 import com.xenopsoftware.core.domain.Document;
 import com.xenopsoftware.core.repository.DocumentRepository;
 import com.xenopsoftware.core.service.storage.DocumentStorage;
@@ -12,11 +12,11 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 

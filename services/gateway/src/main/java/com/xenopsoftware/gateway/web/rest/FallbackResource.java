@@ -60,8 +60,8 @@ public class FallbackResource {
         problem.setTitle("Service unavailable");
         problem.setDetail(
             "The %s service is not responding and its circuit is open. The request was not forwarded, so it had no effect.".formatted(
-                    service
-                )
+                service
+            )
         );
         // "It had no effect" is the part a caller needs. A timeout leaves them unable to tell
         // whether the work happened; a short-circuited request definitively did not.

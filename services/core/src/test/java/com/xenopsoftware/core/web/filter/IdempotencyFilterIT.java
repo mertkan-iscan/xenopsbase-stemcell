@@ -139,7 +139,9 @@ class IdempotencyFilterIT {
         MvcResult result = createDocument(USER, "key-body", "readable.txt");
 
         assertThat(result.getResponse().getStatus()).isEqualTo(201);
-        assertThat(documentRepository.findAll()).singleElement().satisfies(d -> assertThat(d.getFilename()).isEqualTo("readable.txt"));
+        assertThat(documentRepository.findAll())
+            .singleElement()
+            .satisfies(d -> assertThat(d.getFilename()).isEqualTo("readable.txt"));
     }
 
     @Test

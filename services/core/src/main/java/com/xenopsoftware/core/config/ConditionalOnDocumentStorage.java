@@ -26,5 +26,4 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 @Target({ ElementType.TYPE, ElementType.METHOD })
 @Retention(RetentionPolicy.RUNTIME)
 @ConditionalOnProperty(prefix = "application.storage", name = "bucket")
-public @interface ConditionalOnDocumentStorage {
-}
+public @interface ConditionalOnDocumentStorage {}

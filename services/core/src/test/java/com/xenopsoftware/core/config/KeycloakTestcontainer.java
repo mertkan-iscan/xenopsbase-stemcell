@@ -76,8 +76,7 @@ public interface KeycloakTestcontainer {
         // connections well before the realm import finishes, so a port check hands tests a server
         // that 404s on the realm they are about to use.
         .waitingFor(
-            Wait
-                .forHttp("/realms/" + REALM + "/.well-known/openid-configuration")
+            Wait.forHttp("/realms/" + REALM + "/.well-known/openid-configuration")
                 .forPort(8080)
                 .forStatusCode(200)
                 .withStartupTimeout(Duration.ofMinutes(3))
@@ -137,8 +136,11 @@ public interface KeycloakTestcontainer {
                 candidate = candidate.getParent();
             }
             if (candidate == null) {
-                throw new IllegalStateException("could not locate the repository root: no ancestor of " +
-                    Path.of("").toAbsolutePath() + " contains a platform/ directory");
+                throw new IllegalStateException(
+                    "could not locate the repository root: no ancestor of " +
+                        Path.of("").toAbsolutePath() +
+                        " contains a platform/ directory"
+                );
             }
             return candidate;
         }

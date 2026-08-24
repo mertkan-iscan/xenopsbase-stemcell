@@ -119,13 +119,7 @@ class OidcLoginFlowIT {
         // are, and it is not enough", rather than a denial that would have happened anyway.
         gateway.get().uri("/management/loggers").accept(MediaType.APPLICATION_JSON).exchange().expectStatus().isUnauthorized();
 
-        gateway
-            .get()
-            .uri("/management/loggers")
-            .cookie("SESSION", login.authenticatedSession())
-            .exchange()
-            .expectStatus()
-            .isForbidden();
+        gateway.get().uri("/management/loggers").cookie("SESSION", login.authenticatedSession()).exchange().expectStatus().isForbidden();
     }
 
     /**
@@ -155,13 +149,7 @@ class OidcLoginFlowIT {
     void realmRolesReachTheSessionPrincipal() throws Exception {
         Login admin = signIn(KeycloakTestcontainer.ADMIN_USER);
 
-        gateway
-            .get()
-            .uri("/management/loggers")
-            .cookie("SESSION", admin.authenticatedSession())
-            .exchange()
-            .expectStatus()
-            .isOk();
+        gateway.get().uri("/management/loggers").cookie("SESSION", admin.authenticatedSession()).exchange().expectStatus().isOk();
     }
 
     @Test
@@ -171,13 +159,7 @@ class OidcLoginFlowIT {
         // handed every principal ROLE_ADMIN would satisfy the admin case perfectly.
         Login user = signIn(KeycloakTestcontainer.USER);
 
-        gateway
-            .get()
-            .uri("/management/loggers")
-            .cookie("SESSION", user.authenticatedSession())
-            .exchange()
-            .expectStatus()
-            .isForbidden();
+        gateway.get().uri("/management/loggers").cookie("SESSION", user.authenticatedSession()).exchange().expectStatus().isForbidden();
     }
 
     @Test
@@ -229,7 +211,9 @@ class OidcLoginFlowIT {
             .returnResult();
 
         String location = redirect.getResponseHeaders().getFirst(HttpHeaders.LOCATION);
-        assertThat(location).isNotNull().startsWith(KeycloakTestcontainer.issuerUri() + "/protocol/openid-connect/auth");
+        assertThat(location)
+            .isNotNull()
+            .startsWith(KeycloakTestcontainer.issuerUri() + "/protocol/openid-connect/auth");
 
         Map<String, String> query = queryOf(URI.create(location));
         assertThat(query).containsEntry("response_type", "code").containsEntry("client_id", KeycloakTestcontainer.CLIENT_ID);
@@ -330,8 +314,7 @@ class OidcLoginFlowIT {
             URLEncoder.encode(KeycloakTestcontainer.PASSWORD, StandardCharsets.UTF_8) +
             "&credentialId=";
         HttpResponse<String> submitted = send(
-            HttpRequest
-                .newBuilder(URI.create(formAction))
+            HttpRequest.newBuilder(URI.create(formAction))
                 .header("Content-Type", "application/x-www-form-urlencoded")
                 .POST(HttpRequest.BodyPublishers.ofString(form)),
             keycloakCookies
@@ -392,8 +375,7 @@ class OidcLoginFlowIT {
         if (raw == null || raw.isBlank()) {
             return Map.of();
         }
-        return java.util.Arrays
-            .stream(raw.split("&"))
+        return java.util.Arrays.stream(raw.split("&"))
             .map(pair -> pair.split("=", 2))
             .collect(
                 Collectors.toMap(
@@ -431,7 +413,11 @@ class OidcLoginFlowIT {
         }
 
         String header() {
-            return jar.entrySet().stream().map(e -> e.getKey() + "=" + e.getValue()).collect(Collectors.joining("; "));
+            return jar
+                .entrySet()
+                .stream()
+                .map(e -> e.getKey() + "=" + e.getValue())
+                .collect(Collectors.joining("; "));
         }
     }
 }

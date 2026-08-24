@@ -58,17 +58,15 @@ public class SecurityProblemSupport implements AuthenticationEntryPoint, AccessD
         throws IOException {
         response.setStatus(status.value());
         response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
-        response
-            .getWriter()
-            .write(
-                """
-                {"type":"about:blank","title":"%s","status":%d,"detail":"%s","instance":"%s"}""".formatted(
-                        title,
-                        status.value(),
-                        detail,
-                        escape(request.getRequestURI())
-                    )
-            );
+        response.getWriter().write(
+            """
+            {"type":"about:blank","title":"%s","status":%d,"detail":"%s","instance":"%s"}""".formatted(
+                title,
+                status.value(),
+                detail,
+                escape(request.getRequestURI())
+            )
+        );
     }
 
     /** The path is attacker-controlled and lands inside a JSON string literal. */
