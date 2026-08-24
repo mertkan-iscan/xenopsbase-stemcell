@@ -79,7 +79,7 @@ number is not quietly abandoned.
 | Cold rebuild: empty Hetzner project to serving, data restored | ≤ 60 min | `make up` plus GitOps convergence plus restore |
 | Warm start: `make up` on unchanged infrastructure code | ≤ 20 min | Same path, cached module and image layers |
 | RPO, uploaded documents | 0 | Never stored in the cluster; teardown cannot affect them |
-| RPO, database | ≤ 5 min | Continuous WAL archiving to object storage |
+| RPO, database | ≤ 5 min | Continuous WAL archiving to object storage. Worst case, not typical — set by `archive_timeout` in `platform/envs/dev/database/cluster.yaml` (T-2.13) |
 | Rollback of an application version | ≤ 5 min | Image tag revert through GitOps (T-6.4) |
 
 ## Consequences

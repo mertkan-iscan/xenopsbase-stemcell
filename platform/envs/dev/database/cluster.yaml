@@ -116,6 +116,43 @@ spec:
       max_connections: "100"
       shared_buffers: "128MB"
 
+      # THE DATABASE RPO IS THIS NUMBER (T-2.13, #164).
+      #
+      # 300s is also CloudNativePG's default, so this line changes nothing
+      # today. That is the point: it was INHERITED, and an RPO that rests on
+      # somebody else's default is a promise about their release notes. A chart
+      # bump could have changed it, no manifest would have differed, no alert
+      # would have fired, and the first evidence would have been more data lost
+      # than expected during a real recovery -- the same shape as the WAL
+      # archive that reported healthy while archiving nothing (#113) and the
+      # metrics comment asserting a scrape that was switched off (#155).
+      #
+      # Both halves of that verified in CNPG's source rather than assumed:
+      #
+      #   pkg/postgres/configuration.go
+      #     CnpgConfigurationSettings.GlobalDefaultSettings
+      #       "archive_timeout": "5min"        <- the inherited default, = 300s
+      #     FixedConfigurationParameters
+      #       archive_mode, archive_command    <- managed by the operator
+      #       archive_timeout is ABSENT        <- so this line is honoured
+      #
+      # Which is the useful distinction: the operator owns WHETHER archiving
+      # happens, and this repository owns HOW OFTEN. Only the second one is an
+      # RPO, and only the second one was unowned.
+      #
+      # THESE DOCUMENTS STATE A NUMBER THAT COMES FROM HERE. Changing this
+      # value without changing them makes them wrong:
+      #
+      #   docs/adr/0002-ephemeral-cluster-and-durable-state.md  "RPO, database | <= 5 min"
+      #   docs/runbooks/disaster-recovery.md                    the RPO/RTO table and the RPO section
+      #
+      # It is a CEILING, not the typical case. It bounds how long a quiet
+      # database waits before forcing a WAL segment; a busy one fills segments
+      # and archives sooner. So the real RPO is usually better than 5 minutes,
+      # and 5 minutes is the worst case -- which is the only figure safe to
+      # publish. Measured worst case: 301s (T-7.4, #56).
+      archive_timeout: "300s"
+
   managed:
     roles:
       # Keycloak owns its own role and its own database (database/keycloak.yaml)
