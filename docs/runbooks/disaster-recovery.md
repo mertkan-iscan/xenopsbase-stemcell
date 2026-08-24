@@ -323,6 +323,7 @@ Listed so the next person inherits the reasoning, not just the gap.
 | ~~`archive_timeout` not pinned~~ | **closed** | Pinned 2026-08-24, #164. Same value, but now this project's rather than CNPG's |
 | Backup age is not observable | #145 | `LastBackupSucceeded: True` while `lastSuccessfulBackup` is empty — see below |
 | No application metrics reach Prometheus | #155 | So alerting on backup age cannot be built even if the field were populated |
+| `verify-teardown` does not check the Cloudflare edge or mail DNS | ADR-0008 | It asserts buckets and the OS snapshot, but not the tunnel, DNS, Access or Brevo records — all durable, none verified |
 | Lifecycle rules are shared across environments | #151 | A retention change for dev would apply to prod |
 | Both age keys held by one person | #191 | Two recipients removes the single object, not the single person |
 | Rollback not measured | #51 | Blocked on T-6.3 (#50) |

@@ -1,6 +1,6 @@
 # ADR-0002: The cluster is ephemeral, and durable state lives outside it
 
-- **Status:** Accepted
+- **Status:** Accepted, **amended by [ADR-0008](0008-durable-state-outside-terraform.md)**
 - **Date:** 2026-08-18
 - **Task:** T-0.3
 
@@ -49,6 +49,12 @@ preparation, and rebuilt from this repository plus the contents of object storag
 | Keycloak **users and their `sub`** — Postgres, restored with it (ADR-0010) | Grafana's and Prometheus's own volumes |
 | All manifests and Helm values — git, reconciled by GitOps | Grafana dashboards at runtime |
 | Container images — GHCR | Loki index; chunks go to object storage |
+
+> **Amended by [ADR-0008](0008-durable-state-outside-terraform.md) (T-0.6).** This table is
+> incomplete as written: it omits the Packer-built OS snapshot, the Cloudflare edge, the object
+> storage buckets themselves, the mail DNS records and the age private keys — all of which survive
+> `make down`. ADR-0008 adds them and explains why the original framing missed them. Read the two
+> together; where they differ, ADR-0008 is authoritative.
 
 Anything not in the left column **will be lost**, and losing it must be acceptable. If a new
 component needs state that is not acceptable to lose, that state moves to the left column before

@@ -53,11 +53,12 @@ than a clean file that hides the fact a mistake was ever made.
 | ADR | Title | Status |
 |---|---|---|
 | [0001](0001-service-topology.md) | Gateway plus one core service | Accepted |
-| [0002](0002-ephemeral-cluster-and-durable-state.md) | Ephemeral cluster and the durable-state boundary | Accepted |
+| [0002](0002-ephemeral-cluster-and-durable-state.md) | Ephemeral cluster and the durable-state boundary | Accepted, amended by 0008 |
 | [0003](0003-secrets-management.md) | Secrets encrypted in git with SOPS and age | Accepted |
 | [0004](0004-gitops-engine.md) | Argo CD reconciles the cluster from git | Accepted |
 | [0005](0005-terraform-state-backend.md) | Terraform state lives in Cloudflare R2, not Hetzner | Accepted |
 | [0006](0006-tailscale-node-transport.md) | Tailscale node transport; the public API is closed | Accepted |
 | [0007](0007-postgres-backup-mechanism.md) | Postgres backs up through the Barman Cloud plugin | Accepted |
+| [0008](0008-durable-state-outside-terraform.md) | The durable-state boundary includes things Terraform does not create | Accepted |
 | [0009](0009-in-memory-store.md) | Valkey is the in-memory store, and it is disposable | Accepted |
 | [0010](0010-user-identity-durability.md) | User identity is durable; declared users carry explicit ids | Accepted |
