@@ -1,0 +1,165 @@
+# Session limits, bound to the ROLE rather than to the connection string
+# (T-2.18, #259; ADR-0012 §5).
+#
+# WHY THIS MOVED OFF THE JDBC URL
+#
+# core used to pass them as a driver property:
+#
+#   options: "-c statement_timeout=30000 -c idle_in_transaction_session_timeout=60000"
+#
+# which works today and stops working the moment a connection pooler is put in
+# front of the primary. Under transaction-mode pooling `options` becomes part of
+# the POOL KEY: two clients with different options get different server pools,
+# which silently halves the multiplexing a pooler exists to provide, and some
+# PgBouncer versions reject the parameter outright.
+#
+# ADR-0012 defers the pooler and is explicit about the ordering: session settings
+# move server-side **before** one lands, not after it starts behaving oddly. This
+# is that move, done while it is cheap and reversible rather than during an
+# incident.
+#
+# WHY A JOB AND NOT A DECLARATIVE FIELD
+#
+# There isn't one. CNPG's `Cluster.spec.managed.roles` covers role ATTRIBUTES --
+# login, superuser, connection limits -- but not per-role GUCs. And the usual
+# escape hatch, `bootstrap.initdb.postInitApplicationSQL`, does not exist for a
+# cluster that bootstraps from `recovery`, which this one does (ADR-0002 rebuilds
+# it from the WAL archive rather than initialising it).
+#
+# So it is a hook. It is idempotent -- `ALTER ROLE ... SET` is a declaration, not
+# an increment -- so running it on every sync converges rather than accumulating.
+#
+# WHY IT CONNECTS AS `core` AND NOT AS A SUPERUSER
+#
+# Both settings are USERSET (`select context from pg_settings` reports `user`),
+# so a role may set them on itself. Verified against the running cluster before
+# this was written. That means no superuser credential is needed, and the job
+# cannot do anything the application could not already do to itself.
+#
+# `enableSuperuserAccess` is off on this cluster in any case, so a job needing
+# `postgres` would have required turning it on -- a permanent widening of access
+# to avoid a temporary inconvenience.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: core-session-settings
+  namespace: database
+  annotations:
+    # PostSync, not PreSync, and the trade is deliberate.
+    #
+    # PreSync would guarantee the role setting is in place before core's new
+    # pods connect. It would also run before Postgres exists on a cold rebuild,
+    # fail, and BLOCK the sync of the whole database application -- turning a
+    # missing timeout into an unbootable cluster.
+    #
+    # PostSync leaves a window during a deploy where core's sessions have
+    # neither the old driver option nor the new role setting. That window is
+    # bounded by `socketTimeout: 45` on the client, which is still in place and
+    # still abandons a runaway query.
+    argocd.argoproj.io/hook: PostSync
+    # Keeps the previous run's pod until the next sync, so a failure can be read
+    # after the fact rather than having to be reproduced.
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  # The work is idempotent and the failure modes are "database not ready yet",
+  # so retrying is the right response. Bounded, so a genuinely broken credential
+  # fails visibly instead of retrying all day.
+  backoffLimit: 4
+  # Cleaned up on its own if nothing else removes it.
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: core-session-settings
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 26
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: psql
+          # The same image the cluster runs, so psql's version always matches
+          # the server's. Pinning a different postgres image here would be a
+          # second version to keep in step, and nothing would report the drift.
+          image: ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          env:
+            - name: PGHOST
+              # -rw, so this always reaches the PRIMARY. A standby would reject
+              # the write, and on a cluster where the primary can move that is
+              # a failure that appears only after a failover.
+              value: postgres-rw
+            - name: PGDATABASE
+              value: core
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef: { name: core-db, key: username }
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: { name: core-db, key: password }
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+
+              # The database may still be recovering when this runs, and on a
+              # cold rebuild it certainly is. Waiting is the expected case, not
+              # an error; failing immediately would make a normal rebuild look
+              # like a broken credential.
+              for i in $(seq 1 60); do
+                if pg_isready -q; then break; fi
+                echo "waiting for ${PGHOST} (${i}/60)"
+                sleep 5
+              done
+              pg_isready || { echo "error: ${PGHOST} never became ready"; exit 1; }
+
+              # The values themselves. They match what the JDBC option used to
+              # set, deliberately: this is a change of MECHANISM, not of policy,
+              # and mixing the two would make a regression impossible to
+              # attribute.
+              #
+              #   statement_timeout                  30s
+              #     Postgres runs a query until it finishes or the client goes
+              #     away; there is no default limit. One pathological query
+              #     holds its connection indefinitely, and enough of them
+              #     exhaust the pool while every health check still passes.
+              #
+              #   idle_in_transaction_session_timeout 60s
+              #     An open transaction holds its snapshot, which blocks vacuum
+              #     and lets bloat accumulate behind a client that has simply
+              #     stopped.
+              psql -v ON_ERROR_STOP=1 <<'SQL'
+              ALTER ROLE core SET statement_timeout = '30s';
+              ALTER ROLE core SET idle_in_transaction_session_timeout = '60s';
+              SQL
+
+              # Read it back rather than trusting the exit code. `ALTER ROLE`
+              # succeeding says the statement parsed; this says the setting is
+              # what the next session will actually get.
+              echo "--- rolconfig for core ---"
+              psql -v ON_ERROR_STOP=1 -At \
+                -c "select unnest(rolconfig) from pg_roles where rolname = current_user"
+
+              psql -v ON_ERROR_STOP=1 -At -c "
+                select count(*) from pg_roles
+                where rolname = current_user
+                  and rolconfig @> array['statement_timeout=30s']
+                  and rolconfig @> array['idle_in_transaction_session_timeout=60s']
+              " | grep -qx 1 || {
+                echo "error: settings did not take on role ${PGUSER}"
+                exit 1
+              }
+              echo "ok: session limits are bound to the role"

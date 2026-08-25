@@ -149,17 +149,34 @@ spring:
       # to save a few milliseconds of connection setup inside the same cluster.
       minimum-idle: 2
       data-source-properties:
-        # THE important one. Postgres will run a query until it finishes or the
-        # client disconnects -- there is no default limit. A single pathological
-        # query with no timeout holds its connection indefinitely, and enough of
-        # them exhaust the pool while every health check still passes.
+        # statement_timeout AND idle_in_transaction_session_timeout USED TO BE
+        # HERE, as `options: "-c statement_timeout=30000 -c ..."`.
         #
-        # Applied as a server-side setting so it binds the DATABASE's work, not
-        # merely the driver's patience. A JDBC socket timeout abandons the client
-        # side and leaves the query running.
-        options: "-c statement_timeout=30000 -c idle_in_transaction_session_timeout=60000"
+        # They are still enforced, and still server-side, but they are now bound
+        # to the ROLE instead of to the connection string:
+        #
+        #   ALTER ROLE core SET statement_timeout = '30s';
+        #   ALTER ROLE core SET idle_in_transaction_session_timeout = '60s';
+        #
+        # applied by platform/envs/dev/database/session-settings.yaml. Same
+        # values, same effect on every session core opens -- a change of
+        # mechanism, not of policy.
+        #
+        # WHY IT MOVED (ADR-0012 section 5, T-2.18)
+        #
+        # `options` is part of the POOL KEY under a transaction-mode pooler.
+        # Two clients with different options get different server pools, which
+        # silently halves the multiplexing a pooler exists to provide, and some
+        # PgBouncer versions reject the parameter outright. That failure arrives
+        # when a pooler is added, looking like a pooler problem, months after
+        # the line that caused it was written.
+        #
+        # Do not put session settings back here. Add them to the role.
+        #
         # Client-side backstop for a connection that has gone away entirely, where
         # the server-side timeout can never fire because nothing is listening.
+        # This is also what bounds the brief window during a deploy when a new
+        # pod is up before the PostSync hook has run.
         socketTimeout: 45
         connectTimeout: 5
         tcpKeepAlive: true
