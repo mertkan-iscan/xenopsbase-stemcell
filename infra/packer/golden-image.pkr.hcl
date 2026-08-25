@@ -122,8 +122,21 @@ locals {
   # Stamped onto the snapshot so terraform can ASSERT the image holds the
   # version it is configured for, rather than both being told separately and
   # nobody noticing when they disagree.
+  #
+  # `xenopsbase-golden` is deliberately "candidate" here, NOT "yes" (T-1.20,
+  # #252). Everything that selects an image to boot -- terraform, and the
+  # retention policy that decides what may be deleted -- selects on
+  # `xenopsbase-golden=yes`. So a snapshot leaving this build is not yet
+  # selectable by anything: validate-golden-image.sh boots a throwaway
+  # instance from it, and only a snapshot that passed is relabelled.
+  #
+  # This is the honest reading of "no snapshot is published on failure". The
+  # Hetzner object exists for the few minutes validation takes, because you
+  # cannot boot an image that does not exist. It is never PUBLISHED, in the
+  # only sense that matters: nothing can select it, and a failed validation
+  # deletes it.
   snapshot_labels = {
-    "xenopsbase-golden" = "yes"
+    "xenopsbase-golden" = "candidate"
     "k3s-version"       = replace(var.k3s_version, "+", "_")
     "tailscale-version" = var.tailscale_version
   }
@@ -164,7 +177,11 @@ source "hcloud" "golden" {
     disable_root: false
   EOT
 
-  snapshot_name   = "xenopsbase-golden-${var.k3s_version}"
+  # Named for what it is until it has earned the other name. Promotion rewrites
+  # both the description and the label, so a snapshot called "candidate" in the
+  # Hetzner console is one whose validation did not finish -- readable without
+  # consulting this file.
+  snapshot_name   = "xenopsbase-golden-candidate-${var.k3s_version}"
   snapshot_labels = local.snapshot_labels
 }
 
@@ -202,8 +219,41 @@ build {
       "tar -xzf /tmp/ts.tgz -C /tmp",
       "install -m 0755 /tmp/tailscale_${var.tailscale_version}_amd64/tailscale  /usr/local/bin/tailscale",
       "install -m 0755 /tmp/tailscale_${var.tailscale_version}_amd64/tailscaled /usr/local/sbin/tailscaled",
-      "install -m 0644 /tmp/tailscale_${var.tailscale_version}_amd64/systemd/tailscaled.service /etc/systemd/system/tailscaled.service",
-      "install -m 0644 /tmp/tailscale_${var.tailscale_version}_amd64/systemd/tailscaled.defaults /etc/default/tailscaled",
+      "mkdir -p /var/lib/tailscale",
+
+      # THE UNIT IS WRITTEN, NOT COPIED FROM THE TARBALL.
+      #
+      # The tarball's own tailscaled.service says
+      # `ExecStart=/usr/sbin/tailscaled`, because upstream expects the binary
+      # in /usr/sbin. On Leap Micro /usr is read-only, so it goes to
+      # /usr/local/sbin instead -- and the shipped unit then points at a path
+      # that does not exist. tailscaled fails at every boot, no tailscale0
+      # interface is created, and NO NODE FROM THIS IMAGE CAN EVER JOIN THE
+      # TAILNET.
+      #
+      # The first build (#250) installed the tarball unit and reported success:
+      # every build-time assertion passed, because they only checked that the
+      # BINARIES were present and the correct version, which they were. It took
+      # booting the image (T-1.20, #252) to find it.
+      #
+      # This is byte-for-byte the unit kube-hetzner writes in its own bootstrap
+      # (locals.tf, install_tailscale_static), for the reason given at the top
+      # of this file: a node from this image and a node built the old way must
+      # be the same node. ExecStartPre modprobes tun, which is what actually
+      # creates the interface.
+      #
+      # One deliberate divergence: theirs sets
+      # `ExecStopPost=/usr/local/bin/tailscaled --cleanup`, but tailscaled is
+      # in /usr/local/sbin -- the same class of path mistake, in the stop path
+      # where it fails quietly. Copying a bug for the sake of matching would be
+      # a poor trade.
+      "cat > /etc/systemd/system/tailscaled.service <<'UNIT'\n[Unit]\nDescription=Tailscale node agent\nDocumentation=https://tailscale.com/kb/\nWants=network-online.target\nAfter=network-online.target\n\n[Service]\nType=notify\nExecStartPre=/sbin/modprobe tun\nExecStart=/usr/local/sbin/tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/run/tailscale/tailscaled.sock --port=41641\nExecStopPost=/usr/local/sbin/tailscaled --cleanup\nRestart=on-failure\nRuntimeDirectory=tailscale\nRuntimeDirectoryMode=0755\nStateDirectory=tailscale\nStateDirectoryMode=0700\n\n[Install]\nWantedBy=multi-user.target\nUNIT",
+
+      # Proves the unit's ExecStart binary is actually there, at build time.
+      # The check costs nothing and names the exact thing that was wrong.
+      "test -x \"$(sed -n 's|^ExecStart=\\([^ ]*\\).*|\\1|p' /etc/systemd/system/tailscaled.service)\"",
+
+      "systemctl daemon-reload",
       # Enabled, NOT started, and holding no key. It comes up on first boot and
       # waits; `tailscale up` with a runtime key is T-1.19's job.
       "systemctl enable tailscaled",
@@ -280,6 +330,25 @@ build {
   }
 
   # ---------------------------------------------------------------------------
+  # WHAT THE ASSERTIONS ABOVE CANNOT COVER
+  #
+  # Every check so far ran on the BUILD INSTANCE -- a machine that is already
+  # booted, whose cloud-init already ran, whose machine-id already exists. It
+  # proves the files are on the disk. It does not prove that a snapshot of that
+  # disk BOOTS.
+  #
+  # The difference is not academic. The cleanup below empties /etc/machine-id
+  # and wipes cloud-init's state precisely so the image boots fresh -- and if
+  # any of that leaves the image unable to come up, get an address, or accept a
+  # key, this build still exits 0 and publishes it. That is the shape #252 was
+  # filed against: a control that reports success while the thing it names is
+  # broken.
+  #
+  # So a snapshot that reaches the end of this file is a CANDIDATE.
+  # validate-golden-image.sh boots a throwaway instance from it and runs the
+  # assertions that only a real boot can answer. Promotion happens there.
+  #
+  # ---------------------------------------------------------------------------
   # Leave a first-boot image, not a used one.
   provisioner "shell" {
     inline = [
@@ -294,5 +363,17 @@ build {
       "rm -f /etc/machine-id && touch /etc/machine-id",
       "sync",
     ]
+  }
+
+  # The candidate's id, written where the build script can read it.
+  #
+  # The alternative is to re-query the API for the newest snapshot carrying the
+  # candidate label and assume it is this one. That is true right up until two
+  # builds overlap, or a previous build died leaving its candidate behind -- at
+  # which point the validation would boot one image and promote another, and
+  # every assertion would pass. Packer knows exactly what it made; ask it.
+  post-processor "manifest" {
+    output     = "${path.root}/manifest.json"
+    strip_path = true
   }
 }
