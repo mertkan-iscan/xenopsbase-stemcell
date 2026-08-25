@@ -280,6 +280,76 @@ radius, so an archiving problem stops being a data-volume problem. It costs a se
 instance to manage and to pay for. In dev the single volume is deliberate; a production tree should
 revisit it, because there the outage matters more than the volume.
 
+## Connections are running out
+
+`PostgresConnectionsApproachingBudget` at 70% of `max_connections`, `PostgresConnectionsNearlyExhausted`
+at 90%, and `PostgresBackendsWaiting` when backends are blocked rather than merely numerous.
+
+**Postgres refuses connections past `max_connections`; it does not queue them.** So this surfaces as
+application errors, not as a slow database. `superuser_reserved_connections` is why an operator can
+still get in while applications cannot.
+
+**Establish which of three problems it is before reaching for a lever.**
+
+```bash
+kubectl -n database exec postgres-1 -c postgres -- psql -U postgres -c \
+  "select usename, datname, state, count(*) from pg_stat_activity group by 1,2,3 order by 4 desc"
+```
+
+*Many `idle` connections from one role* — a pool is sized larger than it needs. That is a
+configuration defect, not a capacity problem, and the fix is the pool. Check the arithmetic first:
+
+```bash
+make connection-budget ENV=dev
+```
+
+That adds up the declared ceilings — HPA `maxReplicas` × Hikari pool, plus Keycloak's pinned pool,
+plus system and replication — and fails when they no longer fit inside `max_connections`. It reads
+configuration, so it tells you what *could* happen; the alerts tell you what *is* happening. Both,
+because they answer different questions and each is misleading alone.
+
+*Many `idle in transaction`* — a client opened a transaction and stopped. `core`'s sessions are
+bounded by `idle_in_transaction_session_timeout = 60s`, bound to the role (see below). Another role
+without that bound is the likely source.
+
+*Backends `active` but waiting* — contention, not capacity. Adding connections makes it worse:
+
+```bash
+kubectl -n database exec postgres-1 -c postgres -- psql -U postgres -c \
+  "select pid, wait_event_type, wait_event, state, left(query, 80) from pg_stat_activity
+   where wait_event is not null"
+```
+
+**Raising `max_connections` is not the lever**, and ADR-0012 says so explicitly. Every connection is
+a backend process against `shared_buffers`; a higher limit trades a refused connection — which is
+visible — for a slower database, which is diffuse. The lever, when the demand is genuine, is a
+connection pooler, and [ADR-0012](../adr/0012-database-scaling.md) records what must be true first.
+
+### Session limits are bound to the role, not the connection string
+
+```bash
+kubectl -n database exec postgres-1 -c postgres -- psql -U postgres -c \
+  "select rolname, rolconfig from pg_roles where rolconfig is not null"
+```
+
+`core` carries `statement_timeout=30s` and `idle_in_transaction_session_timeout=60s`. They are applied
+by the `core-session-settings` Job (`platform/envs/dev/database/session-settings.yaml`), which runs as
+an Argo CD PostSync hook and is idempotent.
+
+They used to be a JDBC `options` parameter on the connection string. They moved because `options` is
+part of the **pool key** under a transaction-mode pooler: two clients with different options get
+different server pools, which silently halves the multiplexing a pooler exists to provide. Moving them
+afterwards would mean diagnosing that during an incident. **Do not put session settings back on the
+connection string** — add them to the role.
+
+If the settings are missing, re-run the hook:
+
+```bash
+kubectl -n database delete job core-session-settings --ignore-not-found
+kubectl apply -f platform/envs/dev/database/session-settings.yaml
+kubectl -n database logs job/core-session-settings
+```
+
 ## Known gaps
 
 **No separate WAL volume in dev.** Hetzner volumes have a 10 Gi minimum, so a separate `walStorage`
