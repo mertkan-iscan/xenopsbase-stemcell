@@ -16,6 +16,166 @@
 # See docs/runbooks/cluster.md.
 # ==============================================================================
 
+# ------------------------------------------------------------------------------
+# The image every autoscaled node boots (T-1.18, T-1.19).
+#
+# Selected by LABEL, not by a pinned id, and the label is the one T-1.20 only
+# applies after booting a candidate and proving it works. So terraform cannot
+# select an image that has not been validated -- a build that failed its boot
+# test never gets `xenopsbase-golden=yes` and is deleted.
+#
+# most_recent because `make golden-image` produces a new one on every k3s bump
+# or policy change, and pinning the id here would mean a second place to update
+# and a silent divergence when it is forgotten.
+# ------------------------------------------------------------------------------
+data "hcloud_image" "golden" {
+  with_selector = "xenopsbase-golden=yes"
+  most_recent   = true
+
+  # Snapshots are region-scoped, and a node cannot boot an image that is not
+  # where it is. Without this, a stray snapshot built elsewhere would be
+  # selectable and the failure would appear at scale-up as a Hetzner error
+  # about the image rather than about the region.
+  with_architecture = "x86"
+}
+
+# ------------------------------------------------------------------------------
+# The firewall an autoscaled node ends up behind (T-1.19, #251).
+#
+# WHY THIS IS AN ATTACHMENT AND NOT AN AUTOSCALER SETTING
+#
+# The obvious approach is to hand the autoscaler HCLOUD_FIREWALL, which is what
+# kube-hetzner does. It cannot work here. The autoscaler's config is rendered by
+# the module's own kustomization mechanism, so anything the config needs is an
+# INPUT to the module -- and the firewall is created BY the module. Terraform
+# rejects that outright:
+#
+#   Error: Cycle: ... module.kube_hetzner (close), data.hcloud_firewall.cluster,
+#          module.kube_hetzner.var.user_kustomizations (expand) ...
+#
+# A firewall ATTACHMENT is consumed by nothing, so it may depend on the module
+# freely. The cycle disappears.
+#
+# It is also the better design. An attachment driven by a label selector covers
+# every node that ever carries the label, including ones that do not exist yet
+# -- which is precisely the population an autoscaler creates. Passing an id to
+# the autoscaler protects only the nodes it happens to create while that id is
+# current; this protects the group.
+#
+# The label is set on the SERVER (Hetzner side) by the autoscaler's
+# `serverLabels`, not the Kubernetes node label of the same name. They are
+# deliberately spelled the same so the two views of a node agree.
+# ------------------------------------------------------------------------------
+# PLURAL, and with no depends_on. Both are deliberate and both were arrived at
+# by getting it wrong first.
+#
+# `data "hcloud_firewall"` with depends_on = [module.kube_hetzner] is the
+# obvious spelling. It defers the read to apply time, which leaves the id
+# unknown during plan, and terraform then reports:
+#
+#   Error: Missing required argument
+#     with hcloud_firewall_attachment.autoscaled[0]
+#     The argument "firewall_id" is required, but no definition was found.
+#
+# pointing at the line where firewall_id is plainly defined. The argument is
+# not missing; its value is unknowable at that point.
+#
+# Dropping depends_on fixes that but breaks the other direction: on a COLD
+# build the firewall does not exist when the plan is made, and the singular
+# data source errors out rather than returning nothing -- which would fail
+# `make up` from nothing, an acceptance criterion of this card.
+#
+# The plural source returns an empty list instead of failing, so both cases
+# work. The filtering is done here rather than by the API because
+# hcloud_firewalls filters on labels, not names.
+data "hcloud_firewalls" "all" {}
+
+locals {
+  cluster_firewall_id = one([
+    for f in data.hcloud_firewalls.all.firewalls :
+    f.id if f.name == "${var.cluster_name}-${var.environment}"
+  ])
+}
+
+resource "hcloud_firewall_attachment" "autoscaled" {
+  # Absent on the very first apply of a brand-new cluster, because the firewall
+  # is created by that same apply and this was planned before it existed. No
+  # node is unprotected in that window: the pool starts at min_nodes = 0, so
+  # there is nothing to attach to yet. The next apply creates it, and the check
+  # block below says so out loud rather than leaving it to be discovered.
+  count = local.autoscaler_pool == null || local.cluster_firewall_id == null ? 0 : 1
+
+  firewall_id     = local.cluster_firewall_id
+  label_selectors = ["hcloud/node-group=${local.autoscaler_node_group}"]
+}
+
+# A warning, not an error. Failing here would break the cold build this is
+# trying to protect; saying nothing would let an autoscaled node come up on a
+# public IP with no firewall and report success -- which is the exact shape
+# this repository keeps finding.
+check "autoscaled_nodes_are_firewalled" {
+  assert {
+    condition = local.autoscaler_pool == null || local.cluster_firewall_id != null
+    error_message = join(" ", [
+      "No firewall attachment for autoscaled nodes yet: the cluster firewall",
+      "did not exist when this plan was made. Expected on a cold build.",
+      "Run `make cluster-apply ENV=${var.environment}` again before allowing a",
+      "scale-up, or nodes will be created outside the firewall."
+    ])
+  }
+}
+
+locals {
+  # The autoscaled pool. Declared in dev.tfvars like any other nodepool, but
+  # handed to our own autoscaler rather than to the module -- see the
+  # `autoscaler_nodepools = []` note on the module block for why.
+  #
+  # One pool. The Hetzner autoscaler supports several, and supporting several
+  # here would mean templating a list into the config JSON for a case that does
+  # not exist; `element(...)` on an empty list fails loudly at plan time, which
+  # is the right moment to find out.
+  autoscaler_pool       = length(var.autoscaler_nodepools) > 0 ? var.autoscaler_nodepools[0] : null
+  autoscaler_node_group = local.autoscaler_pool == null ? "" : "${var.cluster_name}-${var.environment}-${local.autoscaler_pool.name}"
+
+  # THE ENTIRE BOOTSTRAP, rendered once and used everywhere.
+  #
+  # base64, because the hcloud autoscaler passes `cloudInit` to the Hetzner API
+  # exactly as stored, without decoding it. Established by measurement: the
+  # module's value decoded to 26,499 bytes, inside the limit, and was still
+  # refused -- because what went over the wire was the 35,332-character encoded
+  # form. So the encoded length is the one that must fit, and it is the one
+  # check-user-data-size.sh measures.
+  node_bootstrap_documented = templatefile("${path.module}/templates/node-bootstrap.yaml.tpl", {
+    server_url         = module.kube_hetzner.effective_node_join_endpoint
+    cluster_token      = module.kube_hetzner.cluster_token
+    tailscale_auth_key = var.tailscale_auth_key
+    node_group         = local.autoscaler_node_group
+  })
+
+  # COMMENTS AND BLANK LINES ARE STRIPPED BEFORE THIS GOES ON THE WIRE.
+  #
+  # The template is heavily commented, because a boot path nobody can read is
+  # how #22 stayed invisible for months. But every one of those bytes would
+  # otherwise be shipped to every node, on every scale-up, for ever -- measured
+  # at 6,028 bytes encoded, against a 2,048-byte budget. The documentation was
+  # three quarters of the payload.
+  #
+  # So the comments live in the repository, where they are read, and not in
+  # user_data, where they are merely carried. `#cloud-config` is kept: it is not
+  # a comment, it is the header cloud-init dispatches on, and dropping it turns
+  # the whole file into an inert blob that boots a node doing nothing at all.
+  node_bootstrap = join("\n", concat(
+    ["#cloud-config"],
+    [
+      for line in split("\n", local.node_bootstrap_documented) :
+      line
+      if trimspace(line) != "" && !startswith(trimspace(line), "#")
+    ]
+  ))
+
+  node_bootstrap_b64 = base64encode(local.node_bootstrap)
+}
+
 locals {
   # Pins the metadata route onto the public NIC at every boot, as a unit rather
   # than a one-off command: the bad route is reinstalled by DHCP, so a route
@@ -148,7 +308,26 @@ module "kube_hetzner" {
 
   control_plane_nodepools = var.control_plane_nodepools
   agent_nodepools         = var.agent_nodepools
-  autoscaler_nodepools    = var.autoscaler_nodepools
+
+  # DELIBERATELY EMPTY, even though var.autoscaler_nodepools is not (T-1.19).
+  #
+  # Given a pool, the module deploys its own cluster-autoscaler and generates
+  # the cloud-init it hands to Hetzner: a verified installer that downloads k3s,
+  # base64 inside base64 inside gzip. Measured on this cluster, 35,332 bytes
+  # against a 32,768-byte user_data limit -- so every scale-up got as far as the
+  # API call and was refused (#22):
+  #
+  #   could not create server type cx33 in region fsn1:
+  #   invalid input in field 'user_data' (invalid_input)
+  #
+  # Passing [] stops the module building any of that. The autoscaler, its RBAC
+  # and the node definition are ours, in manifests/30-cluster-autoscaler, where
+  # the bootstrap is ~1KB because everything static now lives in the golden
+  # image (T-1.18).
+  #
+  # The pool is still DECLARED in dev.tfvars and still read below -- this is
+  # not "autoscaling off", it is "the module does not get to define a node".
+  autoscaler_nodepools = []
 
   cni_plugin = var.cni_plugin
 
@@ -297,6 +476,36 @@ module "kube_hetzner" {
         done
         kubectl wait --for=condition=established --timeout=120s crd/applications.argoproj.io
       EOT
+    }
+    # --------------------------------------------------------------------------
+    # Node creation (T-1.19, #251)
+    #
+    # Applied last because it needs the join token and the cluster to exist. It
+    # replaces the autoscaler the module would have deployed, with one whose
+    # node bootstrap fits inside Hetzner's user_data limit.
+    #
+    # This is Terraform's business rather than Argo CD's, which is the one place
+    # ADR-0004's rule bends: every value in it -- the golden image id, the
+    # private network, the firewall, the join token, the Tailscale key -- is a
+    # fact about this cluster build. None of them can be committed to git, and
+    # a node definition that arrived from git could not know them.
+    # --------------------------------------------------------------------------
+    "3" = {
+      source_folder = "${path.module}/manifests/30-cluster-autoscaler"
+      kustomize_parameters = {
+        golden_image_id    = data.hcloud_image.golden.id
+        node_group         = local.autoscaler_node_group
+        min_nodes          = local.autoscaler_pool.min_nodes
+        max_nodes          = local.autoscaler_pool.max_nodes
+        server_type        = local.autoscaler_pool.server_type
+        location           = local.autoscaler_pool.location
+        ssh_key_id         = module.kube_hetzner.ssh_key_id
+        network_id         = module.kube_hetzner.network_id
+        ca_image           = var.cluster_autoscaler_image
+        ca_version         = var.cluster_autoscaler_version
+        node_bootstrap_b64 = local.node_bootstrap_b64
+        config_sha256      = sha256(local.node_bootstrap_b64)
+      }
     }
   }
 

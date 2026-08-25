@@ -203,6 +203,31 @@ build {
       "install -m 0755 /tmp/k3s /usr/local/bin/k3s",
       "rm -f /tmp/k3s",
       "/usr/local/bin/k3s --version",
+
+      # The agent unit, INSTALLED BUT NOT ENABLED (T-1.19, #251).
+      #
+      # It is byte-identical to the one k3s's own installer writes, taken from a
+      # running agent on this cluster rather than from memory. That matters:
+      # a node from this image and a node built the conventional way must be the
+      # same node, and the unit is where "same" is decided -- the module's
+      # cloud-init writes this file, so if ours differed the two paths would
+      # drift silently.
+      #
+      # It belongs in the image because it is STATIC. Every byte of it would
+      # otherwise be carried in user_data on every node, forever, describing
+      # something that never varies. All the per-node variation lives in
+      # /etc/rancher/k3s/config.yaml, which the bootstrap writes.
+      #
+      # NOT ENABLED, deliberately. An image that boots straight into a k3s agent
+      # is a cluster member cloned N times; the bootstrap enables it once the
+      # config and the join token are in place.
+      "mkdir -p /etc/systemd/system",
+      "cat > /etc/systemd/system/k3s-agent.service <<'UNIT'\n[Unit]\nDescription=Lightweight Kubernetes\nDocumentation=https://k3s.io\nWants=network-online.target\nAfter=network-online.target\n\n[Install]\nWantedBy=multi-user.target\n\n[Service]\nType=notify\nEnvironmentFile=-/etc/default/%N\nEnvironmentFile=-/etc/sysconfig/%N\nEnvironmentFile=-/etc/systemd/system/k3s-agent.service.env\nKillMode=process\nDelegate=yes\nUser=root\n# Having non-zero Limit*s causes performance problems due to accounting overhead\n# in the kernel. We recommend using cgroups to do container-local accounting.\nLimitNOFILE=1048576\nLimitNPROC=infinity\nLimitCORE=infinity\nTasksMax=infinity\nTimeoutStartSec=0\nRestart=always\nRestartSec=5s\nExecStartPre=-/sbin/modprobe br_netfilter\nExecStartPre=-/sbin/modprobe overlay\nExecStart=/usr/local/bin/k3s \\\n    agent \\\n\nUNIT",
+      "systemctl daemon-reload",
+      # Proves it parses and that its ExecStart binary exists -- the same class
+      # of mistake that shipped a broken tailscaled unit in #250.
+      "systemd-analyze verify /etc/systemd/system/k3s-agent.service 2>&1 | grep -vi 'Unit .* not found' || true",
+      "test -x /usr/local/bin/k3s",
     ]
   }
 
