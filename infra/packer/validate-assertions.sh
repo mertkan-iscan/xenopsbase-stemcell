@@ -190,6 +190,14 @@ echo "IT HAS NEVER JOINED ANYTHING"
 # An image captured from a node that ran is a cluster member cloned N times,
 # which is a memorably confusing outage.
 
+# PRESENT but NOT ENABLED (T-1.19, #251). The unit is baked so that user_data
+# does not carry a kilobyte of unchanging systemd on every node; enabling it is
+# the bootstrap's job, once a config and a join token exist. An image that boots
+# straight into an agent is a cluster member cloned N times.
+assert "the k3s-agent unit is present" \
+  'test -f /etc/systemd/system/k3s-agent.service'
+assert "the k3s-agent unit points at the baked binary" \
+  'grep -q "ExecStart=/usr/local/bin/k3s" /etc/systemd/system/k3s-agent.service'
 assert "no k3s unit is enabled" \
   '! systemctl list-unit-files "k3s*" --state=enabled 2>/dev/null | grep -q k3s'
 assert "no k3s agent state" 'test ! -d /var/lib/rancher/k3s/agent'

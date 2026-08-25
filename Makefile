@@ -359,6 +359,14 @@ golden-image: ## Build, boot-test and publish the image every node boots from (T
 validate-golden-image: ## Boot a candidate image and promote it only if it passes (T-1.20)
 	@bash $(SCRIPTS)/validate-golden-image.sh $(SNAPSHOT)
 
+.PHONY: user-data-size
+user-data-size: ## Assert the node bootstrap still fits in Hetzner user_data (T-1.19)
+	@bash $(SCRIPTS)/check-user-data-size.sh $(ENV)
+
+.PHONY: node-equivalence
+node-equivalence: ## Prove a static node and an autoscaled node are the same node (T-1.19)
+	@bash $(SCRIPTS)/check-node-equivalence.sh $(ENV)
+
 .PHONY: api-spec
 api-spec: ## Regenerate docs/api/*.json from the services
 	@JH="$$(bash $(SCRIPTS)/java-home.sh)" && cd services/core && JAVA_HOME="$$JH" ./mvnw --batch-mode verify -DskipITs=false -Dit.test=OpenApiSpecIT -DfailIfNoTests=false -Dtest=SchemaOwnershipTest

@@ -461,3 +461,33 @@ check "ccm_networking_override_is_safe" {
     error_message = "ccm_restore_networking_under_tailscale is unsafe with external-network autoscaler nodepools: nodes outside the primary network cannot be resolved against a single HCLOUD_NETWORK. Set it to false and expect the uninitialized-taint failure instead."
   }
 }
+
+# ------------------------------------------------------------------------------
+# cluster-autoscaler (T-1.19, #251)
+#
+# We deploy it ourselves rather than letting the module do it, so its image has
+# to be pinned here. Pinned exactly for the same reason every other version in
+# this repository is: a floating tag means a rebuild can differ from the last
+# one for reasons nobody chose, which is the promise ADR-0002 rests on.
+# ------------------------------------------------------------------------------
+variable "cluster_autoscaler_image" {
+  description = "cluster-autoscaler image repository."
+  type        = string
+  default     = "registry.k8s.io/autoscaling/cluster-autoscaler"
+}
+
+variable "cluster_autoscaler_version" {
+  description = <<-EOT
+    cluster-autoscaler image tag. Its major.minor should track the cluster's
+    Kubernetes version: the autoscaler simulates the scheduler to decide whether
+    a pending pod would fit on a new node, and a simulation from a different
+    version can reach a different answer than the scheduler does.
+  EOT
+  type        = string
+  default     = "v1.34.1"
+
+  validation {
+    condition     = can(regex("^v[0-9]+[.][0-9]+[.][0-9]+$", var.cluster_autoscaler_version))
+    error_message = "cluster_autoscaler_version must be an exact tag such as v1.34.1, never latest."
+  }
+}
