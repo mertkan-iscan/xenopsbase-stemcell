@@ -1,7 +1,25 @@
 # ==============================================================================
 # K3s on Hetzner, via kube-hetzner.
 #
-# PREREQUISITE: an OS snapshot must already exist in the Hetzner project.
+# PREREQUISITES: TWO snapshots must already exist in the Hetzner project.
+#
+#   leapmicro-snapshot=yes   the base OS. bash infra/scripts/build-snapshot.sh
+#   xenopsbase-golden=yes    the image autoscaled nodes boot. make golden-image
+#
+# The second is newer (T-1.19) and is easy to miss: `data.hcloud_image.golden`
+# selects on that label, so without it `terraform plan` fails with
+#
+#   Resource (image) was not found using label selector: xenopsbase-golden=yes
+#
+# which names the selector but not the command that produces one. preflight.sh
+# checks for both before any apply starts, because `make up` retries
+# cluster-apply three times before giving up and a missing image is not a
+# transient fault.
+#
+# Both survive `make down` — they are snapshots, which ADR-0008 counts as
+# durable state — so on a normal rebuild they are simply already there. They
+# are absent on a fresh fork, a new Hetzner project, or an account whose
+# snapshots have been pruned.
 #
 # kube-hetzner 3.1.0 defaults new node pools to Leap Micro, so the snapshot must
 # carry leapmicro-snapshot=yes, NOT the microos-snapshot=yes that most tutorials
@@ -105,7 +123,42 @@ resource "hcloud_firewall_attachment" "autoscaled" {
   # block below says so out loud rather than leaving it to be discovered.
   count = local.autoscaler_pool == null || local.cluster_firewall_id == null ? 0 : 1
 
-  firewall_id     = local.cluster_firewall_id
+  firewall_id = local.cluster_firewall_id
+
+  # THE STATIC NODES ARE LISTED HERE EVEN THOUGH NOTHING HERE MANAGES THEM.
+  #
+  # `hcloud_firewall_attachment` declares the firewall's COMPLETE applied-to
+  # set, not an addition to it. kube-hetzner attaches the same firewall the
+  # other way round, by setting `firewall_ids` on each `hcloud_server`. Two
+  # owners, one relationship.
+  #
+  # Declaring only the label selector therefore reads as "and remove the three
+  # servers", and the plan says so:
+  #
+  #   ~ resource "hcloud_firewall_attachment" "autoscaled" {
+  #       ~ server_ids = [
+  #           - 163598446,
+  #           - 163598448,
+  #           - 163598680,
+  #         ]
+  #
+  # which is every node in the cluster leaving the firewall. It was caught by
+  # reading a plan rather than by anything failing: the apply that created this
+  # resource left the live state correct, and only the NEXT apply would have
+  # stripped them.
+  #
+  # Removing them is not an option either, even though the label selector could
+  # be widened to cover them: the module would see its servers' `firewall_ids`
+  # drift and put them back, and the two resources would undo each other on
+  # every alternate apply.
+  #
+  # So both owners are made to agree. The ids come from the module's own
+  # outputs, so they follow a rebuild rather than being pinned.
+  server_ids = concat(
+    [for k, v in module.kube_hetzner.control_planes : tonumber(v.id)],
+    [for k, v in module.kube_hetzner.agents : tonumber(v.id)],
+  )
+
   label_selectors = ["hcloud/node-group=${local.autoscaler_node_group}"]
 }
 

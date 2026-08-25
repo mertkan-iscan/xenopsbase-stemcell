@@ -304,6 +304,48 @@ case "$MODULE" in
           "it may belong to another project — check before applying"
     fi
 
+    # ------------------------------------------------------------------------
+    # THE IMAGES A NODE BOOTS FROM (T-1.18, T-1.19)
+    #
+    # Both are SNAPSHOTS, which are durable state: `make down` does not remove
+    # them (ADR-0008), so on a normal rebuild they are already there and these
+    # checks are silent. They matter for the cases where they are not — a fresh
+    # fork, a new Hetzner project, or an account whose snapshots were pruned.
+    #
+    # Checked HERE rather than left to terraform because `make up` retries
+    # cluster-apply three times with sleeps before giving up. A missing image is
+    # a one-line prerequisite problem, and without this it costs three failed
+    # applies to be told so.
+    # Filtered by the API, not by grepping the response. Hetzner pretty-prints
+    # its JSON -- `"xenopsbase-golden": "yes"`, with a space -- so a grep for
+    # `"label":"value"` finds nothing and reports a missing image that is
+    # sitting right there. That was the first version of this check, and it
+    # would have blocked `make up` on a project where everything was fine.
+    has_snapshot() {
+      curl -s -H "Authorization: Bearer ${TF_VAR_hcloud_token}" \
+        "https://api.hetzner.cloud/v1/images?type=snapshot&label_selector=$1" \
+        | grep -q '"id"'
+    }
+
+    if has_snapshot "leapmicro-snapshot%3Dyes"; then
+      pass "base OS snapshot (leapmicro-snapshot=yes)"
+    else
+      bad "no base OS snapshot in this project" \
+          "build it with: bash infra/scripts/build-snapshot.sh"
+    fi
+
+    # NEW PREREQUISITE as of T-1.19. Terraform selects the image autoscaled
+    # nodes boot by this label, and the label is only applied by T-1.20 AFTER a
+    # candidate has been booted and proved — so its absence means either that no
+    # image has been built, or that every build so far failed its boot test.
+    # Both are worth stopping for.
+    if has_snapshot "xenopsbase-golden%3Dyes"; then
+      pass "golden image (xenopsbase-golden=yes)"
+    else
+      bad "no golden image in this project" \
+          "build it with: make golden-image   (it boot-tests before publishing)"
+    fi
+
     if [ "$(tfvar "$ROOT/infra/terraform/cluster/env/$ENVIRONMENT.tfvars" node_transport_mode)" = "tailscale" ]; then
       if [ -n "${TF_VAR_tailscale_auth_key:-}" ]; then
         pass "Tailscale auth key present (node_transport_mode = tailscale)"
