@@ -55,6 +55,17 @@ data "hcloud_image" "golden" {
   # selectable and the failure would appear at scale-up as a Hetzner error
   # about the image rather than about the region.
   with_architecture = "x86"
+
+  # The k3s version is read off this image (see k3s_version in the module call
+  # below), so an image without the label is not merely unlabelled -- it silently
+  # returns the module to channel-following. Fail here, where the fix is obvious,
+  # rather than at the version mismatch it would cause weeks later.
+  lifecycle {
+    postcondition {
+      condition     = can(regex("^v[0-9]+[.][0-9]+[.][0-9]+_k3s[0-9]+$", lookup(self.labels, "k3s-version", "")))
+      error_message = "golden image ${self.id} carries no usable k3s-version label. Rebuild it: make golden-image"
+    }
+  }
 }
 
 # ------------------------------------------------------------------------------
@@ -154,9 +165,16 @@ resource "hcloud_firewall_attachment" "autoscaled" {
   #
   # So both owners are made to agree. The ids come from the module's own
   # outputs, so they follow a rebuild rather than being pinned.
+  #
+  # `module.kube_hetzner.agents` is empty since T-1.23 -- static agents are
+  # created by agents.tf, which sets `firewall_ids` on each server itself. It is
+  # still listed, and must be: this resource declares the firewall's COMPLETE
+  # applied-to set, so omitting servers another owner attached reads as "detach
+  # them" on the next apply. Same trap as the note above, from the other side.
   server_ids = concat(
     [for k, v in module.kube_hetzner.control_planes : tonumber(v.id)],
     [for k, v in module.kube_hetzner.agents : tonumber(v.id)],
+    [for k, v in hcloud_server.static_agent : v.id],
   )
 
   label_selectors = ["hcloud/node-group=${local.autoscaler_node_group}"]
@@ -198,12 +216,27 @@ locals {
   # refused -- because what went over the wire was the 35,332-character encoded
   # form. So the encoded length is the one that must fit, and it is the one
   # check-user-data-size.sh measures.
-  node_bootstrap_documented = templatefile("${path.module}/templates/node-bootstrap.yaml.tpl", {
-    server_url         = module.kube_hetzner.effective_node_join_endpoint
-    cluster_token      = module.kube_hetzner.cluster_token
-    tailscale_auth_key = var.tailscale_auth_key
-    node_group         = local.autoscaler_node_group
-  })
+  # RENDERED PER NODE GROUP, not once (T-1.23, #282).
+  #
+  # It was a single string while the autoscaled pool was the only thing that
+  # used it. Static agents now boot the same file, and the one value that
+  # differs is `node_group` -- which the autoscaler matches on to decide whether
+  # a node is one of its own. Rendering once and reusing the string would label
+  # every static agent as a member of the autoscaled pool, and the autoscaler
+  # would then consider deleting them when it scaled down.
+  node_groups = distinct(concat(
+    local.autoscaler_pool == null ? [] : [local.autoscaler_node_group],
+    [for p in var.agent_nodepools : "${var.cluster_name}-${var.environment}-${p.name}"],
+  ))
+
+  node_bootstrap_documented = {
+    for g in local.node_groups : g => templatefile("${path.module}/templates/node-bootstrap.yaml.tpl", {
+      server_url         = module.kube_hetzner.effective_node_join_endpoint
+      cluster_token      = module.kube_hetzner.cluster_token
+      tailscale_auth_key = var.tailscale_auth_key
+      node_group         = g
+    })
+  }
 
   # COMMENTS AND BLANK LINES ARE STRIPPED BEFORE THIS GOES ON THE WIRE.
   #
@@ -217,16 +250,18 @@ locals {
   # user_data, where they are merely carried. `#cloud-config` is kept: it is not
   # a comment, it is the header cloud-init dispatches on, and dropping it turns
   # the whole file into an inert blob that boots a node doing nothing at all.
-  node_bootstrap = join("\n", concat(
-    ["#cloud-config"],
-    [
-      for line in split("\n", local.node_bootstrap_documented) :
-      line
-      if trimspace(line) != "" && !startswith(trimspace(line), "#")
-    ]
-  ))
+  node_bootstrap = {
+    for g, documented in local.node_bootstrap_documented : g => join("\n", concat(
+      ["#cloud-config"],
+      [
+        for line in split("\n", documented) :
+        line
+        if trimspace(line) != "" && !startswith(trimspace(line), "#")
+      ]
+    ))
+  }
 
-  node_bootstrap_b64 = base64encode(local.node_bootstrap)
+  node_bootstrap_b64 = { for g, stripped in local.node_bootstrap : g => base64encode(stripped) }
 }
 
 locals {
@@ -360,7 +395,16 @@ module "kube_hetzner" {
   ssh_private_key = file(pathexpand(var.ssh_private_key_path))
 
   control_plane_nodepools = var.control_plane_nodepools
-  agent_nodepools         = var.agent_nodepools
+
+  # DELIBERATELY EMPTY, like autoscaler_nodepools below and for the same reason
+  # (T-1.23, #282). The pool is still declared in the tfvars and is still read
+  # -- by agents.tf, which creates the servers directly from the golden image.
+  #
+  # Given a pool, the module generates cloud-init that downloads and installs
+  # k3s at boot, over the pinned copy the image already carries. No variable
+  # skips it, so the only way to have one bootstrap path is for the module not
+  # to build the other one.
+  agent_nodepools = []
 
   # DELIBERATELY EMPTY, even though var.autoscaler_nodepools is not (T-1.19).
   #
@@ -381,6 +425,26 @@ module "kube_hetzner" {
   # The pool is still DECLARED in dev.tfvars and still read below -- this is
   # not "autoscaling off", it is "the module does not get to define a node".
   autoscaler_nodepools = []
+
+  # The exact k3s the fixed nodes install, taken from the golden image rather
+  # than written here (T-1.18).
+  #
+  # Unset, the module follows k3s_channel, which defaults to "stable". At module
+  # 3.1.0 that resolves to v1.36.3+k3s1 -- the same release the image carries --
+  # so the two agree today by coincidence and not by anything holding them
+  # together. A module bump changes what "stable" means, and the cluster then
+  # runs one k3s on its fixed nodes and another on its autoscaled ones, split by
+  # node class. That is the mismatch infra/packer/versions.pkrvars.hcl warns
+  # about, and until now nothing enforced it: that file says terraform reads the
+  # versions back from the snapshot labels, and terraform did not.
+  #
+  # READ, not repeated. versions.pkrvars.hcl is the single place the version is
+  # chosen; a literal here would be a second place to update and a silent
+  # divergence the first time someone bumps one and not the other. Hetzner label
+  # values reject "+", so the build stores v1.36.3_k3s1 and it converts back.
+  #
+  # k3s_version supersedes k3s_channel, so the channel default is now moot.
+  k3s_version = replace(data.hcloud_image.golden.labels["k3s-version"], "_", "+")
 
   cni_plugin = var.cni_plugin
 
@@ -556,8 +620,8 @@ module "kube_hetzner" {
         network_id         = module.kube_hetzner.network_id
         ca_image           = var.cluster_autoscaler_image
         ca_version         = var.cluster_autoscaler_version
-        node_bootstrap_b64 = local.node_bootstrap_b64
-        config_sha256      = sha256(local.node_bootstrap_b64)
+        node_bootstrap_b64 = local.node_bootstrap_b64[local.autoscaler_node_group]
+        config_sha256      = sha256(local.node_bootstrap_b64[local.autoscaler_node_group])
       }
     }
   }
