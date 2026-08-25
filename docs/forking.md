@@ -159,6 +159,7 @@ Then, and these are the ones people forget because nothing fails without them:
 
 ```bash
 make snapshot                 # once per Hetzner project; Packer must be exactly 1.16.0
+make golden-image             # the image nodes boot; boot-tests before publishing
 make storage-apply ENV=dev
 make edge-apply ENV=dev
 make up ENV=dev

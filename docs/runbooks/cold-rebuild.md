@@ -120,11 +120,45 @@ fails the same way every time. Read the last error rather than running it again.
 
 ## `make up` fails with "no image found"
 
-The OS snapshot is missing. It is durable state, so this means it was deleted, or this is a genuinely
-empty Hetzner project.
+**There are two images, and either can be the one that is missing.** Both are snapshots, so both are
+durable state (ADR-0008) and both survive `make down` — a normal rebuild finds them already there.
+Missing means deleted, pruned, or a genuinely empty Hetzner project.
+
+`make up` runs `preflight.sh` first, which now names whichever one is absent before any apply starts:
+
+```
+  ✓ base OS snapshot (leapmicro-snapshot=yes)
+  ✗ no golden image in this project
+      build it with: make golden-image   (it boot-tests before publishing)
+```
+
+That check exists because `make up` retries `cluster-apply` three times before giving up, and a
+missing image is not a transient fault — without it, a one-line prerequisite problem costs three
+failed applies to diagnose.
+
+**The base OS snapshot** (`leapmicro-snapshot=yes`):
 
 ```bash
 make snapshot
+```
+
+**The golden image** (`xenopsbase-golden=yes`) — what nodes actually boot, carrying pinned k3s,
+Tailscale, the compiled SELinux policy and the `k3s-agent` unit (T-1.18, T-1.19):
+
+```bash
+make golden-image
+```
+
+It builds on top of the base snapshot, so build that one first. It also **boot-tests the result
+before publishing** (T-1.20): a candidate that fails is deleted rather than labelled, which is why
+the absence of `xenopsbase-golden=yes` can also mean every build so far failed its boot test — read
+the build output rather than assuming nothing was run.
+
+If terraform is reached before preflight for any reason, the error names the selector but not the
+fix:
+
+```
+Resource (image) was not found using label selector: xenopsbase-golden=yes
 ```
 
 Packer must be **exactly 1.16.0** — the kube-hetzner template pins `required_version = "= 1.16.0"`,
