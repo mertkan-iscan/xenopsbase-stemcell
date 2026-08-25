@@ -118,6 +118,27 @@ packer build \
   -var "selinux_policy_dir=$POLICY_DIR" \
   "$PACKER_DIR/golden-image.pkr.hcl"
 
+# ---------------------------------------------------------------------------
+# THAT PRODUCED A CANDIDATE, NOT A GOLDEN IMAGE (T-1.20, #252)
+#
+# Packer exiting 0 means the provisioners ran. It does not mean the snapshot
+# BOOTS -- every assertion inside the template ran on the build instance, which
+# was already up, already had a machine-id, already had cloud-init state. The
+# build's last act is to empty /etc/machine-id and wipe cloud-init's state so
+# the image comes up fresh, and nothing above can tell you whether it does.
+#
+# So the snapshot leaves that step labelled `xenopsbase-golden=candidate`,
+# which nothing selects, and the step below boots one and finds out.
+#
+# Promotion to `xenopsbase-golden=yes` happens in there, AFTER the assertions.
+# A failure deletes the candidate, leaving the previous golden image as the
+# newest one, so a bad build cannot become the image nodes boot from.
+#
+# This needs ONE server beyond whatever is already running. Packer's build
+# instance is destroyed by this point, so the peak is not the two together.
+echo ""
+bash "$ROOT/infra/scripts/validate-golden-image.sh"
+
 # python3 on Linux, python on Windows -- resolved by RUNNING each candidate,
 # because Windows ships a python3 App Execution Alias that satisfies `command -v`
 # and then exits 49 printing an advert for the Microsoft Store.
@@ -125,7 +146,7 @@ PY_BIN="$(python3 -c '' >/dev/null 2>&1 && echo python3 || echo python)"
 
 echo ""
 echo "=================================================================="
-echo " Golden image built"
+echo " Golden images in this project"
 echo "=================================================================="
 curl -sS -H "Authorization: Bearer ${HCLOUD_TOKEN}" \
   "https://api.hetzner.cloud/v1/images?type=snapshot&label_selector=xenopsbase-golden%3Dyes" \

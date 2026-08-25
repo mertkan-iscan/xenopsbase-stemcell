@@ -44,7 +44,21 @@ def plan(images, servers, keep):
 
     golden = [i for i in images if labels(i).get("xenopsbase-golden") == "yes"]
     base = [i for i in images if labels(i).get("leapmicro-snapshot") == "yes"]
-    known = {i["id"] for i in golden} | {i["id"] for i in base}
+
+    # A CANDIDATE is a build that never finished being validated (T-1.20, #252).
+    # validate-golden-image.sh promotes one to `yes` or deletes it, so a
+    # candidate surviving means that run died between the two -- a crash, a
+    # Ctrl-C, a dropped connection.
+    #
+    # It matters that these are recognised HERE. Left unlabelled to this policy
+    # they would fall through to "not ours to delete" and accumulate for ever,
+    # which is precisely the growth #253 was filed about. And they cannot be
+    # kept "just in case": nothing selects a candidate, so an unvalidated image
+    # is storage with no consumer.
+    candidate = [i for i in images
+                 if labels(i).get("xenopsbase-golden") == "candidate"]
+
+    known = {i["id"] for i in golden} | {i["id"] for i in base} | {i["id"] for i in candidate}
     other = [i for i in images if i["id"] not in known]
 
     golden.sort(key=lambda i: i["created"], reverse=True)
@@ -54,6 +68,16 @@ def plan(images, servers, keep):
         decisions.append(("KEEP", i, "base image — golden images are built from it"))
     for i in other:
         decisions.append(("SKIP", i, "not labelled by this project — not ours to delete"))
+    for i in candidate:
+        # The in-use check is what makes this safe to run at any moment: during
+        # a validation the throwaway instance IS booted from the candidate, so
+        # it reads as in use and is kept. The only unguarded window is the few
+        # seconds between packer finishing and that server existing, and this
+        # command is run by hand.
+        if i["id"] in in_use:
+            decisions.append(("KEEP", i, "a running server is booted from it — validation in progress"))
+        else:
+            decisions.append(("DELETE", i, "an abandoned candidate — validation never finished, nothing selects it"))
 
     for rank, i in enumerate(golden):
         if i["id"] in in_use:
@@ -82,6 +106,9 @@ def _self_test():
 
     def golden(i, created):
         return img(i, created, **{"xenopsbase-golden": "yes"})
+
+    def candidate(i, created):
+        return img(i, created, **{"xenopsbase-golden": "candidate"})
 
     cases = []
 
@@ -121,6 +148,29 @@ def _self_test():
          golden(11, "2026-08-11"), golden(10, "2026-08-10"),
          img(50, "2026-02-02")],
         [{"image": {"id": 10}}], 2))
+
+    # Candidates (T-1.20, #252). A candidate is a validation that never
+    # finished; nothing selects one, so keeping it is pure cost.
+    cases.append((
+        "an abandoned candidate is deleted", [8],
+        [candidate(8, "2026-08-20"), golden(1, "2026-08-01")], [], 3))
+
+    # ...but NOT while its validation instance is still booted from it. The
+    # window is small and this would delete the image out from under a running
+    # check, which is a confusing failure to debug.
+    cases.append((
+        "a candidate under validation is kept", [],
+        [candidate(8, "2026-08-20"), golden(1, "2026-08-01")],
+        [{"image": {"id": 8}}], 3))
+
+    # A candidate must not be counted as a golden image. If it were, its
+    # presence would push a real one out of the keep window -- deleting
+    # something bootable in order to retain something nothing can boot.
+    # Only the candidate goes; all three goldens survive.
+    cases.append((
+        "a candidate does not occupy a keep slot", [9],
+        [candidate(9, "2026-08-20"), golden(3, "2026-08-03"),
+         golden(2, "2026-08-02"), golden(1, "2026-08-01")], [], 3))
 
     failures = 0
     for name, expected, images, servers, keep in cases:

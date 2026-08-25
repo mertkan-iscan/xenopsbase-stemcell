@@ -352,8 +352,12 @@ java-home: ## Report which JDK the build will use, and why
 	@printf "selected:  "; bash $(SCRIPTS)/java-home.sh
 
 .PHONY: golden-image
-golden-image: ## Build the image every node boots from: pinned k3s, Tailscale, SELinux (T-1.18)
+golden-image: ## Build, boot-test and publish the image every node boots from (T-1.18, T-1.20)
 	@bash $(SCRIPTS)/build-golden-image.sh
+
+.PHONY: validate-golden-image
+validate-golden-image: ## Boot a candidate image and promote it only if it passes (T-1.20)
+	@bash $(SCRIPTS)/validate-golden-image.sh $(SNAPSHOT)
 
 .PHONY: api-spec
 api-spec: ## Regenerate docs/api/*.json from the services

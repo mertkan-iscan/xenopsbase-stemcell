@@ -93,3 +93,10 @@ infra/dev/.logs/
 # a failure can be read after the fact; it is a per-run artefact, not a record.
 # The numbers worth keeping go in docs/slos.md.
 k6-baseline-*.log
+
+# Packer writes the candidate snapshot id here so validate-golden-image.sh knows
+# exactly which image the build just made, rather than guessing at "the newest
+# candidate" and promoting the wrong one when two builds overlap (T-1.20). It is a
+# per-run artefact; the id that matters ends up as a label on the snapshot.
+infra/packer/manifest.json
+infra/packer/manifest.json.lock
