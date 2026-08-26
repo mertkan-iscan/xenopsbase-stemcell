@@ -82,8 +82,11 @@ Nobody maintains a bespoke Kubernetes installer. The k3s server bootstrap, kubec
 cluster networking, CCM and CSI remain the module's problem, reviewed upstream by more operators
 than this project has.
 
-#285 and #286 close as not-planned rather than hanging open against a decision already made — the
-backlog and the decision agree again.
+#285 and #286 stop hanging open against a decision already made. Both closed as completed, and the
+distinction matters: their *work* is merged — #292 baked both k3s units into the image, the server
+unit byte-identical to a running control plane's and boot-tested, and the join token is ours
+(ADR-0013) — while their *purpose*, preparing the control-plane conversion, is what this decision
+declines. The record says the work exists and the road it was paving is closed.
 
 ### What this makes hard
 
@@ -142,5 +145,8 @@ Carried from #287, with two added by this ADR:
   one, which changes the premise of the taint workaround and the schedulability arithmetic — the
   inventory must be re-verified at that count, not assumed.
 
-If it reopens: #285 and #286 come back verbatim, in that order, and `cluster-v2`'s design starts
-from the record in ADR-0013 rather than from the deleted tree.
+If it reopens: the groundwork is further along than a closed backlog suggests — the image already
+carries a boot-tested server unit (#292, #285) and the token is injected (ADR-0013, #286). What
+remains is #286's other four primitives — endpoint, network, SSH key, kubeconfig — recovered by
+the comparison discipline that card describes, and `cluster-v2`'s design starts from the record in
+ADR-0013 rather than from the deleted tree.

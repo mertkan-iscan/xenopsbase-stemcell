@@ -143,8 +143,8 @@ make snapshot
 ```
 
 **The golden image** (`xenopsbase-golden=yes`) — what every agent and every autoscaled node boots,
-carrying pinned k3s, Tailscale, the compiled SELinux policy and the k3s agent unit (T-1.18,
-T-1.19). The control plane boots the base snapshot above, permanently: #287 decided the project
+carrying pinned k3s, Tailscale, the compiled SELinux policy and both k3s units (T-1.18, T-1.19,
+T-1.24). The control plane boots the base snapshot above, permanently: #287 decided the project
 stays on kube-hetzner, so the split is the design rather than a stage of it (ADR-0015):
 
 ```bash
