@@ -618,49 +618,24 @@ module "kube_hetzner" {
   # the root Application is an argoproj.io CRD, which does not exist until Argo
   # CD has installed. Applying both at once fails on a missing resource type.
   # ----------------------------------------------------------------------------
+  # STAGES 1 AND 2 HAVE MOVED to bootstrap.tf (ADR-0014, T-1.27).
+  #
+  # They installed Argo CD and applied the root Application, here, at the end of
+  # the module's apply. That was correct while the module also created the
+  # agents. Since T-1.23 terraform creates them, and it cannot create one until
+  # the module returns -- so the platform was applied to a cluster whose only
+  # node was the control plane, and all of it scheduled onto a cx23.
+  #
+  # Build 3 is the clearest evidence: 12/14 applications Healthy, held for about
+  # 400 seconds, then 0/0 and a timeout. The platform is not broken; it does not
+  # fit. bootstrap.tf applies it behind hcloud_server.static_agent, so there is
+  # somewhere for it to land.
+  #
+  # STAGE 3 STAYS. It is the autoscaler's node definition -- the golden image
+  # id, the network, the join token -- which is infrastructure rather than
+  # platform, and the one place ADR-0004's rule bends. It waits for nothing and
+  # applies a Deployment that can sit Pending harmlessly until an agent exists.
   user_kustomizations = {
-    "1" = {
-      source_folder = "${path.module}/manifests/10-argocd"
-      kustomize_parameters = {
-        argocd_chart_version = var.argocd_chart_version
-        argocd_domain        = var.argocd_domain
-        ksops_version        = var.ksops_version
-        # Indented to sit under the YAML block scalar in the Secret template.
-        sops_age_key = indent(4, var.sops_age_key)
-      }
-      # The rendered Secret contains the age private key in cleartext. Once
-      # applied it is in etcd, where it has to be; leaving a copy on the node's
-      # filesystem as well is gratuitous, and that copy outlives the apply.
-      post_commands = "shred -u /var/user_kustomize/1/sops-age-secret.yaml 2>/dev/null || rm -f /var/user_kustomize/1/sops-age-secret.yaml"
-    }
-    "2" = {
-      source_folder = "${path.module}/manifests/20-root-app"
-      kustomize_parameters = {
-        platform_repo_url      = var.platform_repo_url
-        platform_repo_revision = var.platform_repo_revision
-        platform_path          = "platform/envs/${var.environment}"
-      }
-      # k3s installs the chart asynchronously, so the CRD appears some time
-      # after set 1 is applied.
-      #
-      # `kubectl wait` alone is NOT enough: it errors immediately when the
-      # object does not exist yet, rather than waiting for it to appear. So the
-      # first loop waits for existence, and only then does wait block on the
-      # condition. Getting this wrong fails with
-      #
-      #   Error from server (NotFound): customresourcedefinitions ...
-      #     "applications.argoproj.io" not found
-      #
-      # which reads like the chart is broken rather than like a race.
-      pre_commands = <<-EOT
-        for i in $(seq 1 60); do
-          kubectl get crd applications.argoproj.io >/dev/null 2>&1 && break
-          echo "waiting for the Argo CD CRDs to appear ($i/60)"
-          sleep 5
-        done
-        kubectl wait --for=condition=established --timeout=120s crd/applications.argoproj.io
-      EOT
-    }
     # --------------------------------------------------------------------------
     # Node creation (T-1.19, #251)
     #
