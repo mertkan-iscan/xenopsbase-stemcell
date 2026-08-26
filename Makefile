@@ -497,6 +497,16 @@ cluster-destroy: ## Destroy the cluster. Does NOT touch the durable buckets or t
 	@# has to happen while the nodes are still alive -- afterwards there is nothing
 	@# left to do it. Set KEEP_VOLUMES=1 to skip.
 	@bash $(SCRIPTS)/release-cluster-volumes.sh $(ENV)
+	@# The autoscaler's nodes are not terraform's, so `terraform destroy` leaves
+	@# them -- and they hold the private network, so the SUBNET will not delete
+	@# and the destroy hangs rather than fails (#294):
+	@#
+	@#   hcloud_network_subnet.control_plane[0]: Still destroying... [08m50s elapsed]
+	@#
+	@# Same gap as #159 one level up: the teardown reaps volumes it did not
+	@# create and did not reap servers it did not create. Before the destroy,
+	@# because after it there is no cluster left to stop the autoscaler with.
+	@bash $(SCRIPTS)/reap-autoscaled-nodes.sh $(ENV)
 	@cd $(CLUSTER_DIR) && terraform destroy $(APPROVE) -var-file=$(TFVARS)
 	@# Reap what the in-cluster release could not (#159). The CSI driver has a
 	@# 300s budget and the Prometheus volume routinely outlives it, so destroy
