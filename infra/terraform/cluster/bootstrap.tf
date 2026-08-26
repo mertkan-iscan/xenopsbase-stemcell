@@ -209,6 +209,60 @@ resource "terraform_data" "platform_bootstrap_files" {
   depends_on = [terraform_data.platform_bootstrap]
 }
 
+# ==============================================================================
+# THE CONTROL PLANE IS NOT A WORKER (T-2.22, #298)
+#
+# The module will not taint it and cannot be made to. `is_single_node_cluster`
+# sums the control-plane, agent and autoscaler counts (locals.tf:2232), and both
+# other pools are [] here since T-1.23 -- so on dev the sum is the control-plane
+# count, the cluster reads as single-node, and the taint is dropped
+# (locals.tf:2338). `allow_scheduling_on_control_plane` resolves as
+# `is_single_node_cluster ? true : var...`, so the first arm always wins and the
+# variable is never read. That was measured and recorded in #282.
+#
+# ADR-0014 fixed the BOOTSTRAP ordering, and only that. The platform lands on
+# workers at build time now, which is what stopped the collapses. Nothing stopped
+# the scheduler putting workloads there afterwards, and under a k6 baseline --
+# ten virtual users, the mildest load in this repository -- it did:
+#
+#   control plane   cpu 1535m (76%) on a cx23, load average 7.03 on two vCPU
+#                   apps/core, apps/gateway, database/postgres-2
+#
+# That is build 1 of #282 in miniature. It did not collapse because the load was
+# mild. A cx23 running etcd and the API server is the one node whose degradation
+# takes the cluster with it.
+#
+# AFTER THE PLATFORM, NOT BEFORE. Tainted before the module's own bootstrap runs,
+# Argo CD has nowhere to install -- which is the deadlock build 2 spent three
+# applies on. By this point the agents are Ready and the platform is applied.
+#
+# NoSchedule does not evict, so anything already placed stays until it
+# reschedules. On a cold build almost nothing is: this runs before Argo has
+# created the application workloads at all.
+# ==============================================================================
+resource "terraform_data" "control_plane_taint" {
+  triggers_replace = { host = local.bootstrap_host }
+
+  connection {
+    type        = "ssh"
+    user        = "root"
+    host        = local.bootstrap_host
+    private_key = file(pathexpand(var.ssh_private_key_path))
+    timeout     = "5m"
+  }
+
+  provisioner "remote-exec" {
+    inline = [<<-EOT
+      set -e
+      kubectl taint nodes -l node-role.kubernetes.io/control-plane         node-role.kubernetes.io/control-plane=:NoSchedule --overwrite
+      echo "control plane tainted; workloads that do not tolerate it will schedule elsewhere"
+    EOT
+    ]
+  }
+
+  depends_on = [terraform_data.platform_apply]
+}
+
 resource "terraform_data" "platform_apply" {
   triggers_replace = {
     content = sha256(jsonencode({ for k, v in local.bootstrap_files : k => v.content }))
