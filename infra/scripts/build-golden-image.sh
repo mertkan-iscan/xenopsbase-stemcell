@@ -2,8 +2,8 @@
 #
 # Builds the golden image agents and autoscaled nodes boot (T-1.18, #250).
 #
-# NOT every node, yet. The control plane is still provisioned by kube-hetzner
-# from the base OS snapshot; T-1.26 (#287) is what makes "every" true.
+# NOT every node, and not pending: the control plane is provisioned by
+# kube-hetzner from the base OS snapshot, by decision (ADR-0015, #287).
 #
 # WHERE THIS SITS
 #

@@ -1,5 +1,7 @@
 /*
- * The golden image every node boots from (T-1.18, #250).
+ * The golden image every worker boots -- static agents and autoscaled nodes
+ * (T-1.18, #250). The control plane stays on the module's base snapshot, by
+ * decision rather than by delay (ADR-0015, #287).
  *
  * WHY THIS EXISTS
  *

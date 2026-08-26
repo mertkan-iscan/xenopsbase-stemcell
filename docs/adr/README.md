@@ -65,3 +65,4 @@ than a clean file that hides the fact a mistake was ever made.
 | [0010](0010-user-identity-durability.md) | User identity is durable; declared users carry explicit ids | Accepted |
 | [0013](0013-node-identity-is-injected.md) | A node's identity is injected before any node exists, never discovered from one | Accepted (token half; endpoint half withdrawn) |
 | [0014](0014-provisioning-and-platform-are-separate-phases.md) | Provisioning the cluster and bootstrapping the platform are separate phases | Accepted |
+| [0015](0015-kube-hetzner-stays.md) | The cluster stays on kube-hetzner, as a hybrid with a chosen boundary | Accepted |
