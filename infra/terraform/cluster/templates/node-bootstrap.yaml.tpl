@@ -52,6 +52,25 @@
 # About twenty bytes against a 2 KB budget. make user-data-size is the gate.
 disable_root: false
 
+# NODE LABELS AND TAINTS COME FROM THE POOL (T-1.23, #282).
+#
+# The extra_node_labels and node_taints parameters below are rendered from the
+# pool's own `labels` and `taints` in main.tf. (Written without the template
+# syntax on purpose: templatefile interpolates comments too, and a multi-line
+# value would spill past the leading # and land in the cloud-config as
+# top-level YAML.)
+#
+# The module used to apply them and stopped
+# being given the pools, so between #282 and this they were declared in the
+# tfvars, accepted by the variable, and silently dropped.
+#
+# Both keep the module's spelling, so a tfvars file does not change:
+#
+#   labels = ["workload=general"]
+#   taints = ["dedicated=db:NoSchedule"]
+#
+# Both render to nothing when the pool declares none, which is every pool
+# today -- so this costs no user_data bytes until someone uses it.
 write_files:
   - path: /etc/rancher/k3s/config.yaml
     permissions: '0600'
@@ -65,7 +84,8 @@ write_files:
       "node-label":
       - "k3s_upgrade=true"
       - "hcloud/node-group=${node_group}"
-      "node-taint": []
+${extra_node_labels}
+      "node-taint":${node_taints}
       "selinux": true
       "server": "${server_url}"
       "token": "${cluster_token}"

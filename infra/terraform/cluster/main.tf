@@ -174,17 +174,52 @@ locals {
   # a node is one of its own. Rendering once and reusing the string would label
   # every static agent as a member of the autoscaled pool, and the autoscaler
   # would then consider deleting them when it scaled down.
-  node_groups = distinct(concat(
-    local.autoscaler_pool == null ? [] : [local.autoscaler_node_group],
-    [for p in var.agent_nodepools : "${var.cluster_name}-${var.environment}-${p.name}"],
-  ))
+  #
+  # A MAP, not a list of names, since the pools carry more than a name.
+  # `labels` and `taints` were declared on agent_nodepools, honoured by the
+  # module, and then silently dropped when #282 stopped handing it the pools --
+  # no error, no plan diff, the node simply came up without them. They are
+  # Kubernetes-level facts, so the bootstrap is where they belong now: they go
+  # into /etc/rancher/k3s/config.yaml, which is the same place the module put
+  # them.
+  #
+  # The autoscaled pool has neither, and its variable never offered them. It is
+  # given empty lists rather than a special case in the template.
+  node_groups = merge(
+    local.autoscaler_pool == null ? {} : {
+      (local.autoscaler_node_group) = { labels = [], taints = [] }
+    },
+    {
+      for p in var.agent_nodepools :
+      "${var.cluster_name}-${var.environment}-${p.name}" => {
+        labels = p.labels
+        taints = p.taints
+      }
+    },
+  )
 
   node_bootstrap_documented = {
-    for g in local.node_groups : g => templatefile("${path.module}/templates/node-bootstrap.yaml.tpl", {
+    for g, cfg in local.node_groups : g => templatefile("${path.module}/templates/node-bootstrap.yaml.tpl", {
       server_url         = module.kube_hetzner.effective_node_join_endpoint
       cluster_token      = random_password.cluster_token.result
       tailscale_auth_key = var.tailscale_auth_key
       node_group         = g
+
+      # Rendered here rather than with a template directive, because the
+      # comment stripper below works line by line and a `%{ for }` block would
+      # have to survive it. Pre-joined YAML is one interpolation and cannot be
+      # broken by stripping.
+      #
+      # Empty renders as an empty string, which the stripper then removes along
+      # with the blank lines -- so a pool with no labels costs zero bytes
+      # against the 2 KB budget, and `make user-data-size` stays the gate.
+      extra_node_labels = join("\n", [for l in cfg.labels : "      - \"${l}\""])
+
+      # `[]` inline when there are none, a block list when there are. k3s
+      # accepts both; the inline form is what a node without taints has always
+      # had, and keeping it means this change is a no-op in every existing
+      # environment.
+      node_taints = length(cfg.taints) == 0 ? " []" : "\n${join("\n", [for t in cfg.taints : "      - \"${t}\""])}"
     })
   }
 
