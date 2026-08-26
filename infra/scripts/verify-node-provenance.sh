@@ -98,7 +98,23 @@ while IFS=$'\t' read -r name image_id; do
     note info "image ${image_id} ships k3s ${want}"
   fi
 
-  host="${name}${DOMAIN:+.$DOMAIN}"
+  # RESOLVED FROM THE TAILNET, NOT FROM MAGICDNS.
+  #
+  # Tailscale appends a suffix when a hostname is taken, and a rebuilt node
+  # finds its own name held by its dead predecessor:
+  #
+  #   xenopsbase-dev-worker-0      offline, last seen 31m ago   <- MagicDNS answers this
+  #   xenopsbase-dev-worker-0-1    offline, last seen 6m ago
+  #   xenopsbase-dev-worker-0-2    the node that is actually running
+  #
+  # So the name resolves to a corpse and the ssh times out. The node bootstrap
+  # calls its key ephemeral, which would have these removed on disconnect; the
+  # devices above say otherwise, and that is #290.
+  #
+  # Prefer the live device whose name is the server name or that name plus a
+  # numeric suffix. Fall back to MagicDNS when tailscale is not on this machine.
+  host="$(tailscale status 2>/dev/null     | awk -v n="$name" '$2 == n || $2 ~ "^"n"-[0-9]+$" { if ($0 !~ /offline/) { print $1; exit } }')"
+  host="${host:-${name}${DOMAIN:+.$DOMAIN}}"
   out="$(ssh $SSH_OPTS "root@${host}" '
     printf "GOT_VERSION=%s\n" "$(/usr/local/bin/k3s --version 2>/dev/null | head -1 | awk "{print \$3}")"
     printf "BTIME=%s\n"      "$(awk "/btime/{print \$2}" /proc/stat)"
