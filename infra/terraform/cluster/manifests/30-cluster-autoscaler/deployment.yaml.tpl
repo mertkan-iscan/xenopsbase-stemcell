@@ -89,6 +89,27 @@ spec:
               value: "${ssh_key_id}"
             - name: HCLOUD_NETWORK
               value: "${network_id}"
+            # ATTACHED AT CREATION, not afterwards (T-1.28).
+            #
+            # This was an hcloud_firewall_attachment in terraform, which meant
+            # two owners of one relation: every hcloud_server also declares its
+            # own firewall_ids, and the last write won. The live firewall ended
+            # up with three servers and zero label selectors -- the selector
+            # this was supposed to apply, silently gone -- and the destroy then
+            # failed trying to remove something that was not there:
+            #
+            #   firewall with ID 11522374 cannot be removed from
+            #   label_selector: resource not found
+            #
+            # which blocked `make down` entirely and had to be cleared by hand.
+            #
+            # The env var is what the module's own autoscaler template uses. It
+            # also closes a window the attachment could not: a node created
+            # before the attachment existed came up on a public address with
+            # nothing in front of it, which the `check` block in main.tf warned
+            # about and could only warn about.
+            - name: HCLOUD_FIREWALL
+              value: "${firewall_id}"
             # A new node needs a route to the internet to reach the tailnet
             # coordination server and pull images. Closing this off is a
             # separate decision (a NAT router), not something to do by accident

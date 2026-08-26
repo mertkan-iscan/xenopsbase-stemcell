@@ -120,106 +120,31 @@ data "hcloud_image" "golden" {
 # `serverLabels`, not the Kubernetes node label of the same name. They are
 # deliberately spelled the same so the two views of a node agree.
 # ------------------------------------------------------------------------------
-# PLURAL, and with no depends_on. Both are deliberate and both were arrived at
-# by getting it wrong first.
+# GONE: data.hcloud_firewalls.all, hcloud_firewall_attachment.autoscaled, and
+# the check block that watched over them (T-1.28).
 #
-# `data "hcloud_firewall"` with depends_on = [module.kube_hetzner] is the
-# obvious spelling. It defers the read to apply time, which leaves the id
-# unknown during plan, and terraform then reports:
+# The attachment existed to put autoscaled nodes behind the cluster firewall,
+# because the autoscaler creates them outside terraform. It was a second owner
+# of a relation every hcloud_server already declares through its own
+# firewall_ids, and the last write won. Observed on a live cluster: three
+# servers attached and ZERO label selectors -- the selector the attachment was
+# there to apply, silently absent -- and then the destroy failed on it:
 #
-#   Error: Missing required argument
-#     with hcloud_firewall_attachment.autoscaled[0]
-#     The argument "firewall_id" is required, but no definition was found.
+#   Error: firewall with ID 11522374 cannot be removed from label_selector:
+#   resource not found
 #
-# pointing at the line where firewall_id is plainly defined. The argument is
-# not missing; its value is unknowable at that point.
+# `make down` could not get past that. It took a `terraform state rm` by hand,
+# which is not a thing a teardown path should ever need.
 #
-# Dropping depends_on fixes that but breaks the other direction: on a COLD
-# build the firewall does not exist when the plan is made, and the singular
-# data source errors out rather than returning nothing -- which would fail
-# `make up` from nothing, an acceptance criterion of this card.
+# The autoscaler takes HCLOUD_FIREWALL and creates its nodes WITH the firewall
+# already attached -- what the module's own autoscaler template does. That is
+# one owner per relation, and it also closes the window the check block could
+# only warn about: a node created before the attachment existed came up on a
+# public address with nothing in front of it.
 #
-# The plural source returns an empty list instead of failing, so both cases
-# work. The filtering is done here rather than by the API because
-# hcloud_firewalls filters on labels, not names.
-data "hcloud_firewalls" "all" {}
-
-locals {
-  cluster_firewall_id = one([
-    for f in data.hcloud_firewalls.all.firewalls :
-    f.id if f.name == "${var.cluster_name}-${var.environment}"
-  ])
-}
-
-resource "hcloud_firewall_attachment" "autoscaled" {
-  # Absent on the very first apply of a brand-new cluster, because the firewall
-  # is created by that same apply and this was planned before it existed. No
-  # node is unprotected in that window: the pool starts at min_nodes = 0, so
-  # there is nothing to attach to yet. The next apply creates it, and the check
-  # block below says so out loud rather than leaving it to be discovered.
-  count = local.autoscaler_pool == null || local.cluster_firewall_id == null ? 0 : 1
-
-  firewall_id = local.cluster_firewall_id
-
-  # THE STATIC NODES ARE LISTED HERE EVEN THOUGH NOTHING HERE MANAGES THEM.
-  #
-  # `hcloud_firewall_attachment` declares the firewall's COMPLETE applied-to
-  # set, not an addition to it. kube-hetzner attaches the same firewall the
-  # other way round, by setting `firewall_ids` on each `hcloud_server`. Two
-  # owners, one relationship.
-  #
-  # Declaring only the label selector therefore reads as "and remove the three
-  # servers", and the plan says so:
-  #
-  #   ~ resource "hcloud_firewall_attachment" "autoscaled" {
-  #       ~ server_ids = [
-  #           - 163598446,
-  #           - 163598448,
-  #           - 163598680,
-  #         ]
-  #
-  # which is every node in the cluster leaving the firewall. It was caught by
-  # reading a plan rather than by anything failing: the apply that created this
-  # resource left the live state correct, and only the NEXT apply would have
-  # stripped them.
-  #
-  # Removing them is not an option either, even though the label selector could
-  # be widened to cover them: the module would see its servers' `firewall_ids`
-  # drift and put them back, and the two resources would undo each other on
-  # every alternate apply.
-  #
-  # So both owners are made to agree. The ids come from the module's own
-  # outputs, so they follow a rebuild rather than being pinned.
-  #
-  # `module.kube_hetzner.agents` is empty since T-1.23 -- static agents are
-  # created by agents.tf, which sets `firewall_ids` on each server itself. It is
-  # still listed, and must be: this resource declares the firewall's COMPLETE
-  # applied-to set, so omitting servers another owner attached reads as "detach
-  # them" on the next apply. Same trap as the note above, from the other side.
-  server_ids = concat(
-    [for k, v in module.kube_hetzner.control_planes : tonumber(v.id)],
-    [for k, v in module.kube_hetzner.agents : tonumber(v.id)],
-    [for k, v in hcloud_server.static_agent : v.id],
-  )
-
-  label_selectors = ["hcloud/node-group=${local.autoscaler_node_group}"]
-}
-
-# A warning, not an error. Failing here would break the cold build this is
-# trying to protect; saying nothing would let an autoscaled node come up on a
-# public IP with no firewall and report success -- which is the exact shape
-# this repository keeps finding.
-check "autoscaled_nodes_are_firewalled" {
-  assert {
-    condition = local.autoscaler_pool == null || local.cluster_firewall_id != null
-    error_message = join(" ", [
-      "No firewall attachment for autoscaled nodes yet: the cluster firewall",
-      "did not exist when this plan was made. Expected on a cold build.",
-      "Run `make cluster-apply ENV=${var.environment}` again before allowing a",
-      "scale-up, or nodes will be created outside the firewall."
-    ])
-  }
-}
+# The env var is set in manifests/30-cluster-autoscaler, which moved to
+# bootstrap.tf so it can be handed the firewall id without a cycle.
+# ------------------------------------------------------------------------------
 
 locals {
   # The autoscaled pool. Declared in dev.tfvars like any other nodepool, but
@@ -618,55 +543,20 @@ module "kube_hetzner" {
   # the root Application is an argoproj.io CRD, which does not exist until Argo
   # CD has installed. Applying both at once fails on a missing resource type.
   # ----------------------------------------------------------------------------
-  # STAGES 1 AND 2 HAVE MOVED to bootstrap.tf (ADR-0014, T-1.27).
+  # EMPTY (ADR-0014, T-1.28). The module provisions machines and nothing above
+  # them; every kustomization now lives in bootstrap.tf.
   #
-  # They installed Argo CD and applied the root Application, here, at the end of
-  # the module's apply. That was correct while the module also created the
-  # agents. Since T-1.23 terraform creates them, and it cannot create one until
-  # the module returns -- so the platform was applied to a cluster whose only
-  # node was the control plane, and all of it scheduled onto a cx23.
+  # Stages 1 and 2 -- Argo CD and the root Application -- moved because they ran
+  # before terraform could create an agent, so the whole platform scheduled onto
+  # a cx23. Build 3: 12/14 applications Healthy, held ~400s, collapsed to 0/0.
   #
-  # Build 3 is the clearest evidence: 12/14 applications Healthy, held for about
-  # 400 seconds, then 0/0 and a timeout. The platform is not broken; it does not
-  # fit. bootstrap.tf applies it behind hcloud_server.static_agent, so there is
-  # somewhere for it to land.
-  #
-  # STAGE 3 STAYS. It is the autoscaler's node definition -- the golden image
-  # id, the network, the join token -- which is infrastructure rather than
-  # platform, and the one place ADR-0004's rule bends. It waits for nothing and
-  # applies a Deployment that can sit Pending harmlessly until an agent exists.
-  user_kustomizations = {
-    # --------------------------------------------------------------------------
-    # Node creation (T-1.19, #251)
-    #
-    # Applied last because it needs the join token and the cluster to exist. It
-    # replaces the autoscaler the module would have deployed, with one whose
-    # node bootstrap fits inside Hetzner's user_data limit.
-    #
-    # This is Terraform's business rather than Argo CD's, which is the one place
-    # ADR-0004's rule bends: every value in it -- the golden image id, the
-    # private network, the firewall, the join token, the Tailscale key -- is a
-    # fact about this cluster build. None of them can be committed to git, and
-    # a node definition that arrived from git could not know them.
-    # --------------------------------------------------------------------------
-    "3" = {
-      source_folder = "${path.module}/manifests/30-cluster-autoscaler"
-      kustomize_parameters = {
-        golden_image_id    = data.hcloud_image.golden.id
-        node_group         = local.autoscaler_node_group
-        min_nodes          = local.autoscaler_pool.min_nodes
-        max_nodes          = local.autoscaler_pool.max_nodes
-        server_type        = local.autoscaler_pool.server_type
-        location           = local.autoscaler_pool.location
-        ssh_key_id         = module.kube_hetzner.ssh_key_id
-        network_id         = module.kube_hetzner.network_id
-        ca_image           = var.cluster_autoscaler_image
-        ca_version         = var.cluster_autoscaler_version
-        node_bootstrap_b64 = local.node_bootstrap_b64[local.autoscaler_node_group]
-        config_sha256      = sha256(local.node_bootstrap_b64[local.autoscaler_node_group])
-      }
-    }
-  }
+  # Stage 3, the autoscaler's node definition, followed for a different reason.
+  # It needs the cluster firewall's id, so that autoscaled nodes are created
+  # WITH the firewall rather than attached to it afterwards -- and the firewall
+  # is created by this module, so a stage inside the module cannot be given it
+  # without a cycle. Outside, `data.hcloud_firewalls.after_cluster` reads it
+  # cleanly.
+  user_kustomizations = {}
 
   # Do not write a kubeconfig to disk automatically. It is a credential with
   # cluster-admin, and a file that appears next to the Terraform code is a file

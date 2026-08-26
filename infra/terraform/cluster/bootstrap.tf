@@ -61,6 +61,39 @@ locals {
         platform_path          = "platform/envs/${var.environment}"
       }
     }
+
+    # ------------------------------------------------------------------------
+    # The autoscaler's node definition (T-1.19, #251), moved out of the module
+    # for the firewall (T-1.28).
+    #
+    # It is here rather than in Argo CD because every value in it -- the golden
+    # image id, the network, the join token, the Tailscale key -- is a fact
+    # about this cluster build that cannot be committed to git. That is the one
+    # place ADR-0004's rule bends.
+    #
+    # It is here rather than inside the module because of HCLOUD_FIREWALL. The
+    # firewall is created by the module, so a stage inside it cannot be handed
+    # the id without a cycle; out here `data.hcloud_firewalls.after_cluster`
+    # reads it after the module has finished.
+    # ------------------------------------------------------------------------
+    "3" = {
+      folder = "${path.module}/manifests/30-cluster-autoscaler"
+      params = {
+        golden_image_id    = data.hcloud_image.golden.id
+        node_group         = local.autoscaler_node_group
+        min_nodes          = local.autoscaler_pool.min_nodes
+        max_nodes          = local.autoscaler_pool.max_nodes
+        server_type        = local.autoscaler_pool.server_type
+        location           = local.autoscaler_pool.location
+        ssh_key_id         = module.kube_hetzner.ssh_key_id
+        network_id         = module.kube_hetzner.network_id
+        firewall_id        = local.static_agent_firewall_id
+        ca_image           = var.cluster_autoscaler_image
+        ca_version         = var.cluster_autoscaler_version
+        node_bootstrap_b64 = local.node_bootstrap_b64[local.autoscaler_node_group]
+        config_sha256      = sha256(local.node_bootstrap_b64[local.autoscaler_node_group])
+      }
+    }
   }
 
   bootstrap_files = merge([
@@ -105,7 +138,7 @@ resource "terraform_data" "platform_bootstrap" {
       #
       # Two owners, one path. Moving is cheaper than coordinating.
       "rm -rf /var/platform-bootstrap",
-      "mkdir -p /var/platform-bootstrap/1 /var/platform-bootstrap/2",
+      "mkdir -p /var/platform-bootstrap/1 /var/platform-bootstrap/2 /var/platform-bootstrap/3",
     ]
   }
 
@@ -193,6 +226,7 @@ resource "terraform_data" "platform_apply" {
       kubectl wait --for=condition=established --timeout=120s crd/applications.argoproj.io
 
       kubectl apply -k /var/platform-bootstrap/2
+      kubectl apply -k /var/platform-bootstrap/3
     EOT
     ]
   }
