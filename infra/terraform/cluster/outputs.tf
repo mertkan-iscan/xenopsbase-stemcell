@@ -33,11 +33,15 @@ output "is_highly_available" {
 # fails, which is how #22 stayed invisible: the module's payload decoded to
 # 26,499 bytes, comfortably inside the limit, and was rejected anyway.
 # ------------------------------------------------------------------------------
+# A MAP since T-1.23 (#282), one entry per node group. Static agents boot the
+# same bootstrap as autoscaled ones, and a single number could only ever have
+# measured one of them -- which would be a check that passes while the payload
+# it does not look at grows past the limit.
 output "node_bootstrap_bytes" {
-  description = "Size in bytes of the node bootstrap as sent to Hetzner as user_data."
+  description = "Size in bytes of each node group's bootstrap, as sent to Hetzner as user_data."
   # nonsensitive() because terraform propagates sensitivity through length():
   # the bootstrap carries a join token, so its LENGTH inherits the taint even
   # though a byte count reveals nothing. Marking the output sensitive instead
   # would hide the one number this exists to show.
-  value = nonsensitive(length(local.node_bootstrap_b64))
+  value = { for g, b64 in local.node_bootstrap_b64 : g => nonsensitive(length(b64)) }
 }

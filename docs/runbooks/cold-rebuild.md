@@ -142,8 +142,9 @@ failed applies to diagnose.
 make snapshot
 ```
 
-**The golden image** (`xenopsbase-golden=yes`) — what nodes actually boot, carrying pinned k3s,
-Tailscale, the compiled SELinux policy and the `k3s-agent` unit (T-1.18, T-1.19):
+**The golden image** (`xenopsbase-golden=yes`) — what every agent and every autoscaled node boots,
+carrying pinned k3s, Tailscale, the compiled SELinux policy and both k3s units (T-1.18, T-1.19,
+T-1.24). The control plane still boots the base snapshot above until T-1.26 (#287) lands:
 
 ```bash
 make golden-image
@@ -315,9 +316,15 @@ The drill deletes its seeded document at the end. If it exited early, one is lef
 
 ```
 Error: error during placement (resource_unavailable, eae9122c…)
-  with module.kube_hetzner.module.agents["0-0-worker"].hcloud_server.server
+  with hcloud_server.static_agent["worker-1"]
 cluster-apply failed 3 times. Not a transient fault; read the error above.
 ```
+
+The address above is the one you will see today. It was
+`module.kube_hetzner.module.agents["0-0-worker"].hcloud_server.server` when this was first observed,
+and the change is not cosmetic: agents are created by this repository now (T-1.23, #282), so a
+placement failure names a resource in `infra/terraform/cluster/agents.tf` rather than one inside the
+module. A control-plane placement failure still names a module address.
 
 **The message is wrong in this case and it is worth knowing why.** The retry loop stops after three
 attempts on the reasoning that a real error fails identically every time. A Hetzner capacity

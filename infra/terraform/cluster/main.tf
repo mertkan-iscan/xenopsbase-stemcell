@@ -46,6 +46,31 @@
 # or policy change, and pinning the id here would mean a second place to update
 # and a silent divergence when it is forgotten.
 # ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# The cluster join token (ADR-0013).
+#
+# A node proves it belongs by presenting this, so it is a credential and it is
+# treated like one: `sensitive`, never written to a file, never a terraform
+# output, and never baked into a snapshot -- the golden image asserts its own
+# absence at build time (`test ! -s /var/lib/rancher/k3s/server/node-token`).
+# It reaches a node once, in cloud-init, at first boot.
+#
+# `keepers` is deliberately empty. Rotating the token invalidates every node's
+# membership at once, so it must happen when someone decides to, not because an
+# unrelated attribute changed and dragged this along with it.
+#
+# ADR-0002 rebuilds clusters routinely and ADR-0007 restores databases into the
+# rebuilt one. A token that changed per build would make the second impossible.
+# ------------------------------------------------------------------------------
+resource "random_password" "cluster_token" {
+  length = 48
+
+  # k3s splits the token on ':' to read the optional CA hash prefix, and the
+  # bootstrap embeds it in a YAML scalar. Alphanumeric sidesteps both without
+  # meaningfully costing entropy at this length.
+  special = false
+}
+
 data "hcloud_image" "golden" {
   with_selector = "xenopsbase-golden=yes"
   most_recent   = true
@@ -55,6 +80,17 @@ data "hcloud_image" "golden" {
   # selectable and the failure would appear at scale-up as a Hetzner error
   # about the image rather than about the region.
   with_architecture = "x86"
+
+  # The k3s version is read off this image (see k3s_version in the module call
+  # below), so an image without the label is not merely unlabelled -- it silently
+  # returns the module to channel-following. Fail here, where the fix is obvious,
+  # rather than at the version mismatch it would cause weeks later.
+  lifecycle {
+    postcondition {
+      condition     = can(regex("^v[0-9]+[.][0-9]+[.][0-9]+_k3s[0-9]+$", lookup(self.labels, "k3s-version", "")))
+      error_message = "golden image ${self.id} carries no usable k3s-version label. Rebuild it: make golden-image"
+    }
+  }
 }
 
 # ------------------------------------------------------------------------------
@@ -84,99 +120,31 @@ data "hcloud_image" "golden" {
 # `serverLabels`, not the Kubernetes node label of the same name. They are
 # deliberately spelled the same so the two views of a node agree.
 # ------------------------------------------------------------------------------
-# PLURAL, and with no depends_on. Both are deliberate and both were arrived at
-# by getting it wrong first.
+# GONE: data.hcloud_firewalls.all, hcloud_firewall_attachment.autoscaled, and
+# the check block that watched over them (T-1.28).
 #
-# `data "hcloud_firewall"` with depends_on = [module.kube_hetzner] is the
-# obvious spelling. It defers the read to apply time, which leaves the id
-# unknown during plan, and terraform then reports:
+# The attachment existed to put autoscaled nodes behind the cluster firewall,
+# because the autoscaler creates them outside terraform. It was a second owner
+# of a relation every hcloud_server already declares through its own
+# firewall_ids, and the last write won. Observed on a live cluster: three
+# servers attached and ZERO label selectors -- the selector the attachment was
+# there to apply, silently absent -- and then the destroy failed on it:
 #
-#   Error: Missing required argument
-#     with hcloud_firewall_attachment.autoscaled[0]
-#     The argument "firewall_id" is required, but no definition was found.
+#   Error: firewall with ID 11522374 cannot be removed from label_selector:
+#   resource not found
 #
-# pointing at the line where firewall_id is plainly defined. The argument is
-# not missing; its value is unknowable at that point.
+# `make down` could not get past that. It took a `terraform state rm` by hand,
+# which is not a thing a teardown path should ever need.
 #
-# Dropping depends_on fixes that but breaks the other direction: on a COLD
-# build the firewall does not exist when the plan is made, and the singular
-# data source errors out rather than returning nothing -- which would fail
-# `make up` from nothing, an acceptance criterion of this card.
+# The autoscaler takes HCLOUD_FIREWALL and creates its nodes WITH the firewall
+# already attached -- what the module's own autoscaler template does. That is
+# one owner per relation, and it also closes the window the check block could
+# only warn about: a node created before the attachment existed came up on a
+# public address with nothing in front of it.
 #
-# The plural source returns an empty list instead of failing, so both cases
-# work. The filtering is done here rather than by the API because
-# hcloud_firewalls filters on labels, not names.
-data "hcloud_firewalls" "all" {}
-
-locals {
-  cluster_firewall_id = one([
-    for f in data.hcloud_firewalls.all.firewalls :
-    f.id if f.name == "${var.cluster_name}-${var.environment}"
-  ])
-}
-
-resource "hcloud_firewall_attachment" "autoscaled" {
-  # Absent on the very first apply of a brand-new cluster, because the firewall
-  # is created by that same apply and this was planned before it existed. No
-  # node is unprotected in that window: the pool starts at min_nodes = 0, so
-  # there is nothing to attach to yet. The next apply creates it, and the check
-  # block below says so out loud rather than leaving it to be discovered.
-  count = local.autoscaler_pool == null || local.cluster_firewall_id == null ? 0 : 1
-
-  firewall_id = local.cluster_firewall_id
-
-  # THE STATIC NODES ARE LISTED HERE EVEN THOUGH NOTHING HERE MANAGES THEM.
-  #
-  # `hcloud_firewall_attachment` declares the firewall's COMPLETE applied-to
-  # set, not an addition to it. kube-hetzner attaches the same firewall the
-  # other way round, by setting `firewall_ids` on each `hcloud_server`. Two
-  # owners, one relationship.
-  #
-  # Declaring only the label selector therefore reads as "and remove the three
-  # servers", and the plan says so:
-  #
-  #   ~ resource "hcloud_firewall_attachment" "autoscaled" {
-  #       ~ server_ids = [
-  #           - 163598446,
-  #           - 163598448,
-  #           - 163598680,
-  #         ]
-  #
-  # which is every node in the cluster leaving the firewall. It was caught by
-  # reading a plan rather than by anything failing: the apply that created this
-  # resource left the live state correct, and only the NEXT apply would have
-  # stripped them.
-  #
-  # Removing them is not an option either, even though the label selector could
-  # be widened to cover them: the module would see its servers' `firewall_ids`
-  # drift and put them back, and the two resources would undo each other on
-  # every alternate apply.
-  #
-  # So both owners are made to agree. The ids come from the module's own
-  # outputs, so they follow a rebuild rather than being pinned.
-  server_ids = concat(
-    [for k, v in module.kube_hetzner.control_planes : tonumber(v.id)],
-    [for k, v in module.kube_hetzner.agents : tonumber(v.id)],
-  )
-
-  label_selectors = ["hcloud/node-group=${local.autoscaler_node_group}"]
-}
-
-# A warning, not an error. Failing here would break the cold build this is
-# trying to protect; saying nothing would let an autoscaled node come up on a
-# public IP with no firewall and report success -- which is the exact shape
-# this repository keeps finding.
-check "autoscaled_nodes_are_firewalled" {
-  assert {
-    condition = local.autoscaler_pool == null || local.cluster_firewall_id != null
-    error_message = join(" ", [
-      "No firewall attachment for autoscaled nodes yet: the cluster firewall",
-      "did not exist when this plan was made. Expected on a cold build.",
-      "Run `make cluster-apply ENV=${var.environment}` again before allowing a",
-      "scale-up, or nodes will be created outside the firewall."
-    ])
-  }
-}
+# The env var is set in manifests/30-cluster-autoscaler, which moved to
+# bootstrap.tf so it can be handed the firewall id without a cycle.
+# ------------------------------------------------------------------------------
 
 locals {
   # The autoscaled pool. Declared in dev.tfvars like any other nodepool, but
@@ -198,12 +166,62 @@ locals {
   # refused -- because what went over the wire was the 35,332-character encoded
   # form. So the encoded length is the one that must fit, and it is the one
   # check-user-data-size.sh measures.
-  node_bootstrap_documented = templatefile("${path.module}/templates/node-bootstrap.yaml.tpl", {
-    server_url         = module.kube_hetzner.effective_node_join_endpoint
-    cluster_token      = module.kube_hetzner.cluster_token
-    tailscale_auth_key = var.tailscale_auth_key
-    node_group         = local.autoscaler_node_group
-  })
+  # RENDERED PER NODE GROUP, not once (T-1.23, #282).
+  #
+  # It was a single string while the autoscaled pool was the only thing that
+  # used it. Static agents now boot the same file, and the one value that
+  # differs is `node_group` -- which the autoscaler matches on to decide whether
+  # a node is one of its own. Rendering once and reusing the string would label
+  # every static agent as a member of the autoscaled pool, and the autoscaler
+  # would then consider deleting them when it scaled down.
+  #
+  # A MAP, not a list of names, since the pools carry more than a name.
+  # `labels` and `taints` were declared on agent_nodepools, honoured by the
+  # module, and then silently dropped when #282 stopped handing it the pools --
+  # no error, no plan diff, the node simply came up without them. They are
+  # Kubernetes-level facts, so the bootstrap is where they belong now: they go
+  # into /etc/rancher/k3s/config.yaml, which is the same place the module put
+  # them.
+  #
+  # The autoscaled pool has neither, and its variable never offered them. It is
+  # given empty lists rather than a special case in the template.
+  node_groups = merge(
+    local.autoscaler_pool == null ? {} : {
+      (local.autoscaler_node_group) = { labels = [], taints = [] }
+    },
+    {
+      for p in var.agent_nodepools :
+      "${var.cluster_name}-${var.environment}-${p.name}" => {
+        labels = p.labels
+        taints = p.taints
+      }
+    },
+  )
+
+  node_bootstrap_documented = {
+    for g, cfg in local.node_groups : g => templatefile("${path.module}/templates/node-bootstrap.yaml.tpl", {
+      server_url         = module.kube_hetzner.effective_node_join_endpoint
+      cluster_token      = random_password.cluster_token.result
+      tailscale_auth_key = var.tailscale_auth_key
+      node_group         = g
+
+      # Rendered here rather than with a template directive, because the
+      # comment stripper below works line by line and a `%{ for }` block would
+      # have to survive it. Pre-joined YAML is one interpolation and cannot be
+      # broken by stripping.
+      #
+      # Empty renders as an empty string, which the stripper then removes along
+      # with the blank lines -- so a pool with no labels costs zero bytes
+      # against the 2 KB budget, and `make user-data-size` stays the gate.
+      extra_node_labels = join("\n", [for l in cfg.labels : "      - \"${l}\""])
+
+      # `[]` inline when there are none, a block list when there are. k3s
+      # accepts both; the inline form is what a node without taints has always
+      # had, and keeping it means this change is a no-op in every existing
+      # environment.
+      node_taints = length(cfg.taints) == 0 ? " []" : "\n${join("\n", [for t in cfg.taints : "      - \"${t}\""])}"
+    })
+  }
 
   # COMMENTS AND BLANK LINES ARE STRIPPED BEFORE THIS GOES ON THE WIRE.
   #
@@ -217,16 +235,18 @@ locals {
   # user_data, where they are merely carried. `#cloud-config` is kept: it is not
   # a comment, it is the header cloud-init dispatches on, and dropping it turns
   # the whole file into an inert blob that boots a node doing nothing at all.
-  node_bootstrap = join("\n", concat(
-    ["#cloud-config"],
-    [
-      for line in split("\n", local.node_bootstrap_documented) :
-      line
-      if trimspace(line) != "" && !startswith(trimspace(line), "#")
-    ]
-  ))
+  node_bootstrap = {
+    for g, documented in local.node_bootstrap_documented : g => join("\n", concat(
+      ["#cloud-config"],
+      [
+        for line in split("\n", documented) :
+        line
+        if trimspace(line) != "" && !startswith(trimspace(line), "#")
+      ]
+    ))
+  }
 
-  node_bootstrap_b64 = base64encode(local.node_bootstrap)
+  node_bootstrap_b64 = { for g, stripped in local.node_bootstrap : g => base64encode(stripped) }
 }
 
 locals {
@@ -353,6 +373,28 @@ module "kube_hetzner" {
 
   hcloud_token = var.hcloud_token
 
+  # OURS, not the module's (ADR-0013).
+  #
+  # Left unset, the module derives a token and every node that needs it reads
+  # it back as `module.kube_hetzner.cluster_token` -- which places anything
+  # holding that reference behind the whole module, including the platform
+  # bootstrap it runs at the end. That ordering is what both T-1.23 builds
+  # died of.
+  #
+  # Generating it here removes one of the two module references in agents.tf.
+  # The other is the join endpoint, which cannot move yet: under tailscale
+  # transport the module resolves it to the first control plane's private
+  # address and offers no way to supply one (locals.tf:121, and the ADR's
+  # deferral note). So this does not make agents concurrent on its own, and
+  # is not claimed to.
+  #
+  # It also makes a restore possible. The module's token exists only inside a
+  # cluster; recreating one to match, which is what "must match when restoring
+  # a cluster" in its own variable description requires, meant reading it out
+  # of the cluster being replaced. Now it is state, and it survives the thing
+  # it unlocks.
+  cluster_token = random_password.cluster_token.result
+
   cluster_name   = "${var.cluster_name}-${var.environment}"
   network_region = var.network_region
 
@@ -360,7 +402,16 @@ module "kube_hetzner" {
   ssh_private_key = file(pathexpand(var.ssh_private_key_path))
 
   control_plane_nodepools = var.control_plane_nodepools
-  agent_nodepools         = var.agent_nodepools
+
+  # DELIBERATELY EMPTY, like autoscaler_nodepools below and for the same reason
+  # (T-1.23, #282). The pool is still declared in the tfvars and is still read
+  # -- by agents.tf, which creates the servers directly from the golden image.
+  #
+  # Given a pool, the module generates cloud-init that downloads and installs
+  # k3s at boot, over the pinned copy the image already carries. No variable
+  # skips it, so the only way to have one bootstrap path is for the module not
+  # to build the other one.
+  agent_nodepools = []
 
   # DELIBERATELY EMPTY, even though var.autoscaler_nodepools is not (T-1.19).
   #
@@ -381,6 +432,46 @@ module "kube_hetzner" {
   # The pool is still DECLARED in dev.tfvars and still read below -- this is
   # not "autoscaling off", it is "the module does not get to define a node".
   autoscaler_nodepools = []
+
+  # The exact k3s the fixed nodes install, taken from the golden image rather
+  # than written here (T-1.18).
+  #
+  # Unset, the module follows k3s_channel, which defaults to "stable". At module
+  # 3.1.0 that resolves to v1.36.3+k3s1 -- the same release the image carries --
+  # so the two agree today by coincidence and not by anything holding them
+  # together. A module bump changes what "stable" means, and the cluster then
+  # runs one k3s on its fixed nodes and another on its autoscaled ones, split by
+  # node class. That is the mismatch infra/packer/versions.pkrvars.hcl warns
+  # about, and until now nothing enforced it: that file says terraform reads the
+  # versions back from the snapshot labels, and terraform did not.
+  #
+  # READ, not repeated. versions.pkrvars.hcl is the single place the version is
+  # chosen; a literal here would be a second place to update and a silent
+  # divergence the first time someone bumps one and not the other. Hetzner label
+  # values reject "+", so the build stores v1.36.3_k3s1 and it converts back.
+  #
+  # k3s_version supersedes k3s_channel, so the channel default is now moot.
+  k3s_version = replace(data.hcloud_image.golden.labels["k3s-version"], "_", "+")
+
+  # DELIBERATELY NOT SET: allow_scheduling_on_control_plane (T-1.23, #282).
+  #
+  # Setting it false looks like the fix for the control plane carrying the
+  # whole platform. It is not, and it reads as though it were, which is worse
+  # than leaving it out. The module resolves it as
+  #
+  #   is_single_node_cluster ? true : var.allow_scheduling_on_control_plane
+  #
+  # and is_single_node_cluster sums the control-plane, agent and autoscaler
+  # counts. Both other pools are [] here, so on dev the sum is 1, the first arm
+  # always wins, and the variable is never read. Confirmed on a live build:
+  # `node-taint: []` in the control plane's config with the value set to false.
+  #
+  # The module's own default is false as well, so the line changed nothing in
+  # any environment.
+  #
+  # The real problem is ordering, not this flag: the module deploys the
+  # platform before terraform can create an agent for it to land on. That is
+  # #287, and nothing in this file fixes it.
 
   cni_plugin = var.cni_plugin
 
@@ -487,80 +578,20 @@ module "kube_hetzner" {
   # the root Application is an argoproj.io CRD, which does not exist until Argo
   # CD has installed. Applying both at once fails on a missing resource type.
   # ----------------------------------------------------------------------------
-  user_kustomizations = {
-    "1" = {
-      source_folder = "${path.module}/manifests/10-argocd"
-      kustomize_parameters = {
-        argocd_chart_version = var.argocd_chart_version
-        argocd_domain        = var.argocd_domain
-        ksops_version        = var.ksops_version
-        # Indented to sit under the YAML block scalar in the Secret template.
-        sops_age_key = indent(4, var.sops_age_key)
-      }
-      # The rendered Secret contains the age private key in cleartext. Once
-      # applied it is in etcd, where it has to be; leaving a copy on the node's
-      # filesystem as well is gratuitous, and that copy outlives the apply.
-      post_commands = "shred -u /var/user_kustomize/1/sops-age-secret.yaml 2>/dev/null || rm -f /var/user_kustomize/1/sops-age-secret.yaml"
-    }
-    "2" = {
-      source_folder = "${path.module}/manifests/20-root-app"
-      kustomize_parameters = {
-        platform_repo_url      = var.platform_repo_url
-        platform_repo_revision = var.platform_repo_revision
-        platform_path          = "platform/envs/${var.environment}"
-      }
-      # k3s installs the chart asynchronously, so the CRD appears some time
-      # after set 1 is applied.
-      #
-      # `kubectl wait` alone is NOT enough: it errors immediately when the
-      # object does not exist yet, rather than waiting for it to appear. So the
-      # first loop waits for existence, and only then does wait block on the
-      # condition. Getting this wrong fails with
-      #
-      #   Error from server (NotFound): customresourcedefinitions ...
-      #     "applications.argoproj.io" not found
-      #
-      # which reads like the chart is broken rather than like a race.
-      pre_commands = <<-EOT
-        for i in $(seq 1 60); do
-          kubectl get crd applications.argoproj.io >/dev/null 2>&1 && break
-          echo "waiting for the Argo CD CRDs to appear ($i/60)"
-          sleep 5
-        done
-        kubectl wait --for=condition=established --timeout=120s crd/applications.argoproj.io
-      EOT
-    }
-    # --------------------------------------------------------------------------
-    # Node creation (T-1.19, #251)
-    #
-    # Applied last because it needs the join token and the cluster to exist. It
-    # replaces the autoscaler the module would have deployed, with one whose
-    # node bootstrap fits inside Hetzner's user_data limit.
-    #
-    # This is Terraform's business rather than Argo CD's, which is the one place
-    # ADR-0004's rule bends: every value in it -- the golden image id, the
-    # private network, the firewall, the join token, the Tailscale key -- is a
-    # fact about this cluster build. None of them can be committed to git, and
-    # a node definition that arrived from git could not know them.
-    # --------------------------------------------------------------------------
-    "3" = {
-      source_folder = "${path.module}/manifests/30-cluster-autoscaler"
-      kustomize_parameters = {
-        golden_image_id    = data.hcloud_image.golden.id
-        node_group         = local.autoscaler_node_group
-        min_nodes          = local.autoscaler_pool.min_nodes
-        max_nodes          = local.autoscaler_pool.max_nodes
-        server_type        = local.autoscaler_pool.server_type
-        location           = local.autoscaler_pool.location
-        ssh_key_id         = module.kube_hetzner.ssh_key_id
-        network_id         = module.kube_hetzner.network_id
-        ca_image           = var.cluster_autoscaler_image
-        ca_version         = var.cluster_autoscaler_version
-        node_bootstrap_b64 = local.node_bootstrap_b64
-        config_sha256      = sha256(local.node_bootstrap_b64)
-      }
-    }
-  }
+  # EMPTY (ADR-0014, T-1.28). The module provisions machines and nothing above
+  # them; every kustomization now lives in bootstrap.tf.
+  #
+  # Stages 1 and 2 -- Argo CD and the root Application -- moved because they ran
+  # before terraform could create an agent, so the whole platform scheduled onto
+  # a cx23. Build 3: 12/14 applications Healthy, held ~400s, collapsed to 0/0.
+  #
+  # Stage 3, the autoscaler's node definition, followed for a different reason.
+  # It needs the cluster firewall's id, so that autoscaled nodes are created
+  # WITH the firewall rather than attached to it afterwards -- and the firewall
+  # is created by this module, so a stage inside the module cannot be given it
+  # without a cycle. Outside, `data.hcloud_firewalls.after_cluster` reads it
+  # cleanly.
+  user_kustomizations = {}
 
   # Do not write a kubeconfig to disk automatically. It is a credential with
   # cluster-admin, and a file that appears next to the Terraform code is a file

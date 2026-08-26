@@ -38,6 +38,8 @@ cd "$ROOT" || exit 1
 
 ENVIRONMENT="${1:-dev}"
 TF_DIR="infra/terraform/cluster"
+FAIL_FLAG="$(mktemp)"
+trap 'rm -f "$FAIL_FLAG"' EXIT
 TEMPLATE="$TF_DIR/templates/node-bootstrap.yaml.tpl"
 
 # Hetzner's hard limit, and the budget this project holds itself to.
@@ -92,9 +94,14 @@ if [ ! -d "$TF_DIR/.terraform" ]; then
   [ "$FAIL" -eq 0 ] && exit 0 || exit 1
 fi
 
-bytes="$(cd "$TF_DIR" && terraform output -raw node_bootstrap_bytes 2>/dev/null)"
+# A MAP since T-1.23 (#282): one entry per node group, because static agents
+# now boot the same bootstrap as autoscaled ones. A single number could only
+# ever have measured one of them -- a check that passes while the payload it
+# never looks at grows past the limit, which is the exact shape of #22.
+groups="$(cd "$TF_DIR" && terraform output -json node_bootstrap_bytes 2>/dev/null \
+  | tr -d '{}"' | tr ',' '\n' | sed 's/^ *//; s/ *$//' | grep ':')"
 
-if ! printf '%s' "$bytes" | grep -qE '^[0-9]+$'; then
+if [ -z "$groups" ]; then
   # Almost always credentials rather than a missing output: `terraform output`
   # reads state from R2, so without AWS_ACCESS_KEY_ID it reports nothing and
   # looks exactly like an environment that was never applied.
@@ -107,28 +114,40 @@ if ! printf '%s' "$bytes" | grep -qE '^[0-9]+$'; then
 fi
 
 echo ""
-printf '  bootstrap, as sent to Hetzner : %6d bytes\n' "$bytes"
-printf '  budget                        : %6d bytes\n' "$TARGET"
-printf '  Hetzner hard limit            : %6d bytes\n' "$HARD_LIMIT"
-printf '  headroom to the hard limit    : %6dx\n' "$((HARD_LIMIT / (bytes > 0 ? bytes : 1)))"
+printf '  budget             : %6d bytes\n' "$TARGET"
+printf '  Hetzner hard limit : %6d bytes\n' "$HARD_LIMIT"
 echo ""
 
-if [ "$bytes" -gt "$HARD_LIMIT" ]; then
-  note FAIL "over Hetzner's limit — every node creation will be refused with"
-  echo "         invalid input in field 'user_data' (invalid_input)"
-  FAIL=1
-elif [ "$bytes" -gt "$TARGET" ]; then
-  note FAIL "over the $TARGET-byte budget"
-  echo ""
-  echo "         It would still be accepted today. The budget exists because"
-  echo "         #22 was not a payload that was suddenly too big — it was one"
-  echo "         that grew, unmeasured, until it was. Move whatever was added"
-  echo "         into the golden image (make golden-image) rather than raising"
-  echo "         this number."
-  FAIL=1
-else
-  note ok "within budget"
-fi
+echo "$groups" | while IFS=: read -r group bytes; do
+  group="$(printf '%s' "$group" | sed 's/^ *//; s/ *$//')"
+  bytes="$(printf '%s' "$bytes" | sed 's/^ *//; s/ *$//')"
+
+  printf '  %-42s %6d bytes\n' "$group" "$bytes"
+
+  if [ "$bytes" -gt "$HARD_LIMIT" ]; then
+    note FAIL "$group is over Hetzner's limit — every node creation will be"
+    echo "         refused: invalid input in field 'user_data' (invalid_input)"
+    echo 1 > "$FAIL_FLAG"
+  elif [ "$bytes" -gt "$TARGET" ]; then
+    note FAIL "$group is over the $TARGET-byte budget"
+    echo ""
+    echo "         It would still be accepted today. The budget exists because"
+    echo "         #22 was not a payload that was suddenly too big — it was one"
+    echo "         that grew, unmeasured, until it was. Move whatever was added"
+    echo "         into the golden image (make golden-image) rather than raising"
+    echo "         this number."
+    echo 1 > "$FAIL_FLAG"
+  else
+    note ok "$group within budget"
+  fi
+done
+
+# The loop runs in a subshell -- `while` on the right of a pipe always does --
+# so a FAIL set inside it does not survive out here. The flag file is how the
+# verdict escapes. Without it the script reports PASSED on a bootstrap it has
+# just called too big, which is worse than not checking.
+[ -s "$FAIL_FLAG" ] && FAIL=1
+: > "$FAIL_FLAG"
 
 echo ""
 if [ "$FAIL" -ne 0 ]; then

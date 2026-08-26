@@ -106,8 +106,22 @@ jobs:
     if: needs.changes.outputs.terraform == 'true'
     strategy:
       fail-fast: false
+      # EVERY root module under infra/terraform, not the three that get planned
+      # (T-1.8, #14). `mail-dns` predates the matrix and was reachable only by
+      # `terraform fmt -check -recursive` and by checkov, which scans the whole
+      # directory -- neither validated nor linted, so a root module could be
+      # merged that does not parse, which is what this job exists to prevent.
+      #
+      # HAND-WRITTEN, and it has to stay in step with the directories. It is not
+      # derived from `ls infra/terraform`, so adding a root module without adding
+      # it here leaves it unlinted, and removing one without removing it here
+      # fails the job on a path that no longer exists. `cluster-v2` was in this
+      # list and left with the directory (#287).
+      #
+      # The plan matrix below is deliberately NOT the same list. See the note
+      # on it for why.
       matrix:
-        module: [storage, edge, cluster]
+        module: [storage, edge, cluster, mail-dns]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
@@ -181,6 +195,15 @@ jobs:
       pull-requests: write
     strategy:
       fail-fast: false
+      # NOT the lint matrix (T-1.8, #14). A plan needs three things this job
+      # supplies by convention: an `env/<environment>.tfvars`, a state key in
+      # the case block below, and credentials that reach real infrastructure.
+      #
+      #   mail-dns    is applied by hand from mail.tfvars, once, when the DKIM
+      #               records change. It has no per-environment layout at all.
+      #
+      # It is linted and scanned above. What it is missing here is a plan, and
+      # the reason is stated rather than left as an omission.
       matrix:
         module: [storage, edge, cluster]
     env:

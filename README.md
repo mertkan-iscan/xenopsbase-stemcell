@@ -13,7 +13,7 @@ Planning board: [XenOpsBase Stemcell (project #5)](https://github.com/users/mert
 | Decision | Choice |
 |---|---|
 | Topology | API gateway + one core service; microservice seams, two deployables |
-| Orchestration | K3s on Hetzner via the `kube-hetzner` Terraform module |
+| Orchestration | K3s on Hetzner. Agents boot a Packer golden image; the control plane is still provisioned by the `kube-hetzner` module |
 | Generator | JHipster to bootstrap, then detach and own the code |
 | Database | PostgreSQL via CloudNativePG operator, PITR archived to object storage |
 | Documents | Hetzner Object Storage (S3-compatible), S3 API only |

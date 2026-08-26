@@ -2,18 +2,35 @@
 #
 # A static node and an autoscaled node must be the same node (T-1.19, #251).
 #
-# WHY THIS EXISTS
+# WHY THIS EXISTS -- AND WHAT CHANGED UNDER IT (T-1.23, #282)
 #
-# They are built by two different mechanisms and that is not going to change
-# soon. Static agents come from kube-hetzner's cloud-init, which downloads and
-# installs k3s at boot. Autoscaled nodes come from the golden image and a ~1.4KB
-# bootstrap. The card that introduced the second path said plainly what the risk
-# is: two paths that must stay equivalent, with nothing enforcing it, drift on
-# the next k3s bump or kubelet argument change -- and the symptom is one flaky
-# node, not an error.
+# It was written when the two were built by genuinely different mechanisms:
+# static agents came from kube-hetzner's cloud-init, which downloads and
+# installs k3s at boot, and autoscaled nodes came from the golden image and a
+# ~1.4KB bootstrap. Two paths that had to stay equivalent with nothing enforcing
+# it, drifting on the next k3s bump or kubelet argument change -- and the
+# symptom is one flaky node, not an error.
 #
-# So this is the enforcement. It does not check that the paths are the same; it
-# checks that the NODES they produce are, which is the property that matters.
+# That is no longer the shape of the risk. #282 moved static agents onto the
+# same image and the same templates/node-bootstrap.yaml.tpl, so BOTH NODES ARE
+# NOW BUILT THE SAME WAY, and this became a weaker check than the one it
+# replaced. It is deliberately kept, because one thing still differs: HOW the
+# same bootstrap reaches the node.
+#
+#   static      terraform renders the template and passes it as user_data,
+#               on every apply
+#   autoscaled  the SAME rendered bytes are base64'd into a Secret by bootstrap
+#               stage 3, and the autoscaler passes them as cloudInit
+#
+# The second copy is applied once per apply and then lives in the cluster. A
+# stage-3 apply that failed, or a Secret edited by hand, leaves the autoscaler
+# creating nodes from a bootstrap the repository no longer describes -- and
+# nothing else would notice, because the template it drifted from still renders
+# correctly.
+#
+# So it does not check that the paths are the same; it checks that the NODES
+# they produce are, which is the property that matters and the one that survived
+# the paths converging.
 #
 # WHAT IS COMPARED, AND WHY EACH ONE
 #
@@ -22,9 +39,10 @@
 #   SELinux mode   read from the kernel, not the config file. Trading
 #                  enforcement away to save user_data bytes was considered and
 #                  rejected on #22; this is what stops it returning by accident.
-#   SELinux policy loaded modules, not files on disk. The golden image compiles
-#                  them at build time and cloud-init compiles them at boot; both
-#                  must end up with the same two loaded.
+#   SELinux policy loaded modules, not files on disk. Both nodes get them
+#                  compiled into the golden image at build time now; the check
+#                  is that both actually LOADED them, which is a property of the
+#                  boot and not of the image.
 #   kubelet args   parsed from config.yaml as a SET, not grepped. These decide
 #                  reserved capacity and the cloud provider, so a difference
 #                  changes how much of a node is schedulable -- quietly.

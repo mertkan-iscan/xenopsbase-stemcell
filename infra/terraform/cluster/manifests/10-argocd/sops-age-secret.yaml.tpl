@@ -6,9 +6,14 @@
 #
 # It is templated from TF_VAR_sops_age_key, which comes from the environment and
 # never from a file in this repository. The rendered manifest is removed from
-# the node after it is applied -- see the post_commands on this kustomization
-# set. Leaving it there would put the bootstrap key in cleartext on a disk that
-# outlives the apply.
+# the node the moment it has been applied -- see terraform_data.platform_apply
+# in bootstrap.tf. Leaving it there would put the bootstrap key in cleartext on
+# a disk that outlives the apply.
+#
+# It is applied with `kubectl apply -f`, on its own, and is NOT listed in
+# kustomization.yaml (T-1.22, #281). Being both a kustomize resource and a file
+# the apply deletes is a contradiction, and kustomize is the one that discovers
+# it -- on the next apply, not this one.
 apiVersion: v1
 kind: Secret
 metadata:

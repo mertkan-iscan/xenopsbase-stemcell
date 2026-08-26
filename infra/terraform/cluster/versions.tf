@@ -18,6 +18,14 @@ terraform {
       source  = "hetznercloud/hcloud"
       version = ">= 1.51.0"
     }
+
+    # For the cluster join token (ADR-0013). Nothing else needs it, and it is
+    # pinned for the same reason the module is: a rebuild must reproduce what
+    # was there before.
+    random = {
+      source  = "hashicorp/random"
+      version = ">= 3.6.0"
+    }
   }
 
   # The backend is deliberately partial. Bucket, region and endpoint come from

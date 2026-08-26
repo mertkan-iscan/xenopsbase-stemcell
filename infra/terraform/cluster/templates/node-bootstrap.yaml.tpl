@@ -29,6 +29,48 @@
 # the same node and a template is a description of what should happen. What
 # differs between a static and an autoscaled node must be only the node's own
 # name and address.
+# ROOT MUST STAY REACHABLE (T-1.27, #288).
+#
+# cloud-init's default is disable_root: true, and it does not merely skip
+# adding a key -- it rewrites root's authorized_keys with a forced command, so
+# the connection is accepted and then answered with:
+#
+#   Please login as the user "root" rather than the user "root".
+#
+# which names no cause and is not obviously about cloud-init at all. The
+# module's own nodes are unaffected because terraform provisions them over SSH
+# and its cloud-init keeps root open; ours had no such line, so every node from
+# this bootstrap has been unreachable since #251. Nobody noticed, because until
+# T-1.23 the only nodes using it were autoscaled ones and nobody logs into
+# those.
+#
+# It matters now for one reason: the node you need to open a shell on is the
+# one that failed to join, and that is precisely the node no kubectl can reach.
+# Both T-1.23 builds ended with a question that could only be answered on the
+# node, and neither could be answered.
+#
+# About twenty bytes against a 2 KB budget. make user-data-size is the gate.
+disable_root: false
+
+# NODE LABELS AND TAINTS COME FROM THE POOL (T-1.23, #282).
+#
+# The extra_node_labels and node_taints parameters below are rendered from the
+# pool's own `labels` and `taints` in main.tf. (Written without the template
+# syntax on purpose: templatefile interpolates comments too, and a multi-line
+# value would spill past the leading # and land in the cloud-config as
+# top-level YAML.)
+#
+# The module used to apply them and stopped
+# being given the pools, so between #282 and this they were declared in the
+# tfvars, accepted by the variable, and silently dropped.
+#
+# Both keep the module's spelling, so a tfvars file does not change:
+#
+#   labels = ["workload=general"]
+#   taints = ["dedicated=db:NoSchedule"]
+#
+# Both render to nothing when the pool declares none, which is every pool
+# today -- so this costs no user_data bytes until someone uses it.
 write_files:
   - path: /etc/rancher/k3s/config.yaml
     permissions: '0600'
@@ -42,7 +84,8 @@ write_files:
       "node-label":
       - "k3s_upgrade=true"
       - "hcloud/node-group=${node_group}"
-      "node-taint": []
+${extra_node_labels}
+      "node-taint":${node_taints}
       "selinux": true
       "server": "${server_url}"
       "token": "${cluster_token}"
@@ -75,7 +118,15 @@ runcmd:
   #    Appending rather than templating keeps the two facts that vary per node
   #    (its address and its name) in one place, and k3s reads config.yaml at
   #    start, after this has run.
-  - ['sh', '-c', 'printf ''"node-ip": "%s"\n'' "$(ip -4 -o addr show eth1 | awk ''{print $4}'' | cut -d/ -f1)" >> /etc/rancher/k3s/config.yaml']
+  #    WAITED FOR, not read once. Attaching the network at server creation
+  #    makes the interface present at boot, but its address still arrives over
+  #    DHCP -- and reading a moment too early writes node-ip: "", which k3s
+  #    rejects permanently rather than retrying. Nineteen restarts on one node
+  #    of build 4, while the address it wanted was there the whole time.
+  #
+  #    Sixty seconds, then fail loudly: a node with no private address cannot
+  #    join, and a silent one is the node nobody looks at.
+  - ['sh', '-c', 'for i in $(seq 1 60); do ip=$(ip -4 -o addr show eth1 2>/dev/null | awk ''{print $4}'' | cut -d/ -f1); [ -n "$ip" ] && break; sleep 1; done; test -n "$ip" || { echo "eth1 has no address after 60s" >&2; exit 1; }; printf ''\"node-ip\": \"%s\"\n'' "$ip" >> /etc/rancher/k3s/config.yaml']
   - ['sh', '-c', 'printf ''"node-name": "%s"\n'' "$(hostname)" >> /etc/rancher/k3s/config.yaml']
 
   # ---------------------------------------------------------------------------

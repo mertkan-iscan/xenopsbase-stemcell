@@ -114,10 +114,26 @@ fi
 # in the dangerous direction: it UNDERSTATES staleness, so a stalled archiver
 # would have read as healthy and this check would have passed a database that
 # had stopped being recoverable hours earlier.
+# ONE LINE PER PAGE, not one line. --query is applied to each page of results
+# separately, so once the archive passes 1000 objects this returns the newest
+# segment OF EACH PAGE. The extra lines then flowed into `date -d` as a single
+# argument and it failed to parse:
+#
+#   could not parse the newest WAL timestamp (2026-08-26T12:45:00.968000+00:00
+#   2026-08-26T13:36:45.909000+00:00)
+#
+# which reads as a broken archive and stops a teardown. It is the gate that
+# protects the data calling a healthy backup unrecoverable -- the direction the
+# comment above worried about, arrived at differently. It appeared the first
+# time the WAL archive grew past a page, so it was always going to show up
+# eventually and always as a refusal to destroy.
+#
+# Sorting across the pages and taking the last is correct for any number of
+# them, including one.
 NEWEST_WAL_LINE="$(aws --endpoint-url "$ENDPOINT" s3api list-objects-v2 \
                      --bucket "$BUCKET" --prefix "$SERVER_NAME/wals/" \
                      --query 'sort_by(Contents,&LastModified)[-1].[Key,LastModified]' \
-                     --output text 2>/dev/null)"
+                     --output text 2>/dev/null | sort -k2 | tail -1)"
 if [ -z "$NEWEST_WAL_LINE" ] || [ "$NEWEST_WAL_LINE" = "None" ]; then
   bad "no WAL segments in the archive" \
       "recoverability cannot advance past the newest base backup"

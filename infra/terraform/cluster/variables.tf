@@ -85,7 +85,22 @@ variable "control_plane_nodepools" {
 }
 
 variable "agent_nodepools" {
-  description = "Agent (worker) node pools."
+  description = <<-EOT
+    Agent (worker) node pools. These are NOT handed to kube-hetzner any more
+    (T-1.23, #282) -- agents.tf creates the servers and templates/node-bootstrap
+    renders their k3s config, so every field here is read by this repository.
+
+    `labels` and `taints` keep the module's spelling and reach the node through
+    /etc/rancher/k3s/config.yaml:
+
+      labels = ["workload=general"]
+      taints = ["dedicated=db:NoSchedule"]
+
+    `network_scope` is GONE. It existed because the module rejected a plan
+    without it under tailscale transport; the module no longer sees these pools,
+    nothing else ever read it, and a field that is accepted and ignored is worse
+    than one that is absent. Remove it from any tfvars that still sets it.
+  EOT
   type = list(object({
     name        = string
     server_type = string
@@ -93,11 +108,6 @@ variable "agent_nodepools" {
     labels      = optional(list(string), [])
     taints      = optional(list(string), [])
     count       = number
-    # Left null, matching the module default. Tailscale transport requires an
-    # explicit value, but that path is blocked (see #84) and defaulting to
-    # "primary" here was a deviation from upstream for no benefit -- both
-    # resolve to network_id 0.
-    network_scope = optional(string, null)
   }))
   default = [
     {
@@ -120,13 +130,11 @@ variable "autoscaler_nodepools" {
     location    = string
     min_nodes   = number
     max_nodes   = number
-    # REQUIRED under node_transport_mode = "tailscale", and the module rejects
-    # the plan without it: it keeps primary/external network intent known at
-    # plan time even though network_id comes from a resource in the same root.
-    # Same reason agent_nodepools carries it. Discovered by planning against a
-    # live cluster (T-2.8) -- the type was written before any autoscaler pool
-    # existed, so nothing had ever exercised this path.
-    network_scope = optional(string, "primary")
+    # network_scope is GONE here for the same reason as on agent_nodepools: the
+    # module is passed `autoscaler_nodepools = []` (T-1.19, #251), so the plan-
+    # time constraint that required it no longer applies to this pool, and the
+    # node definition in manifests/30-cluster-autoscaler never read it. The
+    # network a scaled node joins comes from `network_id` in that template.
   }))
   default = []
 }

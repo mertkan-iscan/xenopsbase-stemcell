@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 #
-# Builds the golden image every node boots from (T-1.18, #250).
+# Builds the golden image agents and autoscaled nodes boot (T-1.18, #250).
+#
+# NOT every node, yet. The control plane is still provisioned by kube-hetzner
+# from the base OS snapshot; T-1.26 (#287) is what makes "every" true.
 #
 # WHERE THIS SITS
 #

@@ -37,13 +37,10 @@ agent_nodepools = [
     location    = "fsn1"
     count       = 2
 
-    # Required once node_transport_mode is "tailscale", and rejected at plan time
-    # if absent. "primary" means this pool sits on the cluster's own Hetzner
-    # network rather than an external one -- which is also what makes restoring
-    # the CCM's network awareness sound (see main.tf).
-    #
-    # Harmless under the hetzner_private escape hatch: the module ignores it.
-    network_scope = "primary"
+    # No network_scope. It was required while the module created these servers;
+    # agents.tf does now (T-1.23, #282), and the variable no longer accepts it.
+    # A static agent joins the cluster network through the inline `network`
+    # block on its hcloud_server, at creation.
   }
 ]
 
@@ -77,9 +74,9 @@ autoscaler_nodepools = [
     location    = "fsn1"
     min_nodes   = 0
     max_nodes   = 2
-    # Required by the module under tailscale transport, same as the static
-    # agent pools above.
-    network_scope = "primary"
+    # No network_scope, same as the static pool above. The module is handed
+    # `autoscaler_nodepools = []`, and the network a scaled node joins comes
+    # from network_id in manifests/30-cluster-autoscaler.
   }
 ]
 

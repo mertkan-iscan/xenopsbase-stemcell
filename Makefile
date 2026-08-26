@@ -352,7 +352,7 @@ java-home: ## Report which JDK the build will use, and why
 	@printf "selected:  "; bash $(SCRIPTS)/java-home.sh
 
 .PHONY: golden-image
-golden-image: ## Build, boot-test and publish the image every node boots from (T-1.18, T-1.20)
+golden-image: ## Build, boot-test and publish the image agents and autoscaled nodes boot (T-1.18, T-1.20)
 	@bash $(SCRIPTS)/build-golden-image.sh
 
 .PHONY: validate-golden-image
@@ -365,7 +365,20 @@ user-data-size: ## Assert the node bootstrap still fits in Hetzner user_data (T-
 
 .PHONY: node-equivalence
 node-equivalence: ## Prove a static node and an autoscaled node are the same node (T-1.19)
+	@# REPORTS SKIPPED IN THE NORMAL CASE, and that is the problem with it.
+	@# It needs one static node AND one autoscaled node; min_nodes = 0, so a
+	@# healthy dev cluster has none of the latter. It has never compared
+	@# anything except when someone forced a scale-up by hand. Since T-1.23
+	@# both node classes are built the same way anyway, so what it was
+	@# guarding is now structural. Rewrite or retire: T-1.27 (#288).
 	@bash $(SCRIPTS)/check-node-equivalence.sh $(ENV)
+
+.PHONY: verify-node-provenance
+verify-node-provenance: ## Did each node boot its image, or build itself? Asks the node, not the cluster (T-1.27)
+	@# Deliberately does not use kubectl. The node worth checking is the one
+	@# that failed to join, and no in-cluster tool can reach it -- which is why
+	@# two T-1.23 builds ended without an answer.
+	@bash $(SCRIPTS)/verify-node-provenance.sh $(ENV)
 
 .PHONY: api-spec
 api-spec: ## Regenerate docs/api/*.json from the services
@@ -415,8 +428,9 @@ up: ## Nothing to a serving stack, one command (T-1.7)
 	  fi; \
 	  echo ""; \
 	  echo "cluster-apply failed (attempt $$attempt). Retrying."; \
-	  echo "  Provisioning fetches the k3s installer over the internet, and that"; \
-	  echo "  has returned 504 mid-build. Terraform apply is idempotent, so a"; \
+	  echo "  A build reaches Hetzner, Tailscale and (for the control plane,"; \
+	  echo "  which kube-hetzner still provisions) the k3s installer. All three"; \
+	  echo "  have returned 5xx mid-build. Terraform apply is idempotent, so a"; \
 	  echo "  retry continues rather than restarting. A REAL error fails again"; \
 	  echo "  the same way and stops after three."; \
 	  attempt=$$((attempt + 1)); \
@@ -435,7 +449,7 @@ down: ## Destroy every billable resource, one command, and prove it
 	echo ""; \
 	echo "make down ENV=$(ENV) completed in $$(( $$(date +%s) - start ))s"
 .PHONY: snapshot
-snapshot: ## Build the OS snapshot kube-hetzner provisions nodes from (once per project)
+snapshot: ## Build the base OS snapshot the control plane boots (once per project)
 	@bash $(SCRIPTS)/build-snapshot.sh
 
 .PHONY: cluster-init
