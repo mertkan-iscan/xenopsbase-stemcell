@@ -507,7 +507,30 @@ cluster-destroy: ## Destroy the cluster. Does NOT touch the durable buckets or t
 	@# create and did not reap servers it did not create. Before the destroy,
 	@# because after it there is no cluster left to stop the autoscaler with.
 	@bash $(SCRIPTS)/reap-autoscaled-nodes.sh $(ENV)
-	@cd $(CLUSTER_DIR) && terraform destroy $(APPROVE) -var-file=$(TFVARS)
+	@# RETRIED, for the same reason `make up` retries its apply (#291).
+	@#
+	@# A Hetzner 503 during a refresh stopped a teardown dead:
+	@#
+	@#   Error: API request failed, with data.hcloud_image.golden
+	@#   service temporarily unavailable (unavailable) -- 503
+	@#
+	@# `terraform destroy` is idempotent exactly as `terraform apply` is, so
+	@# a retry continues rather than restarting, and a REAL error fails the
+	@# same way three times and stops. The build path has had this since
+	@# T-1.7; the teardown path is the one that IS the disaster-recovery
+	@# procedure, and it had none.
+	@attempt=1; \
+	until (cd $(CLUSTER_DIR) && terraform destroy $(APPROVE) -var-file=$(TFVARS)); do \
+	  if [ $$attempt -ge 3 ]; then \
+	    echo ""; \
+	    echo "terraform destroy failed $$attempt times. Not a transient fault; read the error above."; \
+	    exit 1; \
+	  fi; \
+	  echo ""; \
+	  echo "terraform destroy failed (attempt $$attempt). Retrying."; \
+	  attempt=$$((attempt + 1)); \
+	  sleep 20; \
+	done
 	@# Reap what the in-cluster release could not (#159). The CSI driver has a
 	@# 300s budget and the Prometheus volume routinely outlives it, so destroy
 	@# succeeds and leaves a volume Terraform no longer tracks. Until this step
