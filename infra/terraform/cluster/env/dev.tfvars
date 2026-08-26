@@ -64,9 +64,24 @@ agent_nodepools = [
 # cannot get the CPU the HPA sized them against, and the autoscaler would keep
 # adding nodes that do not fix it.
 #
-# NOT YET DEMONSTRATED. Criterion 1 of T-2.8 requires seeing nodes added and
-# removed under load, and that needs a live cluster. This is the configuration;
-# the evidence is still owed.
+# DEMONSTRATED 2026-08-26 (T-2.8, #22). Criterion 1 asked for nodes added and
+# removed under load, and that is what happened -- a pod requesting 3000m that
+# the two fixed workers could not seat:
+#
+#   Final scale-up plan: [{xenopsbase-dev-autoscaled 0->1 (max: 2)}]
+#   node created in Hetzner in 15s, Ready in 30s, boot 20.8s
+#   image 424553376, installed nothing, k3s v1.36.3+k3s1
+#   firewall 11523859 applied at creation
+#   scale-probe pod Running on it
+#   make node-equivalence: static vs autoscaled, 5 properties match
+#
+# The number that killed #22 the first time was the cloudInit payload at 35,332
+# bytes against a 32,768 limit. It is 1,684 now, because everything static went
+# into the golden image (T-1.18).
+#
+# Removal was exercised by the teardown rather than by a scale-down: the node
+# existed when `make down` ran and reap-autoscaled-nodes.sh deleted it (#294).
+# A scale-DOWN under falling load is still owed.
 autoscaler_nodepools = [
   {
     name        = "autoscaled"
