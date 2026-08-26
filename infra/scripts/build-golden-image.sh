@@ -30,13 +30,35 @@
 # Usage:
 #   source ~/.xenopsbase.env && ./build-golden-image.sh [module_version]
 #
+# module_version overrides the terraform pin -- for testing a bump before
+# main.tf changes -- and the override is announced, never silent.
 set -euo pipefail
 
-MODULE_VERSION="${1:-3.1.0}"
 REPO="https://github.com/kube-hetzner/terraform-hcloud-kube-hetzner"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PACKER_DIR="$ROOT/infra/packer"
 VARS_FILE="$PACKER_DIR/versions.pkrvars.hcl"
+TF_MAIN="$ROOT/infra/terraform/cluster/main.tf"
+
+# The version terraform pins is the single source of truth (T-1.30, #302).
+# Before this, the default here was a second literal that happened to agree
+# with main.tf -- the exact "second place that must be updated when the module
+# is bumped" the comment above says this design avoids. Read from the pin, a
+# module bump changes both or neither.
+TF_PIN="$(awk '/^module "kube_hetzner"/ { inblock = 1 }
+               inblock && $1 == "version" { gsub(/"/, "", $3); print $3; exit }' "$TF_MAIN")"
+if [ -z "$TF_PIN" ]; then
+  echo "error: could not read the kube-hetzner version pin from $TF_MAIN" >&2
+  echo "       expected a 'version = \"x.y.z\"' line inside the module \"kube_hetzner\" block." >&2
+  exit 1
+fi
+
+MODULE_VERSION="${1:-$TF_PIN}"
+if [ "$MODULE_VERSION" != "$TF_PIN" ]; then
+  echo "warning: building against module v${MODULE_VERSION}, but terraform pins v${TF_PIN}" >&2
+  echo "         The image will carry v${MODULE_VERSION}'s SELinux policy while the cluster" >&2
+  echo "         runs v${TF_PIN} -- fine for testing a bump, wrong for a published image." >&2
+fi
 
 if [ -z "${HCLOUD_TOKEN:-}" ]; then
   echo "error: HCLOUD_TOKEN is not set — run: source ~/.xenopsbase.env" >&2
@@ -119,6 +141,7 @@ echo "    which packer removes when it finishes)"
 packer build \
   -var-file="$VARS_FILE" \
   -var "selinux_policy_dir=$POLICY_DIR" \
+  -var "module_version=$MODULE_VERSION" \
   "$PACKER_DIR/golden-image.pkr.hcl"
 
 # ---------------------------------------------------------------------------
@@ -159,9 +182,10 @@ images = json.load(sys.stdin).get("images", [])
 images.sort(key=lambda i: i["created"], reverse=True)
 for i in images[:5]:
     labels = i.get("labels", {})
-    print("  %-12s %-34s k3s=%s tailscale=%s  %.1fGB  %s" % (
+    print("  %-12s %-34s k3s=%s tailscale=%s module=%s  %.1fGB  %s" % (
         i["id"], (i.get("description") or "")[:34],
         labels.get("k3s-version", "?"), labels.get("tailscale-version", "?"),
+        labels.get("module-version", "?"),
         i.get("image_size") or 0, i["created"][:19]))
 print("")
 print("  Point terraform at the newest id, and keep the old one until the")

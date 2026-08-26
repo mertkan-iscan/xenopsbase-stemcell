@@ -95,6 +95,16 @@ variable "tailscale_sha256" {
   }
 }
 
+variable "module_version" {
+  type        = string
+  description = "kube-hetzner module version the SELinux policy sources were extracted from. Read from the terraform pin by build-golden-image.sh (T-1.30, #302), and recorded as a label so provenance checks can compare image against cluster without rebuilding either."
+
+  validation {
+    condition     = can(regex("^[0-9]+[.][0-9]+[.][0-9]+$", var.module_version))
+    error_message = "The module_version must be an exact version such as 3.1.0, never latest."
+  }
+}
+
 variable "location" {
   type        = string
   default     = "fsn1"
@@ -139,6 +149,7 @@ locals {
     "xenopsbase-golden" = "candidate"
     "k3s-version"       = replace(var.k3s_version, "+", "_")
     "tailscale-version" = var.tailscale_version
+    "module-version"    = var.module_version
   }
 }
 
