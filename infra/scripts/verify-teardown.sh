@@ -10,7 +10,7 @@
 #
 # Two independent failure modes, both silent:
 #
-#   Something durable died.  Documents, backups or the snapshot are gone. The
+#   Something durable died.  Documents, backups or either snapshot are gone. The
 #                            ephemeral model is unsafe and the boundary in
 #                            ADR-0002 is wrong somewhere.
 #
@@ -69,13 +69,33 @@ for short in documents pg-backups loki-chunks; do
   [ "$rules" -eq 0 ] && { echo "      ^ lifecycle rules lost; rerun make storage-lifecycle"; FAILED=1; }
 done
 
-printf '  %-30s ' "OS snapshot"
-if hcloud image list --selector leapmicro-snapshot=yes -o columns=id 2>/dev/null | tail -n +2 | grep -q '[0-9]'; then
-  echo "present"
-else
-  echo "GONE  <-- next build must run packer again"
-  FAILED=1
-fi
+# TWO SNAPSHOTS, NOT ONE (ADR-0008, T-1.18).
+#
+# This checked only the base OS image for as long as that was the only one, and
+# kept checking only it after the golden image arrived -- so half the boundary
+# it is the gate for went unasserted. preflight.sh has required both before
+# every apply since #251; this required one after every destroy.
+#
+# The failure it could not see: `make down`, or an over-eager prune from T-1.21,
+# takes the golden image with it. Terraform then fails at plan with "Resource
+# (image) was not found using label selector: xenopsbase-golden=yes" -- a
+# message that names the selector and not the two-hour packer build that
+# produces one -- while the teardown that caused it printed TEARDOWN CLEAN.
+#
+#   leapmicro-snapshot=yes   base OS, control plane      bash infra/scripts/build-snapshot.sh
+#   xenopsbase-golden=yes    agents and autoscaled nodes make golden-image
+check_snapshot() {
+  printf '  %-30s ' "$1"
+  if hcloud image list --selector "$2" -o columns=id 2>/dev/null | tail -n +2 | grep -q '[0-9]'; then
+    echo "present"
+  else
+    echo "GONE  <-- rebuild it before the next apply: $3"
+    FAILED=1
+  fi
+}
+
+check_snapshot "base OS snapshot" "leapmicro-snapshot=yes" "bash infra/scripts/build-snapshot.sh"
+check_snapshot "golden image" "xenopsbase-golden=yes" "make golden-image"
 
 echo
 echo "=================================================================="
