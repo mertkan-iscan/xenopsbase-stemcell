@@ -29,6 +29,22 @@ spec:
           # a Deployment would only ever see the logs of the node it landed on.
           type: daemonset
 
+          # EVERY node includes the control plane (T-2.22, #298).
+          #
+          # It carries a NoSchedule taint now, so that application workloads stop
+          # landing on a cx23 that also runs etcd and the API server. A DaemonSet
+          # is not exempt: without this toleration alloy simply stops being
+          # scheduled there, and the node whose logs matter most during an
+          # incident is the one that goes dark.
+          #
+          # That failure would be quiet. `kubectl get ds` still reports every
+          # desired pod running, because the control plane stops being a node
+          # alloy is desired on at all.
+          tolerations:
+            - key: node-role.kubernetes.io/control-plane
+              operator: Exists
+              effect: NoSchedule
+
         alloy:
           resources:
             requests: {cpu: 50m, memory: 128Mi}
