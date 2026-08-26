@@ -29,6 +29,29 @@
 # the same node and a template is a description of what should happen. What
 # differs between a static and an autoscaled node must be only the node's own
 # name and address.
+# ROOT MUST STAY REACHABLE (T-1.27, #288).
+#
+# cloud-init's default is disable_root: true, and it does not merely skip
+# adding a key -- it rewrites root's authorized_keys with a forced command, so
+# the connection is accepted and then answered with:
+#
+#   Please login as the user "root" rather than the user "root".
+#
+# which names no cause and is not obviously about cloud-init at all. The
+# module's own nodes are unaffected because terraform provisions them over SSH
+# and its cloud-init keeps root open; ours had no such line, so every node from
+# this bootstrap has been unreachable since #251. Nobody noticed, because until
+# T-1.23 the only nodes using it were autoscaled ones and nobody logs into
+# those.
+#
+# It matters now for one reason: the node you need to open a shell on is the
+# one that failed to join, and that is precisely the node no kubectl can reach.
+# Both T-1.23 builds ended with a question that could only be answered on the
+# node, and neither could be answered.
+#
+# About twenty bytes against a 2 KB budget. make user-data-size is the gate.
+disable_root: false
+
 write_files:
   - path: /etc/rancher/k3s/config.yaml
     permissions: '0600'

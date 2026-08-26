@@ -365,7 +365,20 @@ user-data-size: ## Assert the node bootstrap still fits in Hetzner user_data (T-
 
 .PHONY: node-equivalence
 node-equivalence: ## Prove a static node and an autoscaled node are the same node (T-1.19)
+	@# REPORTS SKIPPED IN THE NORMAL CASE, and that is the problem with it.
+	@# It needs one static node AND one autoscaled node; min_nodes = 0, so a
+	@# healthy dev cluster has none of the latter. It has never compared
+	@# anything except when someone forced a scale-up by hand. Since T-1.23
+	@# both node classes are built the same way anyway, so what it was
+	@# guarding is now structural. Rewrite or retire: T-1.27 (#288).
 	@bash $(SCRIPTS)/check-node-equivalence.sh $(ENV)
+
+.PHONY: verify-node-provenance
+verify-node-provenance: ## Did each node boot its image, or build itself? Asks the node, not the cluster (T-1.27)
+	@# Deliberately does not use kubectl. The node worth checking is the one
+	@# that failed to join, and no in-cluster tool can reach it -- which is why
+	@# two T-1.23 builds ended without an answer.
+	@bash $(SCRIPTS)/verify-node-provenance.sh $(ENV)
 
 .PHONY: api-spec
 api-spec: ## Regenerate docs/api/*.json from the services
