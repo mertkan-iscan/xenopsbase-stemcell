@@ -45,3 +45,32 @@ output "node_bootstrap_bytes" {
   # would hide the one number this exists to show.
   value = { for g, b64 in local.node_bootstrap_b64 : g => nonsensitive(length(b64)) }
 }
+
+# ------------------------------------------------------------------------------
+# How many nodes this configuration DECLARES (T-7.11, #293).
+#
+# wait-for-stack derived the expected count from the cluster it was waiting on,
+# so `ready == total` compared a number to itself and could not fail. When both
+# workers had just been destroyed and were being recreated, one control plane
+# out of one control plane read as complete:
+#
+#   [  6s] nodes      0/0 Ready
+#   [ 23s] nodes      1/1 Ready
+#   STACK SERVING in 27s
+#
+# `make up` then reported serving with two of three nodes missing, the platform
+# rescheduled onto a schedulable cx23, and the control plane went to load
+# average 32 with its API refusing connections.
+#
+# Autoscaled nodes are deliberately not counted. They are created outside
+# terraform and their number is a function of load, so the gate asserts
+# `registered >= declared` rather than equality -- present-and-ready extras are
+# fine, a missing declared node is not.
+# ------------------------------------------------------------------------------
+output "expected_node_count" {
+  description = "Nodes this configuration declares: control plane plus static agents. Excludes autoscaled nodes, which terraform does not create."
+  value = sum([
+    sum([for p in var.control_plane_nodepools : p.count]),
+    sum([for p in var.agent_nodepools : p.count]),
+  ])
+}
