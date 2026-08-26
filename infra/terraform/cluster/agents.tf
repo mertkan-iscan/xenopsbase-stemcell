@@ -131,28 +131,29 @@ resource "hcloud_server" "static_agent" {
     ipv6_enabled = true
   }
 
-  # ATTACHED HERE, NOT BY A SEPARATE RESOURCE (T-1.23, #282).
+  # NOT an inline `network` block, and the reason is a measured one.
   #
-  # It was an `hcloud_server_network`, which attaches AFTER the server boots.
-  # The bootstrap reads node-ip off eth1, so a node that boots before the
-  # attachment lands writes:
+  # It was one, to attach the network at creation and close a race: the
+  # bootstrap reads node-ip off eth1, and a node that booted before a separate
+  # attachment landed wrote `"node-ip": ""`, which k3s then refuses forever.
   #
-  #   "node-ip": ""
-  #   Error: failed to get node name and addresses: invalid node-ip: invalid ip format ''
+  # That worked and it drifted. Only `network_id` is set in config while `ip`,
+  # `mac_address`, `subnet_id` and `alias_ips` are computed, so the provider
+  # tears the block down and rebuilds it on EVERY apply:
   #
-  # and k3s then refuses that config forever -- 19 restarts, no join, while the
-  # interface it was waiting for is present the whole time you are looking at it.
+  #   - network { ip = "10.255.0.2", mac_address = "86:00:00:35:53:e4", ... }
+  #   + network { ip = (known after apply), ... }
   #
-  # A race, so it presents as one node joining and the other not, differently
-  # each build. It cost build 1 its second worker, was misread there as API
-  # overload, and cost build 4 the same way before the cause was found.
+  # 24 to 32 seconds per node, the private NIC detached and reattached under a
+  # running kubelet, and `ip` known-after-apply -- so a re-apply could renumber
+  # a live worker while its k3s config still names the old address. Found by
+  # running `make up` twice, which nothing had done before.
   #
-  # The module attaches at creation and the autoscaler is handed HCLOUD_NETWORK
-  # at creation. This is the same, and it is why neither of them has this bug.
-  network {
-    network_id = module.kube_hetzner.network_id
-  }
-
+  # The race is already closed on the other side: the bootstrap waits up to 60
+  # seconds for eth1 to carry an address and fails loudly if it does not
+  # (templates/node-bootstrap.yaml.tpl). Attachment measured at 16 to 26
+  # seconds, so the wait covers it with room, and covers it in the direction
+  # that reports rather than the direction that corrupts.
   lifecycle {
     # The image moves on every `make golden-image`, and a new snapshot id would
     # otherwise replace every running agent on the next apply -- an unplanned
@@ -162,6 +163,20 @@ resource "hcloud_server" "static_agent" {
   }
 }
 
-# The separate hcloud_server_network is gone: it is what created the race above,
-# and the provider treats an inline `network` block and a standalone attachment
-# for the same pair as conflicting owners anyway.
+# ------------------------------------------------------------------------------
+# eth1. The bootstrap's `flannel-iface` and its node-ip discovery both name it,
+# and the interface only exists because of this attachment.
+#
+# The address is assigned by Hetzner rather than chosen here. That is what the
+# autoscaler does -- it is handed HCLOUD_NETWORK and nothing else -- and those
+# nodes join correctly, so the same is used rather than inventing a second
+# addressing scheme that has to agree with the module's. Choosing addresses is
+# possible and better, and it needs the subnet the module computes internally
+# and does not output; that is #287's ground, not this card's.
+# ------------------------------------------------------------------------------
+resource "hcloud_server_network" "static_agent" {
+  for_each = hcloud_server.static_agent
+
+  server_id  = each.value.id
+  network_id = module.kube_hetzner.network_id
+}
