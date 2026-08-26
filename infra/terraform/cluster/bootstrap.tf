@@ -69,7 +69,7 @@ locals {
       "${stage}/${f}" => {
         stage       = stage
         source      = "${cfg.folder}/${f}"
-        destination = "/var/user_kustomize/${stage}/${replace(f, ".tpl", "")}"
+        destination = "/var/platform-bootstrap/${stage}/${replace(f, ".tpl", "")}"
         content     = templatefile("${cfg.folder}/${f}", cfg.params)
       }
     }
@@ -95,7 +95,18 @@ resource "terraform_data" "platform_bootstrap" {
   }
 
   provisioner "remote-exec" {
-    inline = ["rm -rf /var/user_kustomize", "mkdir -p /var/user_kustomize/1 /var/user_kustomize/2"]
+    inline = [
+      # OUR OWN DIRECTORY, and the reason is a build that failed on it.
+      #
+      # This used the module's path. Stage 3 still lives there, and the module
+      # keeps its apply-options beside it. The `rm -rf` below then deleted the
+      # module's own scaffolding mid-apply and its deploy step died on
+      # `.kube-hetzner-apply-options/3.sh: Not a directory`.
+      #
+      # Two owners, one path. Moving is cheaper than coordinating.
+      "rm -rf /var/platform-bootstrap",
+      "mkdir -p /var/platform-bootstrap/1 /var/platform-bootstrap/2",
+    ]
   }
 
   # ---------------------------------------------------------------------------
@@ -163,12 +174,12 @@ resource "terraform_data" "platform_apply" {
   provisioner "remote-exec" {
     inline = [<<-EOT
       set -e
-      kubectl apply -k /var/user_kustomize/1
+      kubectl apply -k /var/platform-bootstrap/1
 
       # The rendered Secret holds the age private key in cleartext. Once applied
       # it is in etcd, where it has to be; the copy on disk outlives the apply
       # and is gratuitous.
-      shred -u /var/user_kustomize/1/sops-age-secret.yaml 2>/dev/null || rm -f /var/user_kustomize/1/sops-age-secret.yaml
+      shred -u /var/platform-bootstrap/1/sops-age-secret.yaml 2>/dev/null || rm -f /var/platform-bootstrap/1/sops-age-secret.yaml
 
       # k3s installs the chart asynchronously, so the CRD appears some time
       # after set 1 is applied. `kubectl wait` alone is not enough: it errors
@@ -181,7 +192,7 @@ resource "terraform_data" "platform_apply" {
       done
       kubectl wait --for=condition=established --timeout=120s crd/applications.argoproj.io
 
-      kubectl apply -k /var/user_kustomize/2
+      kubectl apply -k /var/platform-bootstrap/2
     EOT
     ]
   }
