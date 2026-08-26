@@ -63,5 +63,5 @@ than a clean file that hides the fact a mistake was ever made.
 | [0009](0009-in-memory-store.md) | Valkey is the in-memory store, and it is disposable | Accepted |
 | [0012](0012-database-scaling.md) | How the database scales, and the evidence required before it does | Accepted |
 | [0010](0010-user-identity-durability.md) | User identity is durable; declared users carry explicit ids | Accepted |
-| [0013](0013-node-identity-is-injected.md) | A node's identity is injected before any node exists, never discovered from one | Proposed |
+| [0013](0013-node-identity-is-injected.md) | A node's identity is injected before any node exists, never discovered from one | Accepted (token half; endpoint half withdrawn) |
 | [0014](0014-provisioning-and-platform-are-separate-phases.md) | Provisioning the cluster and bootstrapping the platform are separate phases | Accepted |

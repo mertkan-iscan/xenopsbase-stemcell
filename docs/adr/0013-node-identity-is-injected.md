@@ -1,6 +1,6 @@
 # ADR-0013: A node's identity is injected before any node exists, never discovered from one
 
-- **Status:** Proposed
+- **Status:** Accepted (token half). Endpoint half withdrawn — see below.
 - **Date:** 2026-08-26 (endpoint half corrected the same day, before implementation)
 - **Task:** T-1.25 (#286)
 - **Amends:** none. Constrains [ADR-0002](0002-ephemeral-cluster-and-durable-state.md) and
@@ -111,7 +111,17 @@ in the subnet, so the assumption holds only while the control plane is reliably 
 Making agents concurrent — the entire point — turns that into a race an agent can win.
 
 So the endpoint stops being derived from another node at the same moment the network stops being
-the module's, which is T-1.26.
+the module's — and T-1.26 (#287) has since been decided the other way. **The project stays on
+kube-hetzner**, so the network stays the module's, and the endpoint half of this ADR is withdrawn
+rather than pending.
+
+That is a smaller loss than it looked when this was written. What the endpoint half was for was
+letting agents be created concurrently with the control plane, and the problem that motivated it —
+the platform applied before any agent existed — was solved instead by ADR-0014, with one dependency
+edge and no module surgery. Agents still wait for the module; nothing depends on them not waiting.
+
+What remains true and is why the token half stands on its own: the join secret is ours, so a rebuild
+uses the same one by construction rather than by reading it out of the cluster being replaced.
 
 Until then the join endpoint remains a module output. Two other module references stay as well —
 `ssh_key_id` and `network_id` — and they are a different thing: infrastructure the servers attach
@@ -182,6 +192,8 @@ only purpose is to change a count.
 
 ## Revisit if
 
+- #287 is reopened. The endpoint half comes back with it, and the groundwork is described here and
+  in that card rather than sitting in the tree.
 - The module gains a way to depend on the control plane separately from the platform bootstrap, at
   which point injection buys ordering we would already have.
 - We move to Talos or Cluster API, where identity injection is the native model and this ADR
