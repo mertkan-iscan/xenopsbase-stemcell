@@ -173,7 +173,25 @@ resource "terraform_data" "platform_bootstrap" {
 resource "terraform_data" "platform_bootstrap_files" {
   for_each = local.bootstrap_files
 
-  triggers_replace = { content = sha256(each.value.content) }
+  # THE WHOLE SET, NOT THIS ONE FILE (T-1.22, #281).
+  #
+  # Per-file is the obvious key and it is wrong, because this resource is not
+  # the only thing that decides whether a file is on the node. The step above
+  # does `rm -rf /var/platform-bootstrap`, and it triggers on the hash of EVERY
+  # file. So a change to stage 3 wiped the directory while stage 1 and stage 2,
+  # whose own contents had not changed, were never re-uploaded -- and the apply
+  # then failed on a file that had simply been deleted underneath it:
+  #
+  #   accumulating resources from 'sops-age-secret.yaml':
+  #   evalsymlink failure ... no such file or directory
+  #
+  # Keying every upload on the same hash as the wipe makes the three steps agree
+  # on one question: if anything in the bootstrap changed, the directory is
+  # rebuilt and everything in it is re-sent. The cost is uploading nine small
+  # files where one would have done, on the rare apply that changes any of them.
+  triggers_replace = {
+    content = sha256(jsonencode({ for k, v in local.bootstrap_files : k => v.content }))
+  }
 
   connection {
     type        = "ssh"
@@ -207,12 +225,23 @@ resource "terraform_data" "platform_apply" {
   provisioner "remote-exec" {
     inline = [<<-EOT
       set -e
-      kubectl apply -k /var/platform-bootstrap/1
 
+      # THE AGE KEY, APPLIED OUTSIDE KUSTOMIZE AND DELETED IMMEDIATELY (#281).
+      #
       # The rendered Secret holds the age private key in cleartext. Once applied
       # it is in etcd, where it has to be; the copy on disk outlives the apply
-      # and is gratuitous.
+      # and is gratuitous. So it is shredded -- and a file the apply deletes
+      # cannot also be a file kustomize is told to read, which is what #281 was.
+      # It is no longer in 10-argocd/kustomization.yaml for that reason.
+      #
+      # The namespace comes first because the Secret is in it, and `apply -f` on
+      # one object does not create the other. It is applied again by the
+      # kustomization a moment later, which is a no-op.
+      kubectl apply -f /var/platform-bootstrap/1/namespace.yaml
+      kubectl apply -f /var/platform-bootstrap/1/sops-age-secret.yaml
       shred -u /var/platform-bootstrap/1/sops-age-secret.yaml 2>/dev/null || rm -f /var/platform-bootstrap/1/sops-age-secret.yaml
+
+      kubectl apply -k /var/platform-bootstrap/1
 
       # k3s installs the chart asynchronously, so the CRD appears some time
       # after set 1 is applied. `kubectl wait` alone is not enough: it errors
