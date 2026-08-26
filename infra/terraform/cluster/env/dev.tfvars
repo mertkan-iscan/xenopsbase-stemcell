@@ -79,9 +79,26 @@ agent_nodepools = [
 # bytes against a 32,768 limit. It is 1,684 now, because everything static went
 # into the golden image (T-1.18).
 #
-# Removal was exercised by the teardown rather than by a scale-down: the node
-# existed when `make down` ran and reap-autoscaled-nodes.sh deleted it (#294).
-# A scale-DOWN under falling load is still owed.
+# And removed, by the autoscaler itself, when the load went away:
+#
+#   was unneeded for 10m2.378s
+#   Considering node ... for standard scale down
+#   Scale-down: removing empty node
+#   drain.go:140] All pods removed from ...
+#
+# 989s from deleting the workload to both the node object and the Hetzner
+# server being gone -- the 10-minute unneeded window plus the scan interval.
+# It DRAINED rather than dropped, which is the half of "removed under load"
+# that a disappearing server would not have proved.
+#
+# The two --skip-nodes-with-* flags in manifests/30-cluster-autoscaler are what
+# make this possible, and this is the run that shows it: an emptied node still
+# carries alloy and node-exporter, and without those flags the autoscaler would
+# refuse to remove it and the node would stay for ever.
+#
+# The order is worth knowing: the Hetzner server goes first and the node object
+# lingers a few seconds. The reverse -- object gone, server billing -- is the
+# failure #294 is about, and it is not what happens here.
 autoscaler_nodepools = [
   {
     name        = "autoscaled"
