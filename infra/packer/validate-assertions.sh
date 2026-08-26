@@ -153,6 +153,31 @@ assert "k8s_custom_policies policy is loaded" \
 
 # ---------------------------------------------------------------------------
 echo ""
+echo "IT CAN BE EITHER ROLE, AND IS NEITHER YET"
+#
+# Both units ship in the image so one image serves control planes and agents
+# (T-1.24, #285). Repeated here rather than trusted from the build, for the
+# reason this whole second stage exists: the build checked a machine that was
+# already running, and a first-boot unit could enable either of these on a
+# machine that is not.
+#
+# An image that boots straight into k3s is a cluster member cloned N times, and
+# the failure is memorably confusing -- two nodes claiming one identity, with
+# nothing in either log naming the image as the cause. The bootstrap enables
+# exactly one of these, once the config and the join token are in place.
+
+assert "the agent unit is present" 'test -f /etc/systemd/system/k3s-agent.service'
+assert "the server unit is present" 'test -f /etc/systemd/system/k3s.service'
+assert "the agent unit is NOT enabled"   '! systemctl is-enabled k3s-agent 2>/dev/null | grep -q "^enabled"'
+assert "the server unit is NOT enabled"   '! systemctl is-enabled k3s 2>/dev/null | grep -q "^enabled"'
+assert "neither k3s unit is running"   '! systemctl is-active --quiet k3s-agent && ! systemctl is-active --quiet k3s'
+
+# The two differ only where they are meant to. Anything else means the
+# derivation in golden-image.pkr.hcl stopped doing what its comment claims.
+assert "the units differ only in role"   'test "$(sed -e s/k3s\.service/UNIT/g -e s/^\ *server\ /ROLE/ /etc/systemd/system/k3s.service | md5sum)" = "$(sed -e s/k3s-agent\.service/UNIT/g -e s/^\ *agent\ /ROLE/ /etc/systemd/system/k3s-agent.service | md5sum)"'
+
+# ---------------------------------------------------------------------------
+echo ""
 echo "IT CARRIES NO SECRETS"
 #
 # A snapshot outlives the cluster it was built for, is readable by anything

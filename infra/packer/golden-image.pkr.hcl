@@ -227,6 +227,34 @@ build {
       # Proves it parses and that its ExecStart binary exists -- the same class
       # of mistake that shipped a broken tailscaled unit in #250.
       "systemd-analyze verify /etc/systemd/system/k3s-agent.service 2>&1 | grep -vi 'Unit .* not found' || true",
+
+      # The SERVER unit, same treatment (T-1.24, #285).
+      #
+      # DERIVED from the agent unit above rather than typed out: the build
+      # takes that string and substitutes the unit name and `agent` for
+      # `server`. The two files therefore cannot differ anywhere except
+      # where this intends them to, and a transcription slip is not a
+      # failure mode. Both occurrences of the name move, because the third
+      # EnvironmentFile names the unit explicitly rather than through %N.
+      #
+      # `k3s.service`, not `k3s-server.service`. That is what the upstream
+      # installer writes and what a running control plane answers to --
+      # `systemctl is-active k3s` worked on one; the issue title's spelling
+      # would not have.
+      #
+      # ExecStart is `k3s server` with nothing appended, because the module
+      # defaults control_plane_exec_args and agent_exec_args to "" and this
+      # repository overrides neither. Set either one and this image diverges
+      # from the module's nodes silently -- which is exactly why the agent
+      # unit was captured from a live node instead of reconstructed.
+      #
+      # STILL OWED: that capture is what this one lacks. The cluster it
+      # would have been read from was destroyed before this was written, so
+      # diff it against a live control plane's /etc/systemd/system/k3s.service
+      # on the next `make up` before calling #285 done.
+      "cat > /etc/systemd/system/k3s.service <<'UNIT'\n[Unit]\nDescription=Lightweight Kubernetes\nDocumentation=https://k3s.io\nWants=network-online.target\nAfter=network-online.target\n\n[Install]\nWantedBy=multi-user.target\n\n[Service]\nType=notify\nEnvironmentFile=-/etc/default/%N\nEnvironmentFile=-/etc/sysconfig/%N\nEnvironmentFile=-/etc/systemd/system/k3s.service.env\nKillMode=process\nDelegate=yes\nUser=root\n# Having non-zero Limit*s causes performance problems due to accounting overhead\n# in the kernel. We recommend using cgroups to do container-local accounting.\nLimitNOFILE=1048576\nLimitNPROC=infinity\nLimitCORE=infinity\nTasksMax=infinity\nTimeoutStartSec=0\nRestart=always\nRestartSec=5s\nExecStartPre=-/sbin/modprobe br_netfilter\nExecStartPre=-/sbin/modprobe overlay\nExecStart=/usr/local/bin/k3s \\\n    server \\\n\nUNIT",
+      "systemctl daemon-reload",
+      "systemd-analyze verify /etc/systemd/system/k3s.service 2>&1 | grep -vi 'Unit .* not found' || true",
       "test -x /usr/local/bin/k3s",
     ]
   }
@@ -347,6 +375,12 @@ build {
       # Nothing has joined anything. An image captured from a node that ran is
       # a cluster member cloned N times, which is a memorably confusing outage.
       "! systemctl is-enabled k3s-agent 2>/dev/null | grep -q '^enabled'",
+      "! systemctl is-enabled k3s 2>/dev/null | grep -q '^enabled'",
+
+      # Both roles present. An image carrying one of them boots half a cluster
+      # and fails the other half at the moment that half is needed.
+      "test -f /etc/systemd/system/k3s-agent.service",
+      "test -f /etc/systemd/system/k3s.service",
 
       # Infrastructure layer only.
       "test ! -e /app",
