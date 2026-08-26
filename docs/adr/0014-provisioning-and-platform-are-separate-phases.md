@@ -1,8 +1,8 @@
 # ADR-0014: Provisioning the cluster and bootstrapping the platform are separate phases
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-26
-- **Task:** T-1.27
+- **Task:** T-1.28 (#289)
 - **Relates to:** [ADR-0004](0004-gitops-engine.md), [ADR-0013](0013-node-identity-is-injected.md)
 
 ## Context
