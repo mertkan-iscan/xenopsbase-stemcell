@@ -53,12 +53,29 @@ agent_nodepools = [
 # continuously to be ready for a load that arrives during working sessions --
 # which is the cost model ADR-0002 exists to avoid.
 #
-# max_nodes = 2 comes from what the HPAs can actually ask for. Their ceilings
-# are 4 gateway and 3 core; at a 500m request that is 3.5 cores of NEW demand
-# beyond the current floor, and one extra cx33 (4 vCPU) absorbs it. The second
-# node is headroom for the platform growing underneath -- Loki and Prometheus
-# are the ones that move -- not for more application replicas, because nothing
-# can ask for those.
+# max_nodes = 2 is headroom for the platform growing underneath -- Loki and
+# Prometheus are the ones that move -- and NOT for application replicas.
+#
+# This used to say the HPA ceilings were "3.5 cores of NEW demand beyond the
+# current floor, and one extra cx33 (4 vCPU) absorbs it". The arithmetic counted
+# the ceiling TOTAL instead of the delta: 4 gateway and 3 core at 500m is 3,500m
+# altogether, and the floor of 2 gateway and 1 core is already 1,500m, so the
+# new demand is 2,000m.
+#
+# Measured at ceiling on 2026-08-26, with the control plane tainted (#298) so
+# nothing else could absorb it:
+#
+#   worker-0  2510m / 3700m      worker-1  2335m / 3700m      free 2555m
+#   [90s - 345s]  hpa: core=3 gateway=4   pending=0   autoscaled=0
+#
+# Seven pods placed and room for five more. No extra cx33 is absorbed by
+# anything, and a k6 load will never produce a scale-up -- which is what the
+# last clause always said, and what the corrected arithmetic now agrees with.
+#
+# That property is worth keeping and is T-2.8's fourth criterion now: the fixed
+# workers are sized for peak application load, so the application never waits
+# for a node to appear before it can serve. It stops being true the moment
+# someone raises an HPA ceiling or a request past what two cx33s can seat.
 #
 # cx33 to match the fixed workers. A smaller type would schedule pods that then
 # cannot get the CPU the HPA sized them against, and the autoscaler would keep
