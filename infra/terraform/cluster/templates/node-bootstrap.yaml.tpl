@@ -96,9 +96,28 @@ runcmd:
   #    and a node that is not on it cannot be reached to debug when it fails to
   #    join -- which is exactly when you need to.
   #
-  #    The key is REUSABLE and ephemeral: ephemeral means a destroyed node
-  #    removes its own device rather than leaving one behind for every scale
-  #    event, which over a week of autoscaling would be a lot of tailnet litter.
+  #    The key must be REUSABLE: a single-use key registers the first node and
+  #    the rest hang waiting to join.
+  #
+  #    IT SHOULD ALSO BE EPHEMERAL AND IS NOT (T-1.29, #290). This comment used
+  #    to assert it was, and the tailnet says otherwise -- eight offline devices
+  #    for a cluster that has been rebuilt eight times, each still holding the
+  #    name its successor wanted:
+  #
+  #      xenopsbase-dev-worker-0      offline, last seen 31m ago
+  #      xenopsbase-dev-worker-0-1    offline, last seen 6m ago
+  #      xenopsbase-dev-worker-0-2    the node actually running
+  #
+  #    Tailscale appends a suffix when a name is taken, so MagicDNS answers
+  #    `xenopsbase-dev-worker-0` with a corpse and anything addressing a node by
+  #    name reaches nothing. That is why verify-node-provenance resolves through
+  #    `tailscale status` instead of trusting the name.
+  #
+  #    Ephemerality is a property of the key as issued, not of the `tailscale up`
+  #    below, so this cannot be fixed here: the key has to be reissued as
+  #    ephemeral in the Tailscale admin console and the existing devices removed.
+  #    make verify-teardown reports the count after every destroy so the number
+  #    is visible rather than discovered.
   #
   #    Run through `sh -c` rather than as an exec list, because cloud-init's
   #    list form does NOT go through a shell -- $(hostname) would be passed to

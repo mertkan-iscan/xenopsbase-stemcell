@@ -84,6 +84,24 @@ done
 #
 #   leapmicro-snapshot=yes   base OS, control plane      bash infra/scripts/build-snapshot.sh
 #   xenopsbase-golden=yes    agents and autoscaled nodes make golden-image
+# NOTHING THE AUTOSCALER MADE MAY SURVIVE (T-7.12, #294).
+#
+# `make down` reaps them now, before the destroy. This asserts it worked, for
+# the same reason every other line here does: a step that runs is not a step
+# that succeeded. A leftover autoscaled node is not merely billing -- it holds
+# the private network, so the NEXT teardown hangs on a subnet deletion whose
+# message says nothing about servers.
+check_no_autoscaled() {
+  printf '  %-30s ' "autoscaled nodes"
+  left="$(hcloud server list -o noheader -o columns=name -l "hcloud/node-group=${CLUSTER_NAME:-xenopsbase}-${ENVIRONMENT}-autoscaled" 2>/dev/null | grep -c . || true)"
+  if [ "${left:-0}" -eq 0 ]; then
+    echo "none"
+  else
+    echo "$left LEFT  <-- they hold the subnet; the next destroy will hang"
+    FAILED=1
+  fi
+}
+
 check_snapshot() {
   printf '  %-30s ' "$1"
   if hcloud image list --selector "$2" -o columns=id 2>/dev/null | tail -n +2 | grep -q '[0-9]'; then
@@ -96,6 +114,30 @@ check_snapshot() {
 
 check_snapshot "base OS snapshot" "leapmicro-snapshot=yes" "bash infra/scripts/build-snapshot.sh"
 check_snapshot "golden image" "xenopsbase-golden=yes" "make golden-image"
+check_no_autoscaled
+
+# REPORTED, NOT ASSERTED (T-1.29, #290).
+#
+# A destroyed node should leave the tailnet with it. It does not: the auth key
+# is reusable but not ephemeral, so every rebuild leaves a device behind
+# holding the name its successor wanted, and MagicDNS then answers that name
+# with a corpse.
+#
+# This does NOT fail the teardown. Ephemerality is a property of the key as
+# issued in the Tailscale admin console, so nothing in this repository can fix
+# it, and a gate that cannot be satisfied from here would only teach people to
+# ignore it. What it can do is make the number visible, because the failure it
+# leads to -- a node unreachable by name while it is running and healthy --
+# arrives with nothing pointing back at this.
+if command -v tailscale >/dev/null 2>&1; then
+  printf '  %-30s ' "tailnet leftovers"
+  stale="$(tailscale status 2>/dev/null | grep "${CLUSTER_NAME:-xenopsbase}-${ENVIRONMENT}" | grep -c offline || true)"
+  if [ "${stale:-0}" -eq 0 ]; then
+    echo "none"
+  else
+    echo "$stale offline device(s)  <-- #290: reissue the auth key as ephemeral"
+  fi
+fi
 
 echo
 echo "=================================================================="

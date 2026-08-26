@@ -83,15 +83,58 @@ echo "  static     : ${STATIC:-<none>}"
 echo "  autoscaled : ${AUTO:-<none>}"
 echo ""
 
+# IT USED TO EXIT 0 HERE, AND THAT WAS THE PROBLEM (T-1.27, #288).
+#
+# An autoscaled node exists only while something needs one, and dev sits at
+# min_nodes = 0. So on every healthy cluster this printed SKIPPED and returned
+# success, and the check that was meant to catch two node classes drifting
+# apart had never compared anything except when somebody forced a scale-up by
+# hand. A green check that has never run is worse than a missing one: it
+# occupies the place where a real check would be noticed as absent.
+#
+# So it now compares what it CAN and names what it cannot.
+#
+#   both workers present   compare them to each other. They are built by the
+#                          same path since #282, so this is a weaker claim --
+#                          but it is the claim that the path is DETERMINISTIC,
+#                          and a bootstrap that renders differently per node is
+#                          exactly the kind of thing nothing else would see.
+#   an autoscaled node too  compare across the classes, which is the original
+#                          and stronger claim: terraform creates one, the
+#                          autoscaler creates the other, and they differ in how
+#                          the network and the firewall are attached.
+#
+# Only a cluster with fewer than two comparable nodes skips, and that is a
+# broken cluster rather than a normal one.
+if [ -z "$AUTO" ]; then
+  SECOND="$(kubectl get nodes -o name 2>/dev/null | grep -- '-worker-' | sed -n 2p | cut -d/ -f2)"
+  if [ -n "$STATIC" ] && [ -n "$SECOND" ]; then
+    AUTO="$SECOND"
+    MODE="two static agents (no autoscaled node exists; see the note below)"
+  fi
+else
+  MODE="static vs autoscaled"
+fi
+
 if [ -z "$STATIC" ] || [ -z "$AUTO" ]; then
-  echo "SKIPPED — need one of each to compare."
+  echo "FAILED — fewer than two worker nodes to compare."
   echo ""
-  echo "  Autoscaled nodes exist only while something needs them. To make one:"
+  echo "  This is not the old SKIPPED. A cluster with fewer than two workers is"
+  echo "  not a normal cluster, and reporting success about it is how #282's"
+  echo "  builds looked healthy while one agent had never joined."
+  exit 1
+fi
+
+echo "  comparing  : ${MODE}"
+if [ "${MODE#two static}" != "$MODE" ]; then
+  echo ""
+  echo "  The stronger comparison needs an autoscaled node, and they exist only"
+  echo "  while something needs one. To force one:"
   echo "    kubectl create deployment scale-probe --image=registry.k8s.io/pause:3.9"
   echo "    kubectl set resources deployment scale-probe --requests=cpu=3000m"
   echo "  and delete it afterwards."
-  exit 0
 fi
+echo ""
 
 # Facts are collected on the node itself, through a privileged debug pod, because
 # the k3s API reports what a node ADVERTISES and this needs what it actually has.

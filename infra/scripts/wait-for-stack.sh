@@ -82,16 +82,51 @@ echo
 
 # ---------------------------------------------------------------- nodes
 
+# HOW MANY NODES THE CONFIGURATION DECLARES, not how many happen to exist
+# (T-7.11, #293).
+#
+# This gate used to compare the cluster to itself: `ready == total`, both
+# counted from `kubectl get nodes`. A number compared to itself cannot fail.
+# With both workers destroyed and being recreated, one control plane out of one
+# control plane passed:
+#
+#   [  6s] nodes      0/0 Ready
+#   [ 23s] nodes      1/1 Ready
+#   STACK SERVING in 27s
+#
+# `make up` reported serving with two of three nodes missing. The platform then
+# rescheduled onto a schedulable cx23 and the control plane reached load average
+# 32 with its API refusing connections.
+#
+# The count comes from terraform rather than from parsing tfvars, because the
+# arithmetic (sum over both nodepool lists) belongs where the variables are.
+EXPECTED_NODES="$(cd "$ROOT/infra/terraform/cluster" && terraform output -raw expected_node_count 2>/dev/null)"
+
+# NO FALLBACK TO COUNTING THE CLUSTER. That is the bug, and a fallback would
+# reintroduce it exactly when state is unreadable -- which is also when the
+# cluster is least likely to be what you think it is.
+if ! printf '%s' "$EXPECTED_NODES" | grep -qE '^[0-9]+$'; then
+  echo "error: cannot read expected_node_count from terraform." >&2
+  echo "       Without it this gate would compare the cluster to itself and" >&2
+  echo "       pass on any number of nodes, including one (#293)." >&2
+  echo "       run: source ~/.xenopsbase.env" >&2
+  exit 1
+fi
+
 while :; do
   total=$(kc get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ')
   ready=$(kc get nodes --no-headers 2>/dev/null | awk '$2=="Ready"' | wc -l | tr -d ' ')
-  if [ "${total:-0}" -gt 0 ] && [ "$ready" = "$total" ]; then
-    say "nodes      $ready/$total Ready"
+
+  # `>=` on the declared count, not `==`. Autoscaled nodes are created outside
+  # terraform and their number follows load, so extras are legitimate -- but
+  # every one of them still has to be Ready, or the cluster is mid-something.
+  if [ "${total:-0}" -ge "$EXPECTED_NODES" ] && [ "${ready:-0}" = "${total:-0}" ]; then
+    say "nodes      $ready/$total Ready (declared $EXPECTED_NODES)"
     break
   fi
-  say "nodes      ${ready:-0}/${total:-0} Ready"
+  say "nodes      ${ready:-0}/${total:-0} Ready, declared $EXPECTED_NODES"
   if deadline_passed; then
-    echo "TIMED OUT waiting for nodes." >&2
+    echo "TIMED OUT waiting for nodes: $ready Ready of $total registered, $EXPECTED_NODES declared." >&2
     kc get nodes >&2 2>/dev/null
     exit 1
   fi

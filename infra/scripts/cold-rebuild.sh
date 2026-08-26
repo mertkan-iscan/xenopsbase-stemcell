@@ -86,8 +86,40 @@ DRILL_START="$(date +%s)"
 # ---------------------------------------------------------------------------
 banner "Phase 0 — seed a document that must survive"
 # ---------------------------------------------------------------------------
+# THE DRILL CANNOT START ON A HALF-TORN-DOWN ENVIRONMENT, and it has to say so
+# (T-7.10, #291).
+#
+# This used to be one line: "cannot log in; is dev up?" -- which is the right
+# question and no help at all. The situation that produces it is not usually a
+# cluster that was never built; it is a PREVIOUS run of this drill that failed
+# after phase 2. Phase 2 deletes the PersistentVolumeClaims early, so Postgres
+# is gone before anything downstream can fail, and the drill has then broken the
+# thing it needs to start.
+#
+# That happened twice in one afternoon -- once to a Hetzner 503 mid-destroy,
+# once to a stalled subnet deletion -- and each time recovery was improvised.
+# The recovery is one command and it belongs here rather than in somebody's
+# memory.
 TOKEN="$(token)"
-[ -n "$TOKEN" ] || { echo "  error: cannot log in; is ${ENVIRONMENT} up?" >&2; exit 1; }
+if [ -z "$TOKEN" ]; then
+  echo "  error: cannot log in to ${ENVIRONMENT}, so there is nothing to seed." >&2
+  echo "" >&2
+  if hcloud server list -o noheader -o columns=name 2>/dev/null | grep -q "^${CLUSTER_NAME:-xenopsbase}-${ENVIRONMENT}"; then
+    echo "  Servers exist, so this is most likely a teardown that stopped partway:" >&2
+    echo "  phase 2 deletes the PVCs first, so the database goes before anything" >&2
+    echo "  else does. The environment has to be whole before the drill can" >&2
+    echo "  destroy it meaningfully." >&2
+  else
+    echo "  No servers for ${ENVIRONMENT}. The environment is not built." >&2
+  fi
+  echo "" >&2
+  echo "    make down ENV=${ENVIRONMENT} SKIP_BACKUP_CHECK=1 && make up ENV=${ENVIRONMENT}" >&2
+  echo "" >&2
+  echo "  SKIP_BACKUP_CHECK is right here and only here: a half-destroyed" >&2
+  echo "  cluster has no database to archive from, so the gate would refuse a" >&2
+  echo "  teardown that is the only way forward." >&2
+  exit 1
+fi
 
 CONTENT="cold-rebuild drill $(date -u +%Y-%m-%dT%H:%M:%SZ) $RANDOM"
 echo -n "$CONTENT" > "$WORK/seed.txt"
