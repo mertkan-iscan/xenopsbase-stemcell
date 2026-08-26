@@ -116,6 +116,29 @@ check_snapshot "base OS snapshot" "leapmicro-snapshot=yes" "bash infra/scripts/b
 check_snapshot "golden image" "xenopsbase-golden=yes" "make golden-image"
 check_no_autoscaled
 
+# REPORTED, NOT ASSERTED (T-1.29, #290).
+#
+# A destroyed node should leave the tailnet with it. It does not: the auth key
+# is reusable but not ephemeral, so every rebuild leaves a device behind
+# holding the name its successor wanted, and MagicDNS then answers that name
+# with a corpse.
+#
+# This does NOT fail the teardown. Ephemerality is a property of the key as
+# issued in the Tailscale admin console, so nothing in this repository can fix
+# it, and a gate that cannot be satisfied from here would only teach people to
+# ignore it. What it can do is make the number visible, because the failure it
+# leads to -- a node unreachable by name while it is running and healthy --
+# arrives with nothing pointing back at this.
+if command -v tailscale >/dev/null 2>&1; then
+  printf '  %-30s ' "tailnet leftovers"
+  stale="$(tailscale status 2>/dev/null | grep "${CLUSTER_NAME:-xenopsbase}-${ENVIRONMENT}" | grep -c offline || true)"
+  if [ "${stale:-0}" -eq 0 ]; then
+    echo "none"
+  else
+    echo "$stale offline device(s)  <-- #290: reissue the auth key as ephemeral"
+  fi
+fi
+
 echo
 echo "=================================================================="
 echo " MUST BE GONE  (anything still here bills forever)"
