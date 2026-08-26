@@ -12,24 +12,23 @@ metadata:
   name: argo-cd
   namespace: kube-system
 spec:
-  # THE INSTALL JOB MUST RUN BEFORE ANY WORKER EXISTS (T-1.23, #282).
+  # NOT `bootstrap: true`, and the reason is worth keeping (T-1.23, #282).
   #
-  # helm-controller gives a bootstrap chart's install Job tolerations for the
-  # control-plane and etcd taints; a non-bootstrap one gets none. Measured on
-  # the live cluster, all three agreeing:
+  # It was set here to give the install Job the control-plane toleration, so it
+  # could run before any worker existed. It does grant that -- measured, the Job
+  # was scheduled onto the tainted control plane and started.
   #
-  #   hcloud-csi                       bootstrap=true   control-plane-toleration=1
-  #   hcloud-cloud-controller-manager  bootstrap=true   control-plane-toleration=1
-  #   argo-cd                          bootstrap=false  control-plane-toleration=0
+  # It also stops the cluster building. k3s applies bootstrap charts first and
+  # holds the rest of /var/lib/rancher/k3s/server/manifests until they are
+  # ready. Argo CD is not a bootstrap chart: its install loops on failure, so
+  # ccm.yaml sat on disk unapplied, the node kept
+  # node.cloudprovider.kubernetes.io/uninitialized, CoreDNS could not tolerate
+  # that taint and stayed Pending, and the whole apply failed three times on a
+  # CRD that was never going to appear.
   #
-  # It did not matter while kube-hetzner created the agents, because they
-  # existed by the time this was applied. Now they are created by terraform
-  # AFTER the module returns, so at this moment the cluster is one tainted
-  # control plane and nothing else. Without this flag the Job is unschedulable,
-  # the applications.argoproj.io CRD never appears, and the module's next stage
-  # waits 300s for it and then fails the apply -- a deadlock, not a slow start.
-  bootstrap: true
-
+  # The flag is for small infrastructure charts the cluster cannot start
+  # without -- CCM, CSI. Putting an application chart in that queue makes k3s
+  # wait for the application before it finishes becoming a cluster.
   chart: argo-cd
   repo: https://argoproj.github.io/argo-helm
   # Pinned. A floating chart means a rebuild can install a different Argo CD

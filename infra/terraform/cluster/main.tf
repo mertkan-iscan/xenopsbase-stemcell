@@ -446,31 +446,25 @@ module "kube_hetzner" {
   # k3s_version supersedes k3s_channel, so the channel default is now moot.
   k3s_version = replace(data.hcloud_image.golden.labels["k3s-version"], "_", "+")
 
-  # SET, not inherited (T-1.23, #282).
+  # DELIBERATELY NOT SET: allow_scheduling_on_control_plane (T-1.23, #282).
   #
-  # The module infers this: `is_single_node_cluster` sums the control plane,
-  # agent and autoscaler counts, and grants scheduling on the control plane
-  # when that total is 1. Both other pools are now empty here, so the total is
-  # just the control plane count -- and dev, with one, silently became a
-  # single-node cluster whose cx23 control plane was schedulable.
+  # Setting it false looks like the fix for the control plane carrying the
+  # whole platform. It is not, and it reads as though it were, which is worse
+  # than leaving it out. The module resolves it as
   #
-  # Measured on the first build after the conversion: Argo CD, the autoscaler,
-  # alloy, node-exporter, cloudflared and metrics-server all landed on the
-  # control plane, because the module deploys them before any agent exists.
-  # Load average 16.87 on two vCPU, argocd-repo-server restarted three times,
-  # k3s went back to `activating`, and the second worker never managed to
-  # register against an API server in that state. Pods do not migrate once
-  # scheduled, so the workers joining afterwards did not repair it.
+  #   is_single_node_cluster ? true : var.allow_scheduling_on_control_plane
   #
-  # That is #133 again -- the failure dev.tfvars already documents, where two
-  # cx23 workers could not carry the platform. This time it was one.
+  # and is_single_node_cluster sums the control-plane, agent and autoscaler
+  # counts. Both other pools are [] here, so on dev the sum is 1, the first arm
+  # always wins, and the variable is never read. Confirmed on a live build:
+  # `node-taint: []` in the control plane's config with the value set to false.
   #
-  # False makes every environment behave the same way and stops the inference
-  # from depending on how many pools happen to be empty. It is only survivable
-  # because the Argo CD HelmChart now carries `bootstrap: true`, which is what
-  # lets its install Job run on the tainted control plane before the workers
-  # arrive.
-  allow_scheduling_on_control_plane = false
+  # The module's own default is false as well, so the line changed nothing in
+  # any environment.
+  #
+  # The real problem is ordering, not this flag: the module deploys the
+  # platform before terraform can create an agent for it to land on. That is
+  # #287, and nothing in this file fixes it.
 
   cni_plugin = var.cni_plugin
 
