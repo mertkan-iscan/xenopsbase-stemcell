@@ -98,7 +98,15 @@ runcmd:
   #    Appending rather than templating keeps the two facts that vary per node
   #    (its address and its name) in one place, and k3s reads config.yaml at
   #    start, after this has run.
-  - ['sh', '-c', 'printf ''"node-ip": "%s"\n'' "$(ip -4 -o addr show eth1 | awk ''{print $4}'' | cut -d/ -f1)" >> /etc/rancher/k3s/config.yaml']
+  #    WAITED FOR, not read once. Attaching the network at server creation
+  #    makes the interface present at boot, but its address still arrives over
+  #    DHCP -- and reading a moment too early writes node-ip: "", which k3s
+  #    rejects permanently rather than retrying. Nineteen restarts on one node
+  #    of build 4, while the address it wanted was there the whole time.
+  #
+  #    Sixty seconds, then fail loudly: a node with no private address cannot
+  #    join, and a silent one is the node nobody looks at.
+  - ['sh', '-c', 'for i in $(seq 1 60); do ip=$(ip -4 -o addr show eth1 2>/dev/null | awk ''{print $4}'' | cut -d/ -f1); [ -n "$ip" ] && break; sleep 1; done; test -n "$ip" || { echo "eth1 has no address after 60s" >&2; exit 1; }; printf ''\"node-ip\": \"%s\"\n'' "$ip" >> /etc/rancher/k3s/config.yaml']
   - ['sh', '-c', 'printf ''"node-name": "%s"\n'' "$(hostname)" >> /etc/rancher/k3s/config.yaml']
 
   # ---------------------------------------------------------------------------

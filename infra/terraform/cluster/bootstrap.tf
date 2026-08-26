@@ -80,7 +80,7 @@ resource "terraform_data" "platform_bootstrap" {
   # THE EDGE THIS FILE EXISTS FOR. Not timing, not a retry, not a toleration --
   # a dependency. The agents are attached to the network before anything here
   # runs, so `kubectl apply` cannot happen on a cluster with nowhere to schedule.
-  depends_on = [hcloud_server_network.static_agent]
+  depends_on = [hcloud_server.static_agent]
 
   triggers_replace = {
     content = sha256(jsonencode({ for k, v in local.bootstrap_files : k => v.content }))

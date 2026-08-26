@@ -131,6 +131,28 @@ resource "hcloud_server" "static_agent" {
     ipv6_enabled = true
   }
 
+  # ATTACHED HERE, NOT BY A SEPARATE RESOURCE (T-1.23, #282).
+  #
+  # It was an `hcloud_server_network`, which attaches AFTER the server boots.
+  # The bootstrap reads node-ip off eth1, so a node that boots before the
+  # attachment lands writes:
+  #
+  #   "node-ip": ""
+  #   Error: failed to get node name and addresses: invalid node-ip: invalid ip format ''
+  #
+  # and k3s then refuses that config forever -- 19 restarts, no join, while the
+  # interface it was waiting for is present the whole time you are looking at it.
+  #
+  # A race, so it presents as one node joining and the other not, differently
+  # each build. It cost build 1 its second worker, was misread there as API
+  # overload, and cost build 4 the same way before the cause was found.
+  #
+  # The module attaches at creation and the autoscaler is handed HCLOUD_NETWORK
+  # at creation. This is the same, and it is why neither of them has this bug.
+  network {
+    network_id = module.kube_hetzner.network_id
+  }
+
   lifecycle {
     # The image moves on every `make golden-image`, and a new snapshot id would
     # otherwise replace every running agent on the next apply -- an unplanned
@@ -140,18 +162,6 @@ resource "hcloud_server" "static_agent" {
   }
 }
 
-# ------------------------------------------------------------------------------
-# eth1. The bootstrap's `flannel-iface` and its node-ip discovery both name it,
-# and the interface only exists because of this attachment.
-#
-# The IP is assigned by Hetzner from the network rather than being computed
-# here. That is what the autoscaler does -- it is handed HCLOUD_NETWORK and
-# nothing else -- and those nodes join correctly, so the same is used rather
-# than inventing a second addressing scheme that has to agree with the module's.
-# ------------------------------------------------------------------------------
-resource "hcloud_server_network" "static_agent" {
-  for_each = hcloud_server.static_agent
-
-  server_id  = each.value.id
-  network_id = module.kube_hetzner.network_id
-}
+# The separate hcloud_server_network is gone: it is what created the race above,
+# and the provider treats an inline `network` block and a standalone attachment
+# for the same pair as conflicting owners anyway.
