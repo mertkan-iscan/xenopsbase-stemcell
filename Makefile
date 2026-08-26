@@ -352,7 +352,7 @@ java-home: ## Report which JDK the build will use, and why
 	@printf "selected:  "; bash $(SCRIPTS)/java-home.sh
 
 .PHONY: golden-image
-golden-image: ## Build, boot-test and publish the image every node boots from (T-1.18, T-1.20)
+golden-image: ## Build, boot-test and publish the image agents and autoscaled nodes boot (T-1.18, T-1.20)
 	@bash $(SCRIPTS)/build-golden-image.sh
 
 .PHONY: validate-golden-image
@@ -428,8 +428,9 @@ up: ## Nothing to a serving stack, one command (T-1.7)
 	  fi; \
 	  echo ""; \
 	  echo "cluster-apply failed (attempt $$attempt). Retrying."; \
-	  echo "  Provisioning fetches the k3s installer over the internet, and that"; \
-	  echo "  has returned 504 mid-build. Terraform apply is idempotent, so a"; \
+	  echo "  A build reaches Hetzner, Tailscale and (for the control plane,"; \
+	  echo "  which kube-hetzner still provisions) the k3s installer. All three"; \
+	  echo "  have returned 5xx mid-build. Terraform apply is idempotent, so a"; \
 	  echo "  retry continues rather than restarting. A REAL error fails again"; \
 	  echo "  the same way and stops after three."; \
 	  attempt=$$((attempt + 1)); \
@@ -448,7 +449,7 @@ down: ## Destroy every billable resource, one command, and prove it
 	echo ""; \
 	echo "make down ENV=$(ENV) completed in $$(( $$(date +%s) - start ))s"
 .PHONY: snapshot
-snapshot: ## Build the OS snapshot kube-hetzner provisions nodes from (once per project)
+snapshot: ## Build the base OS snapshot the control plane boots (once per project)
 	@bash $(SCRIPTS)/build-snapshot.sh
 
 .PHONY: cluster-init
