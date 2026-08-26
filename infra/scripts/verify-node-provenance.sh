@@ -31,7 +31,11 @@ set -uo pipefail
 ENVIRONMENT="${1:-dev}"
 CLUSTER="${CLUSTER_NAME:-xenopsbase}-${ENVIRONMENT}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/xenopsbase_ed25519}"
-SSH_OPTS="-i $SSH_KEY -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o BatchMode=yes"
+# -n matters and is not decoration. This loop reads its node list from a
+# process substitution, and ssh reads stdin -- so without it the first node's
+# ssh drains every remaining line and the loop silently checks one node and
+# reports success. Which it did, twice, while three servers were running.
+SSH_OPTS="-n -i $SSH_KEY -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o BatchMode=yes"
 
 FAIL=0
 CHECKED=0
