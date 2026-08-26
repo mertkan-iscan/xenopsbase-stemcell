@@ -1,7 +1,7 @@
 # ADR-0013: A node's identity is injected before any node exists, never discovered from one
 
 - **Status:** Proposed
-- **Date:** 2026-08-26
+- **Date:** 2026-08-26 (endpoint half corrected the same day, before implementation)
 - **Task:** T-1.25 (#286)
 - **Amends:** none. Constrains [ADR-0002](0002-ephemeral-cluster-and-durable-state.md) and
   [ADR-0006](0006-tailscale-node-transport.md).
@@ -54,7 +54,9 @@ consequence of a node learning who it is *from* the cluster it is trying to join
 
 ## Decision criteria
 
-1. **Order-independence.** Can an agent be created without waiting for the control plane?
+1. **Order-independence.** Can an agent be created without waiting for the control plane? *(Met by
+   the token half only. See the deferral below — this criterion is not satisfied by this ADR alone,
+   which is stated here rather than quietly dropped.)*
 2. **Uses the module as documented**, rather than against its grain.
 3. **Testable before the thing it changes**, so it can be proven while the current architecture
    still works.
@@ -70,12 +72,51 @@ and handed to both the module and to every node this repository provisions.
 - The token is a `random_password` in this repository's state, passed to the module as
   `cluster_token` (a documented module input) and into each node's cloud-init. It is never read back
   out of a running cluster.
-- The endpoint is a stable address that exists before the nodes — passed to the module as
-  `control_plane_endpoint`, which the module documents as "the k3s `server` value for agents and
-  secondary control planes".
+- The endpoint is a stable address that exists before the nodes. **This half is not achievable
+  today and is deferred to T-1.26 (#287)** — see below.
 
-No node's configuration is derived from another node. `agents.tf` holds no `module.` reference for
-identity.
+The token half stands on its own: it is what makes a rebuild reproducible and a restore possible,
+and it is a prerequisite for the endpoint half rather than an optimisation of it.
+
+### The endpoint half, and why it is deferred
+
+This ADR originally said the endpoint would be passed as `control_plane_endpoint`, on the strength
+of that variable's description — *"used as the k3s `server` value for agents and secondary control
+planes"*. Under this project's transport mode it is not. `locals.tf:126`:
+
+```hcl
+k3s_endpoint = local.node_transport_tailscale_enabled
+  ? local.tailscale_k3s_join_endpoint
+  : (multinetwork ? control_plane_public_endpoint : control_plane_private_endpoint)
+```
+
+`node_transport_mode = "tailscale"` is set in every environment (ADR-0006), so the first arm always
+wins and the override is never read. And that arm is not a tailscale address despite its name
+(`locals.tf:121`): it is `module.control_planes[first].private_ipv4_address`.
+
+Three ways to supply that address ahead of the nodes were considered and none is available:
+
+- **Assign the control plane's private IP explicitly.** `control_planes.tf:88` hardcodes
+  `private_ipv4 = null`; it is not a module input.
+- **Put a load balancer in front.** `enable_control_plane_load_balancer` does produce a stable
+  private IP, but it feeds `control_plane_private_host` (`locals.tf:109`) and not
+  `tailscale_control_plane_join_host` (`locals.tf:121`). Under tailscale it is unused for joining.
+- **Own the network and create the endpoint in it first.** `existing_network_id` was removed in
+  module v3, so the network is the module's for as long as the module runs.
+
+The remaining possibility is to assume the first control plane always receives the subnet's first
+address — observed twice, `10.255.0.1`. It is rejected, and rejected specifically because of the
+change this ADR exists to enable: with `private_ipv4 = null` Hetzner assigns the lowest free address
+in the subnet, so the assumption holds only while the control plane is reliably attached first.
+Making agents concurrent — the entire point — turns that into a race an agent can win.
+
+So the endpoint stops being derived from another node at the same moment the network stops being
+the module's, which is T-1.26.
+
+Until then the join endpoint remains a module output. Two other module references stay as well —
+`ssh_key_id` and `network_id` — and they are a different thing: infrastructure the servers attach
+to, not identity a node presents. This ADR is about the second kind. Both move with T-1.26, for the
+same reason the endpoint does.
 
 This is what every mainstream bootstrap does: `kubeadm --token` is generated first, k3s reads
 `K3S_TOKEN` from the environment, Talos writes it into the machine config, Cluster API's bootstrap
@@ -85,13 +126,15 @@ providers mint it ahead of the machine. The pattern here was the outlier.
 
 ### What this makes easy
 
-Agents and control planes are created concurrently. The window in which the cluster is one node
-closes, and with it both failures above.
+The token stops being a value that must be extracted from a live cluster, so a rebuild uses the same
+join secret by construction rather than by luck.
 
-T-1.26 becomes tractable: once no node's identity comes from another, "the control plane is just a
-server that runs a different unit" is true rather than aspirational.
+It removes one of the two `module.` references in `agents.tf`. Concurrency arrives when the second
+one goes, with T-1.26 — this ADR gets the cluster half of the way there and does not pretend
+otherwise.
 
-The token stops being a value that must be extracted from a live cluster to restore one.
+T-1.26 becomes tractable: the token is no longer one of the things that has to be untangled at the
+same time as the network, the endpoint and the servers.
 
 ### What this makes hard
 

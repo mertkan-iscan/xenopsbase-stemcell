@@ -46,6 +46,31 @@
 # or policy change, and pinning the id here would mean a second place to update
 # and a silent divergence when it is forgotten.
 # ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# The cluster join token (ADR-0013).
+#
+# A node proves it belongs by presenting this, so it is a credential and it is
+# treated like one: `sensitive`, never written to a file, never a terraform
+# output, and never baked into a snapshot -- the golden image asserts its own
+# absence at build time (`test ! -s /var/lib/rancher/k3s/server/node-token`).
+# It reaches a node once, in cloud-init, at first boot.
+#
+# `keepers` is deliberately empty. Rotating the token invalidates every node's
+# membership at once, so it must happen when someone decides to, not because an
+# unrelated attribute changed and dragged this along with it.
+#
+# ADR-0002 rebuilds clusters routinely and ADR-0007 restores databases into the
+# rebuilt one. A token that changed per build would make the second impossible.
+# ------------------------------------------------------------------------------
+resource "random_password" "cluster_token" {
+  length = 48
+
+  # k3s splits the token on ':' to read the optional CA hash prefix, and the
+  # bootstrap embeds it in a YAML scalar. Alphanumeric sidesteps both without
+  # meaningfully costing entropy at this length.
+  special = false
+}
+
 data "hcloud_image" "golden" {
   with_selector = "xenopsbase-golden=yes"
   most_recent   = true
@@ -232,7 +257,7 @@ locals {
   node_bootstrap_documented = {
     for g in local.node_groups : g => templatefile("${path.module}/templates/node-bootstrap.yaml.tpl", {
       server_url         = module.kube_hetzner.effective_node_join_endpoint
-      cluster_token      = module.kube_hetzner.cluster_token
+      cluster_token      = random_password.cluster_token.result
       tailscale_auth_key = var.tailscale_auth_key
       node_group         = g
     })
@@ -387,6 +412,28 @@ module "kube_hetzner" {
   }
 
   hcloud_token = var.hcloud_token
+
+  # OURS, not the module's (ADR-0013).
+  #
+  # Left unset, the module derives a token and every node that needs it reads
+  # it back as `module.kube_hetzner.cluster_token` -- which places anything
+  # holding that reference behind the whole module, including the platform
+  # bootstrap it runs at the end. That ordering is what both T-1.23 builds
+  # died of.
+  #
+  # Generating it here removes one of the two module references in agents.tf.
+  # The other is the join endpoint, which cannot move yet: under tailscale
+  # transport the module resolves it to the first control plane's private
+  # address and offers no way to supply one (locals.tf:121, and the ADR's
+  # deferral note). So this does not make agents concurrent on its own, and
+  # is not claimed to.
+  #
+  # It also makes a restore possible. The module's token exists only inside a
+  # cluster; recreating one to match, which is what "must match when restoring
+  # a cluster" in its own variable description requires, meant reading it out
+  # of the cluster being replaced. Now it is state, and it survives the thing
+  # it unlocks.
+  cluster_token = random_password.cluster_token.result
 
   cluster_name   = "${var.cluster_name}-${var.environment}"
   network_region = var.network_region
