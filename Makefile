@@ -109,6 +109,18 @@ EXPECT_WEB  ?=
 # How long `make up` waits for the stack to become SERVING, not merely applied.
 # Generous: a cold build provisions three nodes, converges thirteen Argo
 # applications and recovers Postgres from object storage.
+#
+# MEASURED, not guessed (T-3.24, #279). The cold-rebuild drill on #289 reached
+# SERVING in 442s from nothing, so this allows 2.7x the observed time. It is the
+# headroom that is the point: the number is not tuned to the measurement, it is
+# far enough above it that a slow but healthy rebuild cannot trip it.
+#
+# T-3.24 was raised believing this was 300s. It was not -- 300 is
+# ROLLOUT_TIMEOUT in rollout-status.sh, a different script that `make up` never
+# calls. The timeout was never what failed on 2026-08-25: core and gateway were
+# crash-looping on the OIDC issuer and would not have converged in any time at
+# all. What was genuinely wrong is what the message said when the deadline
+# passed, and that is fixed in wait-for-stack.sh rather than here.
 UP_TIMEOUT  ?= 1200
 ifeq ($(AUTO),1)
 APPROVE := -auto-approve -input=false

@@ -1,0 +1,31 @@
+# The OIDC issuer, in one place, because two containers per pod now need it.
+#
+# T-3.24 added an initContainer that waits for the issuer's discovery document
+# before the application starts. That container and the application must agree
+# on the URL or the wait is worthless: the init container would poll a host that
+# is up while the application resolves one that is not, and the pod would go
+# back to crash-looping with an extra passing check in front of it.
+#
+# A ConfigMap rather than the literal repeated four times. The value moves per
+# environment, and the failure mode of getting it wrong in one of four places is
+# a service that waits successfully for the wrong thing.
+#
+# core previously took this from the default baked into its application.yml.
+# That default points at dev, so it was right here and wrong everywhere else --
+# the same class of problem T-3.7 called out for the bucket name.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oidc
+  namespace: apps
+  labels: {app.kubernetes.io/part-of: xenopsbase}
+data:
+  # The PUBLIC issuer, not a cluster-internal address, and not negotiable:
+  # Keycloak stamps this exact string into every token's `iss` claim regardless
+  # of which host the request arrived on, and the login flow redirects the
+  # user's BROWSER here, which cannot resolve a .svc.cluster.local name.
+  #
+  # It is also why the wait below is not merely "is Keycloak's pod up": the
+  # discovery request leaves the cluster and comes back through the ingress, so
+  # it depends on the edge and on cert-manager having issued the certificate.
+  OIDC_ISSUER_URI: https://auth-dev.xenopsoftware.com/realms/xenopsbase

@@ -151,8 +151,45 @@ while :; do
   fi
   say "platform   ${healthy:-0}/${apps:-0} applications Healthy"
   if deadline_passed; then
-    echo "TIMED OUT waiting for the platform. Not Healthy:" >&2
+    echo "" >&2
+    echo "TIMED OUT after ${DEADLINE_SECONDS}s waiting for the platform. Not Healthy:" >&2
     kc get applications -A --no-headers 2>/dev/null | awk '$4!="Healthy"' >&2
+
+    # WHICH OF THE TWO THIS IS (T-3.24, #279).
+    #
+    # The message used to stop at the list above, and a list of unhealthy
+    # Applications reads identically whether the stack is three minutes from
+    # converging or will never converge without a human. That is the shape this
+    # repository keeps meeting: a control that cannot distinguish a problem from
+    # normal operation gets ignored, and then it is not a control.
+    #
+    # A pod being restarted is not converging -- something starts, fails, and is
+    # backed off, and waiting longer only repeats it. A pod that is pulling,
+    # initialising or waiting on a dependency has not failed at all, and the
+    # initContainer T-3.24 added makes that second state both common and
+    # correct: Init:0/1 while Keycloak comes up is the fix working, not a fault.
+    echo "" >&2
+    echo "Pods that are not Running:" >&2
+    kc get pods -A --no-headers 2>/dev/null       | awk '$4!="Running" && $4!="Completed" {printf "  %-14s %-44s %-24s restarts=%s
+", $1, $2, $4, $5}' >&2
+
+    # Failing, not merely unfinished. Includes the Init: variants, which is how
+    # a crash-looping initContainer presents.
+    failing=$(kc get pods -A --no-headers 2>/dev/null       | awk '$4 ~ /CrashLoopBackOff|Error|ImagePullBackOff|ErrImagePull|CreateContainerConfigError/'       | wc -l | tr -d ' ')
+
+    echo "" >&2
+    if [ "${failing:-0}" -gt 0 ]; then
+      echo "NOT GOING TO FINISH: ${failing} pod(s) above are failing and being backed off." >&2
+      echo "  Waiting longer repeats the same failure. Read them:" >&2
+      echo "    kubectl logs -n <namespace> <pod> --previous" >&2
+    else
+      echo "STILL CONVERGING: nothing is crash-looping or failing to pull." >&2
+      echo "  Every pod above is pulling, initialising, or waiting on a dependency -- slow" >&2
+      echo "  rather than broken. A cold rebuild reached SERVING in 442s when it was last" >&2
+      echo "  measured (#289), against the ${DEADLINE_SECONDS}s allowed here." >&2
+      echo "  If that has genuinely grown, raise UP_TIMEOUT rather than reading this as a" >&2
+      echo "  failure -- but check first that it grew for a reason." >&2
+    fi
     exit 1
   fi
   sleep 20
