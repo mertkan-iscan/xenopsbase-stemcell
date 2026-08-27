@@ -178,6 +178,34 @@ export const options = {
     },
   },
 
+  // ---------------------------------------------------------------------------
+  // NO_CONN_REUSE=true TURNS OFF HTTP KEEP-ALIVE, AND IT EXISTS TO TEST ONE
+  // SPECIFIC HYPOTHESIS (T-5.14)
+  // ---------------------------------------------------------------------------
+  //
+  // A Kubernetes Service load-balances PER CONNECTION, not per request. With
+  // keep-alive on, a VU's connection is assigned a backend pod at setup and
+  // stays there for the whole run, so a replica the HPA adds later receives
+  // traffic only from connections created after it appeared.
+  //
+  // T-5.13 measured what looks exactly like that: two replicas became Ready at
+  // t+67s and served ~0 req/s until t+340s, while k6 sat on its 120
+  // preAllocatedVUs and created no new connections. The moment the pool grew
+  // past 120 -- at t+320s -- they started serving, and their share then climbed
+  // as the pool grew to 127, 154, 231, 303.
+  //
+  // That is a correlation. Setting this makes every request its own connection,
+  // which converts the Service's per-connection balancing into per-request
+  // balancing and removes the mechanism entirely. If the imbalance disappears,
+  // the hypothesis holds; if it survives, the cause is something else and the
+  // reasoning above is wrong.
+  //
+  // NOT A DEFAULT, and it must not become one. A handshake per request is not
+  // how any real client behaves, and it moves absolute throughput -- which is
+  // what every other number in this file is for. Use it to answer the
+  // distribution question and then turn it off.
+  noConnectionReuse: __ENV.NO_CONN_REUSE === 'true',
+
   // No thresholds. See the header -- reaching the ceiling is the result, not a
   // failure. `dropped_iterations` and the per-step trends are the output.
   summaryTrendStats: ['avg', 'min', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],

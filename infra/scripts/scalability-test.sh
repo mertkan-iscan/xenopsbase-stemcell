@@ -32,6 +32,7 @@
 #
 # Environment:
 #   CORE_STEPS, GW_STEPS, STEP_SEC, GW_STEP_SEC, GAP_SEC   passed to k6
+#   NO_CONN_REUSE=true  disable HTTP keep-alive (T-5.14 diagnostic, not a default)
 #   TOKEN_REFRESH_SEC   per-VU token refresh, default 120 (realm lifespan is 300)
 #   SAMPLE_SEC      sampler interval, default 10
 #   K6_IMAGE        default grafana/k6:0.55.0
@@ -264,6 +265,10 @@ spec:
             - {name: STEP_SEC,    value: "${STEP_SEC:-}"}
             - {name: GW_STEP_SEC, value: "${GW_STEP_SEC:-}"}
             - {name: GAP_SEC,     value: "${GAP_SEC:-}"}
+            # T-5.14. Turns off HTTP keep-alive so the Service balances per
+            # request instead of per connection. Diagnostic only -- see the long
+            # note in scalability.js.
+            - {name: NO_CONN_REUSE, value: "${NO_CONN_REUSE:-}"}
             - {name: TOKEN_REFRESH_SEC, value: "${TOKEN_REFRESH_SEC:-}"}
           resources:
             requests: {cpu: 1000m, memory: 512Mi}
