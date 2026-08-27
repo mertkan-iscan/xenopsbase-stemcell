@@ -28,6 +28,15 @@ spec:
         # ----------------------------------------------------------------
         prometheus:
           prometheusSpec:
+            # The hostname Prometheus believes it serves on (T-8.6 extended).
+            #
+            # Not cosmetic. Prometheus stamps this into the `generatorURL` of
+            # every alert it sends, which is the "view this in Prometheus" link
+            # an operator follows out of an Alertmanager mail. Left unset it
+            # emits the pod's own address, and every one of those links is dead
+            # from a browser.
+            externalUrl: https://prometheus-dev.xenopsoftware.com
+
             # RETENTION IS BOUNDED TWICE, on purpose.
             #
             # `retention` alone bounds age, not size: a sudden increase in
@@ -161,6 +170,11 @@ spec:
                       subject: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }} ({{ .CommonLabels.namespace }})'
 
           alertmanagerSpec:
+            # Same reasoning as Prometheus's externalUrl above: this is the host
+            # Alertmanager writes into the notification it sends, so it is what
+            # the "silence this" link in an alert mail points at.
+            externalUrl: https://alertmanager-dev.xenopsoftware.com
+
             # Mounts the SOPS-managed secret at
             # /etc/alertmanager/secrets/alertmanager-smtp/
             secrets:
@@ -213,6 +227,14 @@ spec:
             limits:   {memory: 384Mi}
 
           grafana.ini:
+            server:
+              # Grafana builds absolute URLs -- the redirect after login, share
+              # links, the OAuth callback if one is ever configured -- from
+              # these. Behind a proxy that terminates TLS elsewhere it cannot
+              # infer them, and the visible symptom is a login that succeeds and
+              # then redirects to http://localhost:3000.
+              domain: grafana-dev.xenopsoftware.com
+              root_url: https://grafana-dev.xenopsoftware.com
             users:
               # No sign-up, and viewers cannot edit. Grafana is reachable through
               # the tunnel like everything else.

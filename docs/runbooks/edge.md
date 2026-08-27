@@ -43,6 +43,36 @@ Hyphens, not extra dots. Cloudflare's Universal SSL certificate covers the apex 
 paid. A variable validation rejects any hostname deeper than one label so this is caught at plan
 time rather than as a certificate error in a browser.
 
+## What each hostname serves, and what is in front of it
+
+Every hostname below is a CNAME to the same tunnel and is delivered to the same ingress controller,
+which routes by `Host`. Adding one costs a DNS record, a tunnel ingress rule and an Ingress object
+— never a load balancer.
+
+| Hostname | Serves | Cloudflare Access |
+|---|---|---|
+| `app-dev` | the application, through the gateway | team + CI service token |
+| `auth-dev` | Keycloak | **no** — see below |
+| `grafana-dev` | Grafana | team only |
+| `prometheus-dev` | Prometheus | team only |
+| `alertmanager-dev` | Alertmanager | team only |
+| `argocd-dev` | the Argo CD web UI | team only |
+
+**Keycloak is deliberately not behind Access.** The OIDC authorization-code flow redirects the
+user's browser to `auth-dev` to log in, and the back-channel code exchange has no browser at all. An
+Access interstitial in that path breaks login while every component reports healthy. The `access`
+flag on `extra_hostnames` is opt-in for exactly this reason — so a hostname added later does not
+inherit protection silently, and so this one entry reads as a decision rather than an omission.
+
+**The dashboards carry the team policy only.** The service token exists so CI can drive the
+application through smoke and promotion; nothing automated reads a dashboard. Handing it to
+`alertmanager-dev` would give every CI run the ability to silence alerting.
+
+**Two of them have no login of their own.** Grafana and Argo CD authenticate; Prometheus and
+Alertmanager do not. For those two Access is not defence in depth, it is the only control. A `check`
+block refuses the configuration that would publish them naked — `access = true` while
+`manage_access = false` — because that combination reads as protected and is not.
+
 ## ⚠️ This is a shared company zone
 
 `xenopsoftware.com` hosts a live company site. Two of T-1.6's original criteria — TLS mode and WAF —

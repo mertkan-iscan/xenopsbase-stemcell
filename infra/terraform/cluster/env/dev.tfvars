@@ -230,3 +230,13 @@ extra_firewall_rules = [
     destination_ips = ["0.0.0.0/0", "::/0"]
   },
 ]
+
+# Argo CD now has an ingress and a hostname, so it should stop believing it is
+# argocd.internal. This is the value the server puts in redirects and in the
+# links it generates; a wrong one is not fatal but sends people to a host that
+# does not resolve. Behind Cloudflare Access, like the other dashboards -- see
+# infra/terraform/edge/env/dev.tfvars.
+#
+# NOTE: this is read at bootstrap render time, so changing it needs a
+# `make cluster-apply ENV=dev`, not just an Argo sync.
+argocd_domain = "argocd-dev.xenopsoftware.com"

@@ -274,7 +274,7 @@ variable "sops_age_key" {
 }
 
 variable "argocd_domain" {
-  description = "Hostname Argo CD believes it serves on. No ingress exists for it; access is by port-forward."
+  description = "Hostname Argo CD believes it serves on, used for the URLs it generates. The ingress that serves it is in platform/envs/dev/argocd."
   type        = string
   default     = "argocd.internal"
 }

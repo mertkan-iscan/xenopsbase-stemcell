@@ -153,6 +153,37 @@ Cloudflare in front, the observability stack, or a real teardown/rebuild.
 `hcloud server list` is the honest answer to "did I remember to tear it down". It talks to Hetzner,
 not to any local state, so it is right even when something else is wrong.
 
+## Dashboards
+
+Four, all on their own hostnames behind Cloudflare Access. Signing in is the same Access login as
+the application; there is nothing to port-forward and nothing to remember beyond the URLs.
+
+| Dashboard | URL | Second login? |
+|---|---|---|
+| Grafana | `https://grafana-dev.xenopsoftware.com` | yes — `grafana-admin` in SOPS |
+| Prometheus | `https://prometheus-dev.xenopsoftware.com` | no |
+| Alertmanager | `https://alertmanager-dev.xenopsoftware.com` | no |
+| Argo CD | `https://argocd-dev.xenopsoftware.com` | yes — `argocd-initial-admin-secret` |
+
+Grafana is the one to open first: Prometheus, Loki and Tempo are all wired in as datasources, so
+metrics, logs and traces are reachable from it without visiting the other hostnames at all.
+
+```bash
+sops -d platform/envs/dev/secrets/grafana-admin.yaml
+```
+
+The Argo CD **CLI** is not covered by this. It speaks gRPC, which needs `--grpc-web` through the
+ingress, and it has no Access service token — the dashboard policy admits the team and nothing
+else. Port-forward for CLI work:
+
+```bash
+kubectl port-forward -n argocd svc/argo-cd-argocd-server 8080:80
+```
+
+These exist only while the cluster does. `make down` takes them with it; the DNS records and Access
+applications survive, so the hostnames come back on their own after `make up` without touching
+Cloudflare.
+
 ## Cost
 
 Three `cx23` servers in `fsn1`, billed by the hour, plus any volumes. Nothing here is free while it

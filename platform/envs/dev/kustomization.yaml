@@ -24,6 +24,10 @@ resources:
   - apps/services.yaml
   - issuers/letsencrypt.yaml
 
+  # Argo CD installs itself from Terraform, but its ingress is an ordinary
+  # object and belongs with everything else that is reconciled from git.
+  - argocd/ingress.yaml
+
   # Decrypted by ksops at render time inside argocd-repo-server (ADR-0003).
   # Nothing here is committed in plaintext and nothing is stored decrypted.
   - secrets

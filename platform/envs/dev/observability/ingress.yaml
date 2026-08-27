@@ -1,0 +1,68 @@
+# Routes the three observability dashboards to their in-cluster services.
+#
+# Same shape as the gateway and Keycloak ingresses: the tunnel delivers every
+# hostname to this one ingress controller, which routes by Host header. No
+# second entry point, no load balancer, no TLS block -- Cloudflare terminates
+# TLS at the edge and the tunnel hands ingress-nginx plain HTTP on 80.
+#
+# WHAT IS ACTUALLY IN FRONT OF THESE. Cloudflare Access, and for two of them
+# that is all there is. Grafana has its own login; Prometheus and Alertmanager
+# have none, so publishing them at all is a decision that rests entirely on the
+# Access policy in infra/terraform/edge. If Access is ever turned off for this
+# environment, delete this file in the same change.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grafana
+  namespace: observability
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: grafana-dev.xenopsoftware.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kube-prometheus-stack-grafana
+                port:
+                  number: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: prometheus
+  namespace: observability
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: prometheus-dev.xenopsoftware.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kube-prometheus-stack-prometheus
+                port:
+                  number: 9090
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: alertmanager
+  namespace: observability
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: alertmanager-dev.xenopsoftware.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kube-prometheus-stack-alertmanager
+                port:
+                  number: 9093
