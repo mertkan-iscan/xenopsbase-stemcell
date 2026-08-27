@@ -93,6 +93,7 @@ infra/dev/.logs/
 # a failure can be read after the fact; it is a per-run artefact, not a record.
 # The numbers worth keeping go in docs/slos.md.
 k6-baseline-*.log
+k6-write-*.log
 
 # Scalability run artifacts: k6 log, cluster timeline, events, report (T-5.10).
 # The report is the thing worth keeping, and it belongs in docs/slos.md when a

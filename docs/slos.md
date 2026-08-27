@@ -914,7 +914,9 @@ recurring lesson is what happens when one is picked before it is measured.
 
 ### What this does not cover
 
-**Writes.** Both scenarios are reads, for the reason already stated above.
+**Writes.** Both scenarios here are reads. The write path has its own test — `make load-write`,
+`infra/load/write.js` — but it is a CLOSED model like `load`, so it says what a write costs, not
+where writes stop scaling. An open-model write step does not exist yet.
 
 **Recovery.** Whether an open breaker closes on its own once load falls below the knee is untested.
 
@@ -930,10 +932,116 @@ different question and answers it worse, because the edge's variance swamps the 
 sustained load through Cloudflare's free tier to benchmark our own pods would eventually, fairly,
 be treated as abuse.
 
-**Writes.** Both scenarios are reads. The upload path ends in a presigned PUT straight to Hetzner
-object storage, so a write benchmark would mostly measure Hetzner's latency from a Hetzner node and
-attribute it to this application. Worth doing deliberately, as its own scenario, with that caveat
-stated.
+**Writes.** Both scenarios in `baseline.js` are reads. That was once the whole story, on the
+grounds that the upload path ends in a presigned PUT straight to Hetzner object storage, so a write
+benchmark would mostly measure Hetzner's latency from a Hetzner node and attribute it to this
+application.
+
+That reasoning holds for a benchmark that performs the PUT, and `infra/load/write.js` (T-5.15,
+`make load-write`) is the scenario it asked for: it stops at `POST /api/documents`, which INSERTs
+one row and presigns a URL **locally** — `S3Presigner` computes a SigV4 signature over a request it
+never sends. No socket is opened to Hetzner and no object is created, so what is measured is the
+row: gateway route, bearer validation, core, Hibernate, INSERT, commit.
+
+It runs its scenarios one at a time — the read alone, the write alone, then both together at one
+write in five — so the mixed numbers have a control from the same run rather than from another
+day's cluster.
+
+### Measured 2026-08-27
+
+10 VUs, 30s ramp / 60s hold / 15s down per scenario, run twice. Second run: 111,388 requests, zero
+failures, zero circuit-breaker fallbacks, 37,039 rows written and cleaned up.
+
+| Scenario | median | p95 | p99 | rate | threshold p95 / p99 |
+|---|---|---|---|---|---|
+| `read_control` — read, ~18 rows, no writes | 16.3ms | 37.5ms | 52.3ms | 413/s | 75ms / 150ms |
+| `write_only` — write alone | 21.6ms | 45.5ms | 61.8ms | 317/s | 150ms / 250ms |
+| `mixed_read` — read, ~35k rows, writes in flight | 45.3ms | 77.7ms | 96.3ms | 147/s | 200ms / 300ms |
+| `mixed_write` — write, reads in flight | 20.5ms | 37.8ms | 50.7ms | 36/s | 100ms / 175ms |
+| `read_after` — read, 37k rows, no writes | 49.9ms | 87.9ms | 112.2ms | 148/s | 225ms / 350ms |
+
+**A write costs about twice a read** — 45.5ms against 37.5ms at p95 here, 56.1 against 28.0 in the
+first run, roughly 2x at the median in both. Unremarkable in the good sense: an INSERT and a commit
+through the whole stack, with no write amplification hiding in it. That is the number this test was
+built to produce.
+
+**`mixed_write` looks faster than `write_only` because it is a lighter load, not a cheaper write.**
+Four in five mixed iterations are reads, so the write rate is 36/s against 317/s. A closed model
+with a fixed VU count cannot hold the write rate constant across a mix; these numbers are valid for
+`WRITE_EVERY=5` and meaningless if it is overridden.
+
+### `mixed` does not measure contention. It measures row count.
+
+The first run had `mixed_read` at 2.7x `read_control` and the file claimed that difference was
+contention, on the grounds that `listAvailable()` filters `status = AVAILABLE` and every row the
+test writes is `PENDING`, so the result set never grows. The result set does not; **the work does.**
+
+`ix_document_owner_created_at` is `(owner, created_at DESC)` and does not carry `status`. Every row
+the test writes has the current timestamp and the smoke user's `sub`, so they all sort to the front
+of that index and the listing skips ~35,000 of them, heap-checking each, before reaching the first
+`AVAILABLE` row. `Page`'s count query pays the same cost.
+
+`read_after` — the identical read, last, on the grown table with **no writes in flight** — settled
+it and not ambiguously:
+
+```
+read_control   37.5ms p95    ~18 rows,   no writes
+mixed_read     77.7ms p95    ~35k rows,  36 writes/s in flight
+read_after     87.9ms p95     37k rows,  no writes in flight
+```
+
+Removing the writes entirely made the read **slower**, because by then the table was bigger still.
+Read latency tracks row count and nothing else; whatever contention 36 writes/s produces is too
+small to find underneath it. No number from `mixed` should be quoted as a contention figure until
+`read_after` and `read_control` converge — which is what an index on `(owner, status, created_at
+DESC)` would do.
+
+**This is a finding about the application, not only about the test.** A listing degrades with the
+number of `PENDING` rows its owner has accumulated, and nothing sweeps them:
+`reapAbandonedUploads()` is deliberately unscheduled.
+
+`V6__document_listing_index.sql` fixes it: `(owner, status, created_at DESC)` matches
+`findByOwnerAndStatus` exactly, so Postgres seeks straight to the caller's `AVAILABLE` rows in sort
+order and the `PENDING` rows are no longer on the path. It also drops `ix_document_owner_created_at`,
+now strictly redundant — nothing filters on `owner` alone — and redundant is not free: every INSERT
+maintained it, and it was the 806-page index in the table below.
+
+**The prediction to check on the next run:** `read_after` should collapse towards `read_control`.
+If it does, the listing has stopped caring how many rows the table holds, and the gap that remains
+between `mixed_read` and `read_after` is the read/write contention figure this test set out to
+produce and has never yet been able to see. If it does not, the index was not the cause and this
+section is wrong.
+
+### The test was contaminating its own next run, through index bloat
+
+`read_control` moved from 28.0ms to 37.5ms p95 between the two runs: the same query, over the same
+~18 rows, 34% slower. Nothing about the application changed. The **indexes** did.
+
+Deleting the rows returns the heap — after the first run `document` was back to a single page — but
+a B-tree does not shrink. `VACUUM` removes its entries and marks the pages reusable; the page count
+stays where the peak left it. Measured after run one, on 18 live rows:
+
+| Relation | Size | Pages |
+|---|---|---|
+| `document` (heap) | 8 kB | 1 |
+| `ix_document_owner_created_at` | 6448 kB | 806 |
+| `uk_document_object_key` | 4600 kB | 575 |
+| `ix_document_pending_created_at` | 1200 kB | 150 |
+
+The second run's control was measured scanning the first run's tombstones, and a third run would
+have been slower again — a baseline degrading monotonically with every execution, which would
+eventually be read as a regression in the application. `write-load-test.sh` now runs `REINDEX TABLE
+CONCURRENTLY document` after cleanup and prints the index page count before and after, so the drift
+is both fixed and visible. The thresholds above stay where run one put them; `read_control` should
+settle back near 28ms once a run starts from unbloated indexes.
+
+**`mixed_read` and `read_after` are coupled to throughput,** and that is a real fragility: their
+latency depends on how many rows `write_only` inserted first, so a faster cluster fails them by
+writing more in the same 105 seconds. Set anyway — a shaky gate that is read beats none — but they
+are the two to re-derive after any change to the sizing.
+
+**Still not measured:** the PUT itself, `POST /{id}/complete` (which does call the object store), and
+writes under an open model.
 
 **Sustained load.** 105 seconds per scenario. Long enough for JIT and the connection pool to settle,
 far too short to say anything about memory growth, connection leaks or anything else that appears
