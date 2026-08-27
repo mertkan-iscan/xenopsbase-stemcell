@@ -163,6 +163,25 @@ spec:
           image: curlimages/curl@sha256:7c12af72ceb38b7432ab85e1a265cff6ae58e06f95539d539b654f2cfa64bb13  # 8.21.0
           imagePullPolicy: IfNotPresent
           securityContext:
+            # runAsUser is REQUIRED here, and its absence is what failed the
+            # first cold-rebuild drill after T-3.24 landed:
+            #
+            #   Error: container has runAsNonRoot and image has non-numeric
+            #   user (curl_user), cannot verify user is non-root
+            #
+            # The pod sets runAsNonRoot, so the kubelet has to PROVE the user is
+            # not root before starting the container. curlimages/curl declares
+            # `USER curl_user` by name, and the kubelet does not read the
+            # image's /etc/passwd -- a name it cannot resolve is not proof, so
+            # it refuses. Every pod sat in Init:CreateContainerConfigError, which
+            # never resolves on its own.
+            #
+            # Checking `id` inside the image was the wrong check: it confirmed
+            # the user is non-root, not that the image declares a NUMERIC uid,
+            # which is the only thing runAsNonRoot can verify. 100:101 is
+            # curl_user:curl_group from the image's own /etc/passwd.
+            runAsUser: 100
+            runAsGroup: 101
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities: {drop: [ALL]}
