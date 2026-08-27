@@ -123,8 +123,18 @@ spec:
           # NO CPU LIMIT, deliberately -- CFS throttling stalls a request
           # mid-flight and surfaces as tail latency. The reasoning is written
           # out once, in gateway.yaml.
+          #
+          # cpu 700m, not 500m (T-5.12). Measured at 648m-658m per replica at
+          # the 1200 req/s step and ~740m at the peak of the T-5.11 runs, so
+          # 500m booked a pod for rather less than it uses and left the
+          # scheduler treating a saturated node as half free. See the long note
+          # in gateway.yaml for the mechanism and the evidence -- this is the
+          # same change, at core's smaller measured draw.
+          #
+          # The HPA target in hpa.yaml is a percentage OF this number and has
+          # been re-derived so the scale-out point does not move.
           resources:
-            requests: {cpu: 500m, memory: 832Mi}
+            requests: {cpu: 700m, memory: 832Mi}
             limits: {memory: 1Gi}
           volumeMounts:
             # readOnlyRootFilesystem is on, and the JVM still needs somewhere to

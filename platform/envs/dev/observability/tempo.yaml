@@ -144,9 +144,53 @@ spec:
             httpGet: {path: /ready, port: http}
             initialDelaySeconds: 30
             periodSeconds: 30
+          # ---------------------------------------------------------------
+          # SIZED FOR THE SPANS THIS PROJECT ACTUALLY SENDS (T-5.12)
+          # ---------------------------------------------------------------
+          #
+          # Was `cpu: 100m, memory: 256Mi/512Mi`. Under the T-5.11 load runs
+          # this pod was **OOMKilled 16 times**, on a roughly 90-second cycle:
+          #
+          #   reason OOMKilled, exitCode 137, memory 507Mi against a 512Mi limit
+          #   Liveness probe failed: /ready context deadline exceeded
+          #
+          # It was never Ready, so **no trace ever reached storage**, and the
+          # `Failed to export spans ... InterruptedIOException: timeout` the
+          # services logged under load (T-5.10) was this pod dying, not a
+          # network fault.
+          #
+          # BOTH numbers were wrong, and the CPU one is the less obvious:
+          #
+          #  - memory. 512Mi is below the working set of a single-binary Tempo
+          #    ingesting from two services at TRACING_SAMPLE_PROBABILITY 1.0.
+          #    It OOMs, replays a WAL it did not finish writing, and OOMs again.
+          #
+          #  - cpu. A request is not only a scheduling reservation, it is the
+          #    weight the kernel arbitrates by when a node is CONTENDED. During
+          #    the run every node was at 97-100% CPU with a load average of 30
+          #    on four cores. Against the app tier's 500m-per-pod requests, a
+          #    100m request bought Tempo roughly 3% of a node while it was
+          #    demanding 1650m. It was starved below the point where it could
+          #    answer /ready within the probe timeout, so the kubelet killed it
+          #    -- for being slow, because it had been told it was unimportant.
+          #
+          # This is the same defect as the low app-tier requests below, in the
+          # place where it does the most damage: it silently disabled the
+          # telemetry that any future diagnosis depends on.
+          #
+          # SIZED FOR THE OLD VOLUME, DELIBERATELY. Sampling has since dropped
+          # to 0.1 in both services' application-prod.yml, so this reserves for
+          # roughly ten times the spans Tempo will now receive. That is not an
+          # oversight and it is not a second guess either: nobody has yet
+          # watched this pod stay up through a load run, and shrinking it on the
+          # strength of arithmetic is how it ended up at 100m in the first
+          # place. Re-derive both numbers from a run where it survives, and
+          # note that 500m is also part of the Pending arithmetic in
+          # docs/slos.md -- lowering it moves the point at which the
+          # cluster-autoscaler is asked for a node.
           resources:
-            requests: {cpu: 100m, memory: 256Mi}
-            limits: {memory: 512Mi}
+            requests: {cpu: 500m, memory: 768Mi}
+            limits: {memory: 1536Mi}
           volumeMounts:
             - {name: config, mountPath: /conf}
             # readOnlyRootFilesystem means every path Tempo writes to needs a

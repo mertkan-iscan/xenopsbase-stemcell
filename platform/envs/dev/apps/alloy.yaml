@@ -46,9 +46,28 @@ spec:
               effect: NoSchedule
 
         alloy:
+          # SIZED FOR WHAT IT COLLECTS, NOT FOR WHAT A COLLECTOR "SHOULD" COST
+          # (T-5.12).
+          #
+          # Was `cpu: 50m`. Measured during the T-5.11 load runs, per pod:
+          #
+          #   alloy on the control plane   993m - 1197m
+          #   alloy on each worker         115m -  259m
+          #
+          # Up to TWENTY TIMES the request. Two of the three pods sat
+          # `1/2 Running` -- the alloy container not Ready -- for the same
+          # reason Tempo was being killed: on a node at 100% CPU the kernel
+          # shares out cores in proportion to REQUESTS, so a 50m request is an
+          # instruction to starve this pod first, and it is the pod that carries
+          # every span and log line off the box.
+          #
+          # 300m is above the workers' measured draw and below the control
+          # plane's, deliberately. The control-plane figure is inflated by 100%
+          # trace sampling; reserving for it would book a core on every node in
+          # the cluster to serve a peak that a sampling change removes.
           resources:
-            requests: {cpu: 50m, memory: 128Mi}
-            limits:   {memory: 256Mi}
+            requests: {cpu: 300m, memory: 256Mi}
+            limits:   {memory: 512Mi}
 
           # Needs the host log directory to read container stdout/stderr.
           mounts:

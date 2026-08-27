@@ -32,9 +32,34 @@
 # ones still have headroom to absorb the traffic during the ~15s a new JVM needs
 # before it is worth having.
 #
-# IF THE REQUESTS CHANGE, THESE TARGETS ARE WRONG. They are a ratio to 500m and
-# nothing enforces the relationship. Re-derive them from a fresh T-5.6 run
-# rather than scaling the number by eye.
+# IF THE REQUESTS CHANGE, THESE TARGETS ARE WRONG. They are a ratio to the
+# request and nothing enforces the relationship.
+#
+# ---------------------------------------------------------------------------
+# THE REQUESTS DID CHANGE (T-5.12), AND THE ARGUMENT ABOVE WAS HALF RIGHT
+# ---------------------------------------------------------------------------
+#
+# Everything above is correct about the HPA and wrong about what a request
+# costs elsewhere. Treating it as "a scheduling floor rather than an estimate"
+# is a decision about the SCHEDULER, and the scheduler is not the only reader:
+#
+#   - the cluster-autoscaler wakes only for Pending pods, and a pod is Pending
+#     only when the sum of REQUESTS exceeds a node. During the T-5.11 runs the
+#     nodes were at 97-100% CPU with a load average of 30 on four cores, while
+#     reading 55% requested. Nothing was ever Pending, so no node was ever
+#     asked for. T-5.10 noticed the symptom and did not name this as the cause.
+#
+#   - the kernel shares out a contended CPU in proportion to requests. A pod
+#     that under-declares is starved first, exactly when the node is busy.
+#     Tempo, at a 100m request against a 1650m draw, was starved past its probe
+#     timeout and killed 16 times, so the trace pipeline was down for the whole
+#     investigation that needed it.
+#
+# So the requests are now the measured draw at the point the HPA acts:
+# gateway 1000m, core 700m. The targets below are re-derived to keep the
+# ABSOLUTE trigger where it was -- one core per pod -- so that this change
+# alters scheduling and autoscaling and nothing else. Scale-out behaviour is
+# meant to be indistinguishable; if it is not, this file is where to look.
 #
 # ---------------------------------------------------------------------------
 # WHY THERE IS NO MEMORY METRIC
@@ -78,9 +103,10 @@ spec:
         name: cpu
         target:
           type: Utilization
-          # 200% of a 500m request = 1 core. See the header: this is a ratio to
-          # the request, and the request is a floor, not a usage estimate.
-          averageUtilization: 200
+          # 100% of a 1000m request = 1 core -- THE SAME ABSOLUTE TRIGGER as
+          # the 200%-of-500m this replaces (T-5.12). The request changed, so
+          # the ratio had to; the scale-out point deliberately did not.
+          averageUtilization: 100
 
   behavior:
     scaleUp:
@@ -140,9 +166,11 @@ spec:
         name: cpu
         target:
           type: Utilization
-          # Same derivation as the gateway: 200% of a 500m request = 1 core,
-          # against a measured 1.72-core peak.
-          averageUtilization: 200
+          # Same derivation as the gateway, at core's request of 700m:
+          # 145% of 700m = 1015m, which holds the old 200%-of-500m trigger of
+          # 1 core to within 1.5% (T-5.12). Not rounded to 150% -- that would
+          # move the trigger to 1050m for no reason anyone could reconstruct.
+          averageUtilization: 145
 
   behavior:
     scaleUp:
