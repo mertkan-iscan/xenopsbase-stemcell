@@ -84,6 +84,55 @@ class GatewayRouteConfigurationTest {
             .anyMatch(key -> key.startsWith("resilience4j.circuitbreaker.instances.core"));
     }
 
+    // -----------------------------------------------------------------------
+    // The concurrency limit (T-5.11).
+    //
+    // The reactive CircuitBreaker resolves a bulkhead by the BREAKER'S OWN ID and decorates the
+    // call with it. Nothing anywhere fails if that name matches no declared instance: the call
+    // silently gets a fresh library-default bulkhead of 25 permits instead. Every assertion in
+    // BulkheadIT would still pass, because that test declares its own instances.
+    //
+    // Values are asserted here where the previous section deliberately refuses to. The
+    // circuit-breaker numbers are a posture meant to be tuned per deployment; these two are not
+    // tuning. maxWaitDuration must be zero because a non-zero one parks a Netty event loop, and
+    // the ignored exception must be present because without it the gateway's own shedding is
+    // counted as the downstream failing -- which is the outage T-5.10 measured, reintroduced.
+
+    @Test
+    void theRouteIsSubjectToAConcurrencyLimitAndNotJustABreaker() {
+        // A circuit breaker is binary -- all traffic or none -- so on its own it can only choose
+        // between over- and under-protecting the downstream. T-5.10 measured both, in one run.
+        assertThat(config.stringPropertyNames())
+            .as("the bulkhead instance must be named after the breaker the route uses, or a default one of 25 governs the route instead")
+            .anyMatch(key -> key.startsWith("resilience4j.bulkhead.instances.core"));
+    }
+
+    @Test
+    void theBulkheadNeverWaitsForAPermit() {
+        // SemaphoreBulkhead.tryEnterBulkhead() calls the non-blocking tryAcquire() only when this
+        // is zero, and the BLOCKING tryAcquire(timeout, unit) otherwise. The caller is an event
+        // loop thread, so any non-zero value parks one under exactly the overload it exists to
+        // survive.
+        assertThat(config.getProperty("resilience4j.bulkhead.configs.default.maxWaitDuration"))
+            .as("a waiting bulkhead blocks the event loop")
+            .isEqualTo("0");
+    }
+
+    @Test
+    void sheddingLoadIsNotCountedAgainstTheDownstream() {
+        // The runtime nests these as fallback(timeLimiter(circuitBreaker(bulkhead(call)))), so a
+        // rejected call raises BulkheadFullException INSIDE the breaker's window.
+        // ReactiveBulkheadWiringTest asserts that nesting against the real upstream classes; this
+        // asserts that production draws the consequence.
+        assertThat(config.stringPropertyNames())
+            .as("the breaker must ignore BulkheadFullException, or admission control reads as downstream failure")
+            .anyMatch(
+                key ->
+                    key.startsWith("resilience4j.circuitbreaker.configs.default.ignoreExceptions") &&
+                    "io.github.resilience4j.bulkhead.BulkheadFullException".equals(config.getProperty(key))
+            );
+    }
+
     @Test
     void circuitBreakerMetricsAreExposedForScraping() {
         // The behavioural test proves the breaker emits meters. This proves a deployment can

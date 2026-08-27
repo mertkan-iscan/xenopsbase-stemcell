@@ -8,12 +8,17 @@ import com.xenopsoftware.gateway.IntegrationTest;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.ServerSocket;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
@@ -43,7 +48,7 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 @TestPropertySource(
     properties = {
         "spring.cloud.gateway.server.webflux.routes[0].id=core",
-        "spring.cloud.gateway.server.webflux.routes[0].uri=http://127.0.0.1:1",
+        "spring.cloud.gateway.server.webflux.routes[0].uri=http://127.0.0.1:${refused.port}",
         "spring.cloud.gateway.server.webflux.routes[0].predicates[0]=Path=/services/core/**",
         "spring.cloud.gateway.server.webflux.routes[0].filters[0].name=StripPrefix",
         "spring.cloud.gateway.server.webflux.routes[0].filters[0].args.parts=2",
@@ -63,6 +68,11 @@ import org.springframework.test.web.reactive.server.WebTestClient;
         "resilience4j.circuitbreaker.instances.core.failureRateThreshold=50",
         "resilience4j.circuitbreaker.instances.core.waitDurationInOpenState=10s",
         "resilience4j.circuitbreaker.instances.core.automaticTransitionFromOpenToHalfOpenEnabled=false",
+        // Bounded explicitly, because the library defaults are not the regime production runs in
+        // and this test's timings should not depend on them. Production allows 2s to connect
+        // against a 12s limiter; the same shape, scaled down.
+        "spring.cloud.gateway.server.webflux.httpclient.connect-timeout=250",
+        "resilience4j.timelimiter.instances.core.timeoutDuration=2s",
         // The management config is likewise absent from the test file.
         "management.endpoints.web.exposure.include=health,prometheus",
         "management.endpoints.web.base-path=/management",
@@ -70,8 +80,39 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 )
 class DeadDownstreamIT {
 
-    // The route above points at 127.0.0.1:1 -- privileged, never bound in a test environment, so
-    // connections are refused immediately. A random high port risks colliding with something real.
+    // WHICH FAILURE THIS TEST PRODUCES USED TO DEPEND ON THE MACHINE (T-5.11).
+    //
+    // The route used to point at 127.0.0.1:1 -- privileged, never bound in a test environment, so
+    // "connections are refused immediately". That holds on Linux and CI. It does not hold on
+    // Windows, where a connect to that port is dropped rather than refused: nothing came back,
+    // the TimeLimiter fired, and the test was quietly exercising a TIMEOUT while claiming to
+    // exercise a refusal.
+    //
+    // Nobody could have noticed while FallbackResource returned one fixed sentence for every
+    // cause. It became visible the moment that body started telling the truth (T-5.11), because
+    // a refusal and a timeout now say opposite things about whether the request had an effect --
+    // and this test asserts the refusal's half of that.
+    //
+    // A port that was bound and then closed is refused on every platform, and cannot collide with
+    // something real the way a guessed high port can.
+    private static final int REFUSED_PORT = portNobodyIsListeningOn();
+
+    @DynamicPropertySource
+    static void refusedPort(DynamicPropertyRegistry registry) {
+        // Registered as its own key and referenced by placeholder above, NOT as `routes[0].uri`.
+        // Spring Boot binds an indexed collection from ONE property source, so a dynamic source
+        // contributing a single `routes[0].*` key wins the whole list and silently discards every
+        // route key declared above -- which surfaces as "routes[0].predicates must not be empty".
+        registry.add("refused.port", () -> REFUSED_PORT);
+    }
+
+    private static int portNobodyIsListeningOn() {
+        try (ServerSocket socket = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            return socket.getLocalPort();
+        } catch (IOException e) {
+            throw new IllegalStateException("could not reserve a port to close", e);
+        }
+    }
 
     @Autowired
     private ApplicationContext context;
