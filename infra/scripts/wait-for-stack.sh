@@ -170,8 +170,11 @@ while :; do
     # correct: Init:0/1 while Keycloak comes up is the fix working, not a fault.
     echo "" >&2
     echo "Pods that are not Running:" >&2
-    kc get pods -A --no-headers 2>/dev/null       | awk '$4!="Running" && $4!="Completed" {printf "  %-14s %-44s %-24s restarts=%s
-", $1, $2, $4, $5}' >&2
+    # `print` rather than `printf` with an escaped newline: the escape did
+    # not survive being written into this file and awk died on an
+    # unterminated string, so the list was empty in the one run that needed
+    # it. sprintf keeps the columns; print supplies the line ending.
+    kc get pods -A --no-headers 2>/dev/null \n      | awk '$4!="Running" && $4!="Completed" {print sprintf("  %-14s %-44s %-28s restarts=%s", $1, $2, $4, $5)}' >&2
 
     # Failing, not merely unfinished. Includes the Init: variants, which is how
     # a crash-looping initContainer presents.
