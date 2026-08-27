@@ -31,12 +31,70 @@ spec:
   # the new one starts, instead of every logged-in user being dropped on every
   # deploy.
   replicas: 2
+
+  # ---------------------------------------------------------------------------
+  # A ROLLOUT CANNOT SURGE, BECAUSE EVERY NODE ALREADY HOLDS ONE (T-5.13)
+  # ---------------------------------------------------------------------------
+  #
+  # The anti-affinity below allows exactly one gateway per node, so the default
+  # `maxSurge: 25%` would ask the scheduler for a pod that has nowhere legal to
+  # go and the rollout would sit Pending until it timed out. Taking one down
+  # first frees a node for its replacement.
+  #
+  # The cost is stated: at `replicas: 2` a rollout runs on one pod for the time
+  # it takes a JVM to start. That is the price of the anti-affinity, and it is
+  # cheaper than the alternative it replaces -- see below.
+  strategy:
+    rollingUpdate: {maxSurge: 0, maxUnavailable: 1}
+
   selector:
     matchLabels: {app.kubernetes.io/name: gateway}
   template:
     metadata:
       labels: {app.kubernetes.io/name: gateway, app.kubernetes.io/part-of: xenopsbase}
     spec:
+      # -----------------------------------------------------------------------
+      # ONE REPLICA PER NODE, BECAUSE TWO ON ONE NODE ARE NOT TWO REPLICAS
+      # (T-5.13)
+      # -----------------------------------------------------------------------
+      #
+      # Nothing here previously expressed any opinion about where replicas go,
+      # so the scheduler packed by request and put two of the four on one node.
+      # T-5.12's ramp measured what that costs. Traffic was balanced within 12%
+      # across the four pods -- the Service is not the problem -- but the CPU
+      # each spent to serve it was not:
+      #
+      #   pod on the autoscaled node   501 req/s   978m   1.95 m/req
+      #   pod on worker-0              451 req/s  1220m   2.71 m/req
+      #   pod on worker-1 (1 of 2)     508 req/s  1683m   3.31 m/req
+      #   pod on worker-1 (2 of 2)     513 req/s  1714m   3.34 m/req
+      #
+      # THE SAME WORK COST 1.7x THE CPU on the doubled-up node. That is not
+      # extra work, it is the node at 98% with a run queue of 27.69 on four
+      # cores: threads are descheduled mid-request and the cache locality goes
+      # with them. The two pods then made their own node worse, which made them
+      # more expensive, which is a loop the HPA cannot break by adding a fifth
+      # pod to the same three nodes.
+      #
+      # `required`, not `preferred`, and the difference is the whole point.
+      # Preferred lets the scheduler double up as soon as it is convenient,
+      # which is exactly when the node is busy. Required makes a replica mean a
+      # node's worth of capacity or nothing: the fourth replica goes Pending,
+      # and Pending is the one signal the cluster-autoscaler listens to
+      # (T-5.12). The autoscaled pool is min 0 / max 2 against two static
+      # workers, so four replicas have four nodes available -- exactly enough.
+      #
+      # THE SLACK IS ZERO AND THAT IS DELIBERATE. Lose a node at full scale-out
+      # and one replica stays Pending, because the pool is already at max. That
+      # is three replicas serving instead of four, which is the correct
+      # degradation: the alternative is a fourth pod that adds 40% of a
+      # replica's throughput while making its neighbour slower.
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels: {app.kubernetes.io/name: gateway}
+              topologyKey: kubernetes.io/hostname
       # NO LEGACY SERVICE LINKS (T-2.17, #212).
       #
       # Kubernetes injects Docker-link variables for every Service in the pod's
