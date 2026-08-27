@@ -223,8 +223,15 @@ spec:
               searchNamespace: ALL
 
           resources:
-            requests: {cpu: 50m, memory: 192Mi}
-            limits:   {memory: 384Mi}
+            # Grafana 13.x carries unified storage, the embedded Zanzana authz
+            # server and an in-memory bleve search index before a single panel
+            # renders, which puts its idle working set around 330Mi. The 384Mi
+            # ceiling this started with was never sized for that release: it sat
+            # at 99.8% of the limit and the kernel spent the difference on
+            # reclaim, so /api/health timed out and the liveness probe killed it
+            # the moment anyone opened a dashboard.
+            requests: {cpu: 50m, memory: 512Mi}
+            limits:   {memory: 1Gi}
 
           grafana.ini:
             server:
