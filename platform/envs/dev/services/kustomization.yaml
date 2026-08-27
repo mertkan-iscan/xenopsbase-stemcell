@@ -4,6 +4,9 @@ kind: Kustomization
 # The two application services. Everything else under platform/ is off-the-shelf
 # infrastructure; this is the part that is ours.
 resources:
+  # The issuer both Deployments read, and that both wait for before starting
+  # (T-3.24). Listed first because nothing below starts without it.
+  - oidc.yaml
   - core.yaml
   - gateway.yaml
   # Without this nothing scrapes the applications, and the registry being on

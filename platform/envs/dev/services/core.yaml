@@ -23,6 +23,112 @@ spec:
       securityContext:
         runAsNonRoot: true
         seccompProfile: {type: RuntimeDefault}
+      # WAIT FOR THE OIDC ISSUER, RATHER THAN DYING ON IT (T-3.24, #279).
+      #
+      # Both services resolve the issuer's discovery document while Spring is
+      # building beans, and a single HTTP GET with no retry decides whether the
+      # context starts. On a cold rebuild the order is postgres -> keycloak ->
+      # apps, and the apps lose that race every time.
+      #
+      # Losing it is not a delay, it is a crash: the context fails, the
+      # container exits, and the kubelet backs off -- capped at five minutes. So
+      # the applications stayed down long after Keycloak was healthy, and only a
+      # manual `kubectl rollout restart` brought them back.
+      #
+      # This turns that crash into a wait. Same mechanism in both Deployments,
+      # deliberately: the two fail in different beans and one fix reads better
+      # than two.
+      #
+      #   core     JwtDecoders.fromOidcIssuerLocation, from SecurityConfiguration
+      #   gateway  ClientRegistrations.fromIssuerLocation, from Boot's
+      #            reactiveClientRegistrationRepository -- autoconfiguration, so
+      #            the application's own code never runs and cannot be made lazy
+      #            without hand-rolling issuer validation
+      #
+      # Reproduced rather than assumed: both jars, issuer pointed at a closed
+      # port, both refuse to start. The gateway's stack is recorded on #279.
+      #
+      # WHY THIS DOES NOT TIME OUT
+      #
+      # It waits indefinitely and the pod sits in Init, which is the point --
+      # exiting non-zero would restart the pod and rebuild the same
+      # CrashLoopBackOff one layer up. What changes over time is the MESSAGE,
+      # because a wait that reads the same at ten seconds and at ten hours is
+      # the kind of control that gets ignored.
+      initContainers:
+        - name: wait-for-oidc
+          # Pinned by digest, like every other off-the-shelf image here. Chosen
+          # over the service's own image because eclipse-temurin, which jib
+          # builds on, ships neither curl nor wget -- checked, not assumed.
+          image: curlimages/curl@sha256:7c12af72ceb38b7432ab85e1a265cff6ae58e06f95539d539b654f2cfa64bb13  # 8.21.0
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          env:
+            # The same value the application container reads, from the same
+            # ConfigMap. See oidc.yaml for why this is not a literal.
+            - name: OIDC_ISSUER_URI
+              valueFrom: {configMapKeyRef: {name: oidc, key: OIDC_ISSUER_URI}}
+          command: [sh, -c]
+          args:
+            - |
+              set -u
+              url="${OIDC_ISSUER_URI}/.well-known/openid-configuration"
+
+              # Not a timeout -- nothing is aborted when this elapses, the
+              # wording just stops calling a ten-minute outage a cold start.
+              # #289 measured a full rebuild-to-serving at 883s with Keycloak
+              # well inside that, so anything past 600s is no longer the race
+              # this container exists to absorb.
+              patience=600
+
+              start=$(date +%s)
+              attempt=0
+              echo "waiting for OIDC discovery before starting the application"
+              echo "  $url"
+
+              while :; do
+                attempt=$((attempt + 1))
+                # curl already prints 000 when the connection never completed,
+                # so `|| echo 000` appended a SECOND one and the line read
+                # 000000 -- while the explanation below talked about 000. Found
+                # by running this script against a closed port.
+                code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$url" 2>/dev/null || true)
+                [ -n "$code" ] || code=000
+                elapsed=$(( $(date +%s) - start ))
+
+                if [ "$code" = "200" ]; then
+                  echo "OIDC discovery answered 200 after ${elapsed}s and ${attempt} attempts — starting"
+                  exit 0
+                fi
+
+                if [ "$elapsed" -lt "$patience" ]; then
+                  echo "  ${elapsed}s: ${code} — still converging"
+                elif [ -z "${explained:-}" ]; then
+                  # Once, on the transition. Five lines every five seconds for
+                  # as long as the outage lasts buries the one line that says
+                  # something changed, which is the whole point of saying it.
+                  explained=yes
+                  echo "  ${elapsed}s: ${code} — NOT converging. Past ${patience}s this is more likely"
+                  echo "    misconfiguration than a slow dependency:"
+                  echo "      000  the connection never completed — DNS, the edge, or a"
+                  echo "           certificate cert-manager has not issued"
+                  echo "      404  the host answers but the realm path is wrong"
+                  echo "    Check: kubectl -n keycloak get pods,ingress"
+                else
+                  echo "  ${elapsed}s: ${code} — still not converging"
+                fi
+
+                sleep 5
+              done
+          # Small and bounded. This container does nothing but sleep and issue
+          # one request every five seconds, and it must not be what stops the
+          # pod being scheduled during a cold rebuild.
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 32Mi}
       containers:
         - name: core
           # Pinned by digest at deploy time, not by a moving tag. See the
@@ -37,6 +143,21 @@ spec:
             capabilities: {drop: [ALL]}
           env:
             - {name: SPRING_PROFILES_ACTIVE, value: prod}
+
+            # Stated here rather than taken from application.yml's default.
+            #
+            # core is a RESOURCE SERVER: it never starts a login, it only
+            # validates the tokens the gateway relays inward. The value still
+            # has to be the PUBLIC issuer, because that is the string Keycloak
+            # puts in every token's `iss` claim regardless of which host the
+            # request arrived on.
+            #
+            # The default in application.yml points at dev, so it was correct
+            # here and wrong in any other environment -- and the initContainer
+            # above has to wait for the same URL this resolves, which a default
+            # nothing else can see cannot guarantee.
+            - name: OIDC_ISSUER_URI
+              valueFrom: {configMapKeyRef: {name: oidc, key: OIDC_ISSUER_URI}}
 
             # Flyway runs at startup and the schema is validated against the
             # entities (T-3.6a), so a drifted image fails here rather than on
