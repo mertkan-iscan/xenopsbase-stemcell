@@ -718,8 +718,74 @@ The telemetry stack costs **5.6× less** and delivers traces instead of nothing.
 
 **What is still wrong, stated:** the load is not evenly spread. One worker sits at 98% with a load
 average of 27.69 while the other two are at ~78% and load ~9. Adding a node relieved the cluster
-without balancing it, and that imbalance is now the largest single lever left — ahead of anything
-in the resilience config, which remains untouched and should stay that way until this is addressed.
+without balancing it. That is addressed below.
+
+## One replica per node (T-5.13)
+
+The imbalance above was not uneven traffic. At the 2000 req/s step the four gateway pods served
+within 12% of each other — 451, 501, 508 and 513 req/s — while spending very different amounts of
+CPU to do it:
+
+| pod | node | req/s | CPU | **m/req** |
+|---|---|---:|---:|---:|
+| pcwz7 | autoscaled | 501 | 978m | **1.95** |
+| xgdh2 | worker-0 | 451 | 1220m | 2.71 |
+| 4t9zz | worker-1 | 508 | 1683m | **3.31** |
+| 2jzqq | worker-1 | 513 | 1714m | **3.34** |
+
+**The same work cost 1.7× the CPU on the node holding two replicas.** That is the node at 98% with
+a run queue of 27.69 on four cores: threads descheduled mid-request, cache locality gone with them.
+The two pods then made their own node worse, which is a loop the HPA cannot break by adding a fifth
+pod to the same three nodes.
+
+Nothing in the deployment expressed any opinion about where replicas go, so the scheduler packed by
+request. The gateway now declares `requiredDuringSchedulingIgnoredDuringExecution` anti-affinity on
+`kubernetes.io/hostname` — one replica per node or Pending, and Pending is the one signal the
+cluster-autoscaler listens to.
+
+### What it measured
+
+| offered | T-5.10 baseline | T-5.12 | **T-5.13** | 5xx baseline | **5xx now** |
+|---:|---:|---:|---:|---:|---:|
+| 400 | 400 | 400 | **400** | 0% | **0%** |
+| 800 | 768 | 757 | **795** | 3.9% | **0.6%** |
+| 1200 | 580 | 757 | **1199** | 51.6% | **0.0%** |
+| 1600 | 901 | 1037 | **1578** | 43.5% | **1.3%** |
+| 2000 | 570 | 1347 | **1823** | 71.4% | **8.7%** |
+
+**1200 req/s is now served in full with zero errors**, against 580 and 51.6% at the start of this
+work. At 2000 offered the stack serves **3.2× what it did** with errors down from 71.4% to 8.7%,
+and p95 at 1200 req/s is 72.1 ms against 393.7 ms.
+
+The autoscaler behaved exactly as designed: `peak Pending app pods 1`, nodes 4 → 5, four gateway
+replicas on four distinct nodes. Node saturation fell with it — load averages 17.25 / 6.86 / 4.47 /
+2.79, against 27.69 / 9.31 / 8.42.
+
+### The imbalance that is now visible underneath it
+
+Fixing placement exposed a different one. At the 1600 req/s step the four pods no longer serve
+equal traffic:
+
+| pod | req/s |
+|---|---:|
+| 4gflb | 669 |
+| pc4hh | 497 |
+| zvhc2 | 128 |
+| wbpcc | 72 |
+
+A **9× spread**, and it maps to pod age: the two replicas the HPA added mid-run carry the least.
+The per-request CPU figures above are not comparable across pods in this state, because a pod at 72
+req/s is mostly paying fixed overhead.
+
+**Hypothesis, not measured:** k6 reaches the gateway through its ClusterIP Service, so kube-proxy
+picks a backend **per connection**, not per request. With HTTP keep-alive, one connection carries
+many requests for its whole life, and replicas that appear after the connections were established
+only ever receive new ones. If that is right, the effect is worst exactly when the HPA has just
+acted, which is when the new capacity is most needed.
+
+It is directly testable — compare each pod's share over the life of a single step, or count
+established connections per pod — and nothing should be tuned on the strength of it until someone
+has. The remaining hot node (load 17.25) is the one hosting the pod serving 669 req/s.
 
 ### What this does not cover
 
