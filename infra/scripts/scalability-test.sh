@@ -283,6 +283,28 @@ EOF
 echo "  job ${JOB} submitted; sampling every ${SAMPLE_SEC}s"
 echo "  this is a long run by design - the steps are sized to let an HPA react"
 echo ""
+# WATCHING THIS FROM SOMEWHERE ELSE (T-5.17).
+#
+# A fifteen-minute run streams its progress to whichever terminal launched it,
+# which is no use if that terminal is not the one you are sitting at -- an agent
+# ran it, or it went to a log, or you closed the laptop. Everything needed to
+# follow it lives in the cluster and in this directory, so print the commands
+# rather than making anyone reconstruct the job name from a timestamp.
+echo "  ---- follow this run from any terminal ----"
+echo ""
+echo "    export KUBECONFIG=\"\$PWD/infra/terraform/cluster/kubeconfig\""
+echo ""
+echo "    # k6's own progress bar, live from the pod"
+echo "    kubectl -n ${NAMESPACE} logs -f job/${JOB}"
+echo ""
+echo "    # what the cluster is doing about it, refreshed every 5s"
+echo "    watch -n5 'kubectl -n ${NAMESPACE} get hpa,pods; kubectl get nodes'"
+echo ""
+echo "    # the sampler's own view, appended a row at a time"
+echo "    tail -f ${OUTDIR}/timeline.tsv"
+echo ""
+echo "  -------------------------------------------"
+echo ""
 
 kubectl -n "$NAMESPACE" wait --for=condition=Ready pod -l "job-name=${JOB}" --timeout=180s >/dev/null 2>&1
 
