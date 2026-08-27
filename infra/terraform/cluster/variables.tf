@@ -499,3 +499,48 @@ variable "cluster_autoscaler_version" {
     error_message = "cluster_autoscaler_version must be an exact tag such as v1.34.1, never latest."
   }
 }
+
+variable "cluster_autoscaler_scale_down_unneeded_time" {
+  description = <<-EOT
+    How long a node must be continuously unneeded before the autoscaler removes
+    it. "Unneeded" is measured against REQUESTS, not usage.
+
+    THE DEFAULT HERE IS THE UPSTREAM DEFAULT, DELIBERATELY. Ten minutes is not
+    conservatism: a node removed the moment it looks idle is re-provisioned by
+    the next burst, and a Hetzner server takes minutes to boot, join and pull
+    images, so an eager timer buys thrash and pays a cold start for it. Where
+    real traffic is being served that cost lands on users.
+
+    Dev overrides it to 2m because dev's workload is load tests, and there the
+    cost of waiting is different in kind: T-5.15 recorded runs being launched on
+    the previous run's leftover nodes and producing quietly wrong numbers,
+    because the cluster took ~25 minutes to return to its floor. Lowering it in
+    dev trades thrash nobody feels for comparability that everything downstream
+    depends on. See infra/terraform/cluster/env/dev.tfvars.
+  EOT
+  type        = string
+  default     = "10m"
+
+  validation {
+    condition     = can(regex("^[0-9]+[smh]$", var.cluster_autoscaler_scale_down_unneeded_time))
+    error_message = "must be a Go duration such as 10m, 2m or 90s."
+  }
+}
+
+variable "cluster_autoscaler_scale_down_delay_after_add" {
+  description = <<-EOT
+    How long after ANY scale-up the autoscaler refuses to consider scale-down.
+
+    Upstream default, for the same reason as the setting above: it is what stops
+    a cluster oscillating around a burst. Dev overrides it, because a load run
+    causes a scale-up by design and then has to get back to its floor before the
+    next run can be compared with the last.
+  EOT
+  type        = string
+  default     = "10m"
+
+  validation {
+    condition     = can(regex("^[0-9]+[smh]$", var.cluster_autoscaler_scale_down_delay_after_add))
+    error_message = "must be a Go duration such as 10m, 2m or 90s."
+  }
+}

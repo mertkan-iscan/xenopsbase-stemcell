@@ -90,6 +90,8 @@ locals {
         firewall_id        = local.static_agent_firewall_id
         ca_image           = var.cluster_autoscaler_image
         ca_version         = var.cluster_autoscaler_version
+        ca_unneeded_time   = var.cluster_autoscaler_scale_down_unneeded_time
+        ca_delay_after_add = var.cluster_autoscaler_scale_down_delay_after_add
         node_bootstrap_b64 = local.node_bootstrap_b64[local.autoscaler_node_group]
         config_sha256      = sha256(local.node_bootstrap_b64[local.autoscaler_node_group])
       }

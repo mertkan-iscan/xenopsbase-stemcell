@@ -77,32 +77,26 @@ spec:
             # and scale-down never happens.
             - --skip-nodes-with-system-pods=false
             - --skip-nodes-with-local-storage=false
-            # SCALE-DOWN TIMERS, SHORTENED FOR A CLUSTER WHOSE JOB IS TESTING
-            # (T-5.16).
+            # SCALE-DOWN TIMERS, PER ENVIRONMENT (T-5.16, T-5.18).
             #
-            # Both default to ten minutes, and both were being paid in full
-            # after every load run: a node stayed for ten minutes of being
-            # unneeded, and no scale-down could start within ten minutes of the
-            # scale-up that the run itself had caused. Combined with the HPAs'
-            # own windows that is roughly twenty-five minutes before the cluster
-            # is back on its floor -- long enough that the next run gets
-            # launched on the previous one's hardware and its numbers are
-            # quietly wrong. T-5.15 is the record of that happening.
+            # Both hold the UPSTREAM DEFAULT of 10m unless an environment says
+            # otherwise, and only dev does. Ten minutes is not conservatism: a
+            # node removed the moment it looks idle is re-provisioned by the
+            # next burst, and a Hetzner server takes minutes to boot, join and
+            # pull images, so an eager timer buys thrash and pays a cold start
+            # for it. Where real traffic is being served, users pay that.
             #
-            # Two minutes, not zero. The reason ten minutes is the upstream
-            # default is that a node removed the instant it looks idle gets
-            # re-provisioned by the next burst, and a Hetzner server takes
-            # minutes to boot, join and pull images -- so an over-eager timer
-            # buys thrash and pays a cold start for it. Two minutes is long
-            # enough to ride out the gap between steps of a ramp and short
-            # enough that a finished run does not hold a server for the length
-            # of a coffee break.
+            # Dev is 2m because dev's workload IS load tests. Combined with the
+            # HPAs' own windows the defaults put ~25 minutes between a run
+            # finishing and the cluster being back on its floor -- long enough
+            # that the next run gets launched on the previous one's hardware and
+            # its numbers are quietly wrong. T-5.15 is the record of exactly
+            # that happening, across six runs.
             #
-            # This is a DEV posture. A production cluster serving real traffic
-            # should be nearer the default, because there the cost of thrash is
-            # paid by users rather than by a test.
-            - --scale-down-unneeded-time=2m
-            - --scale-down-delay-after-add=2m
+            # The values live in variables.tf so this file states the mechanism
+            # once and neither environment carries the other's number.
+            - --scale-down-unneeded-time=${ca_unneeded_time}
+            - --scale-down-delay-after-add=${ca_delay_after_add}
           env:
             - name: HCLOUD_TOKEN
               valueFrom:
