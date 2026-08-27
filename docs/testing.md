@@ -29,6 +29,7 @@ something, and against tests that assert a call **returned**.
 | Contract | — | — | none yet (T-5.4, #43) |
 | End-to-end | `make smoke ENV=<env>` | the **deployed** environment | `smoke.yml` after every deploy; gates promotion |
 | Load | `make load ENV=<env>` | k6, **in-cluster** | none yet — CI cannot reach the cluster (#207) |
+| Write load | `make load-write ENV=<env>` | k6, **in-cluster** | none yet — CI cannot reach the cluster (#207); thresholds measured 2026-08-27 (T-5.15) |
 | Scalability | `make scale-test ENV=<env>` | k6, **in-cluster**, open model | none — it is exploratory by design (T-5.10) |
 | Chaos | — | — | none yet (T-5.7, #46) |
 | Security | CodeQL, dependency review, image scan, SBOM | GitHub Actions | `codeql.yml`, `security.yml`, `secrets.yml` |
