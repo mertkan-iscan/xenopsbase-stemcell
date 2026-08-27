@@ -116,6 +116,28 @@ agent_nodepools = [
 # The order is worth knowing: the Hetzner server goes first and the node object
 # lingers a few seconds. The reverse -- object gone, server billing -- is the
 # failure #294 is about, and it is not what happens here.
+# ---------------------------------------------------------------------------
+# SCALE-DOWN TIMERS: DEV ONLY (T-5.18)
+# ---------------------------------------------------------------------------
+#
+# Both default to the upstream 10m in variables.tf, and staging and prod keep
+# that. Ten minutes is the right number where real traffic is served: a node
+# removed the moment it looks idle is re-provisioned by the next burst, and a
+# Hetzner server takes minutes to boot, join and pull images, so an eager timer
+# buys thrash and users pay the cold start.
+#
+# Dev's workload is load tests, where the cost of waiting is different in kind.
+# With the defaults, a finished run plus the HPAs' own windows left ~25 minutes
+# before the cluster was back on its floor -- and T-5.15 is the record of six
+# runs being compared against each other when three had started on 3 nodes and
+# two on 4, because the next run got launched on the previous one's leftovers.
+# The throughput numbers in docs/slos.md had to be re-measured and re-labelled.
+#
+# 2m, not 0: long enough to ride out the quiet gap between steps of a ramp,
+# short enough that a finished run does not hold a server for a coffee break.
+cluster_autoscaler_scale_down_unneeded_time   = "2m"
+cluster_autoscaler_scale_down_delay_after_add = "2m"
+
 autoscaler_nodepools = [
   {
     name        = "autoscaled"
