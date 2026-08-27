@@ -57,7 +57,7 @@ images:
     # e7acc9b (correlation id on spans, T-3.8), 1c81e0d (infra usage endpoint,
     # T-3.16), and 1329471 (the RFC 9457 problem document is serialised rather
     # than string-formatted, T-5.12).
-    digest: sha256:a357f19a53edd0e97f505d53f007b34fdcd7eea2dd6f6f0254932e928d45906e
+    digest: sha256:5b325f7b0d3d02a0096e3df436043e55ddb7507451c06fd47d42cb5ec31a5b75
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway
     # Commit c805107 -- the gateway can shed load without the circuit breaker
     # counting it as core failing, and the fallback stops telling the caller
