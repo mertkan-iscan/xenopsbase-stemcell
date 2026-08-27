@@ -627,10 +627,99 @@ and dead the whole time. The tracing was expensive *and* absent.
 Tempo's new sizing deliberately still reserves for the old volume. Nobody has yet watched it stay up
 through a load run, and shrinking it on arithmetic is how it reached 100m in the first place.
 
-**Not yet applied to the cluster, and not yet re-measured.** Reaching dev needs a commit through
-CI → GHCR → Argo. Nothing about the resilience posture should be re-tuned until it has: every
-throughput number in T-5.10 and T-5.11 was measured on a host whose CPU was pinned and whose trace
-pipeline was dead.
+### Measured, after
+
+Deployed through #307 and #308 and re-run on the same ramp. Against the T-5.10 post-window-fix
+baseline, which is the last measurement taken before any of this changed:
+
+| offered | served (before) | **served (after)** | 5xx before | **5xx after** |
+|---:|---:|---:|---:|---:|
+| 200 | 200 | 196 | 0% | 0.8% |
+| 400 | 400 | 400 | 0% | 0% |
+| 800 | 768 | 757 | 3.9% | 5.2% |
+| 1200 | 580 | **757** | 51.6% | **36.9%** |
+| 1600 | 901 | **1037** | 43.5% | **35.2%** |
+| 2000 | 570 | **1347** | 71.4% | **31.9%** |
+
+**Throughput no longer runs backward anywhere.** 400 → 757 → 757 → 1037 → 1347 is monotonic; the
+old curve peaked at 901 and fell to 570. At 2000 req/s offered the stack now serves **2.4× more**
+with **less than half** the error rate. `gateway_only` recovered to 2999 of 3000 with zero errors.
+
+No resilience4j value was touched to get this. The circuit-breaker config is exactly what T-5.10
+left, and `maxConcurrentCalls` is back at the 50 it always was.
+
+### The cluster-autoscaler ran, for the first time
+
+```
+13:59:22  Final scale-up plan: [{xenopsbase-dev-autoscaled 0->1 (max: 2)}]
+14:00:01  node xenopsbase-dev-autoscaled-8b88067268fab6d created, 4 vCPU
+```
+
+The 1000m gateway request made the HPA's fourth replica genuinely unschedulable, it went Pending,
+and the autoscaler was asked for a node — which is what T-2.8 and #22 always claimed would happen
+and what T-5.10 observed never happening. Note the sampler reports `peak Pending app pods 0` for
+the run itself: the node arrived during the rollout that preceded it, so by the time load started
+there was already room.
+
+### Tempo stayed up, and there are traces
+
+`tempo-0`: **Ready, 0 restarts**, 399Mi through a ramp that peaked at 2000 req/s — against 24
+restarts and never once Ready before.
+
+Getting there needed the pod deleted by hand, which is worth writing down: **a StatefulSet
+RollingUpdate will not replace a pod that has never become Ready**, so the fix for a crash-loop
+cannot roll out *through* the crash-loop. `currentRevision` sat on the old 512Mi spec with
+`availableReplicas: 0` while `updateRevision` went unused.
+
+### Where the latency actually is
+
+The profiling breakdown that was impossible before. 59 traces over 800ms, sampled at the knee:
+
+| | median | p90 | max |
+|---|---:|---:|---:|
+| gateway root span, end to end | 953.3 ms | 1269.2 ms | 1640.2 ms |
+| gateway's client span to core | 502.1 ms | 838.0 ms | 1207.8 ms |
+| **core's server span** | **5.5 ms** | **12.7 ms** | **23.4 ms** |
+
+**Core accounts for a median 0.51% of end-to-end latency, and never more than 2.32%.** One trace,
+laid out:
+
+```
++   0.0   2717.7ms  gateway  http get                     <- whole request
++   2.9     32.5ms  gateway  security filterchain before
++  35.4   2681.0ms  gateway  secured request
++ 725.1   1469.6ms  gateway  HTTP GET                     <- the call to core
++1977.4     11.6ms  core     http get /api/documents      <- core's entire work
++2716.5      0.5ms  gateway  security filterchain after
+```
+
+690 ms elapse before the outbound call is even issued. Inside the 1469.6 ms client span, 1252 ms
+pass before core receives anything, core spends 11.6 ms, and 523 ms pass after its answer returns.
+None of that is core, none of it is Postgres, and none of it is a downstream dependency of any kind
+— it is the gateway's own request handling waiting for CPU.
+
+This is the same run-queue delay the USE section describes, now attributed to a span rather than
+inferred. It is also the direct explanation of T-5.11's bulkhead result: a permit is held for that
+whole 2.7 s, of which the downstream it exists to protect uses 11 ms.
+
+### USE, after
+
+At the 2000 req/s step:
+
+| | before | after |
+|---|---:|---:|
+| `observability` CPU | 1,442m | **256m** |
+| `apps` CPU | 6,180m | 8,568m |
+| node CPU | 100% / 98.4% / 97.3% | 98.1% / 80.0% / 77.9% |
+| load average | 30.07, 22.87 | 27.69, 9.31, 8.42 |
+
+The telemetry stack costs **5.6× less** and delivers traces instead of nothing. The app tier gets
+2.4 more cores and converts them into 2.4× the throughput.
+
+**What is still wrong, stated:** the load is not evenly spread. One worker sits at 98% with a load
+average of 27.69 while the other two are at ~78% and load ~9. Adding a node relieved the cluster
+without balancing it, and that imbalance is now the largest single lever left — ahead of anything
+in the resilience config, which remains untouched and should stay that way until this is addressed.
 
 ### What this does not cover
 
