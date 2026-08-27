@@ -113,6 +113,53 @@ if [ "$BEFORE" != "0" ]; then
 fi
 echo ""
 
+# ---------------------------------------------------------------------------
+# THE SCRIPT'S KNOBS, FORWARDED INTO THE JOB
+# ---------------------------------------------------------------------------
+#
+# write.js reads its settings from __ENV. k6 runs in a POD, not in this shell,
+# so a variable exported here reaches it only if it is put on the container --
+# and until it was, `VUS=50 make load-write` ran at the default 10 and said so
+# nowhere except in a progress line nobody reads as a setting.
+#
+# Silent is the problem, not wrong. An override that does nothing produces a
+# plausible run at the wrong parameters, which is worse than an error.
+K6_KNOBS="VUS WRITE_EVERY WARMUP_SEC RAMP HOLD DOWN SIZE_BYTES TOKEN_REFRESH_SEC"
+K6_KNOBS="$K6_KNOBS GATEWAY_URL KEYCLOAK_URL REALM SMOKE_USER SMOKE_PASSWORD"
+
+ENV_BLOCK=""
+OVERRIDES=""
+for knob in $K6_KNOBS; do
+  value="${!knob-}"
+  [ -n "$value" ] || continue
+  ENV_BLOCK="${ENV_BLOCK}
+            - {name: ${knob}, value: \"${value}\"}"
+  # SMOKE_PASSWORD is the one that must not be echoed, even though the default
+  # is committed in the realm file. A fork will point this at something real.
+  case "$knob" in
+    SMOKE_PASSWORD) OVERRIDES="${OVERRIDES} ${knob}=<set>" ;;
+    *)              OVERRIDES="${OVERRIDES} ${knob}=${value}" ;;
+  esac
+done
+[ -z "$ENV_BLOCK" ] || ENV_BLOCK="
+          env:${ENV_BLOCK}"
+
+if [ -n "$OVERRIDES" ]; then
+  echo "  overrides:${OVERRIDES}"
+  echo ""
+fi
+
+# THE THRESHOLDS ARE CALIBRATED FOR VUS=10 AND NOTHING ELSE. They were derived
+# at 2.5x the p95 measured at ten, so raising the concurrency raises the latency
+# and fails a gate that is working correctly. Said out loud rather than left for
+# the reader to deduce from a red threshold.
+if [ -n "${VUS:-}" ] && [ "${VUS}" != "10" ]; then
+  echo "  note: VUS=${VUS}, and the thresholds in write.js were measured at 10."
+  echo "        Expect latency thresholds to fail. That is the gate being right,"
+  echo "        not the system being slow -- read the trends, ignore the crosses."
+  echo ""
+fi
+
 # The script goes in as a ConfigMap rather than baked into an image, so changing
 # a scenario is a commit rather than a build.
 CM="${JOB}-script"
@@ -144,7 +191,7 @@ spec:
       containers:
         - name: k6
           image: ${K6_IMAGE}
-          args: ["run", "/scripts/write.js"]
+          args: ["run", "/scripts/write.js"]${ENV_BLOCK}
           resources:
             requests: {cpu: 200m, memory: 256Mi}
             limits:   {memory: 512Mi}
