@@ -420,6 +420,24 @@
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-circuitbreaker-reactor-resilience4j</artifactId>
         </dependency>
+        <!--
+            Declared explicitly, and the reason is part of the T-5.11 finding.
+
+            The starter above already drags resilience4j-bulkhead in, but at RUNTIME scope
+            (via resilience4j-reactor). So the bulkhead autoconfiguration applies, the
+            `resilience4j.bulkhead.instances.core` block in application.yml binds, and the meters
+            appear. But nothing in this service can name BulkheadFullException, because it is not
+            on the compile classpath. A control you cannot reference is one nobody writes a test
+            or a fallback branch for, which is most of how it survived this long without anyone
+            noticing it had never limited anything.
+
+            Version comes from the resilience4j BOM imported by spring-cloud-dependencies; pinning
+            one here would let it drift from the rest of the resilience4j modules.
+        -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-bulkhead</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-gateway-server-webflux</artifactId>

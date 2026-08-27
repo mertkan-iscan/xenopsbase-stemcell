@@ -46,25 +46,102 @@ resilience4j:
   circuitbreaker:
     configs:
       default:
-        # Percentage-based, over a rolling window of calls rather than of time:
-        # a low-traffic service would never accumulate enough calls in a time
-        # window to make a decision, and would stay closed while entirely broken.
-        slidingWindowType: COUNT_BASED
-        slidingWindowSize: 20
-        # Below this, the failure rate is noise. Three failures out of three is
-        # not evidence that a downstream is down.
-        minimumNumberOfCalls: 10
+        # ---------------------------------------------------------------------
+        # THE WINDOW IS A DURATION, NOT A CALL COUNT (T-5.10)
+        # ---------------------------------------------------------------------
+        #
+        # This was COUNT_BASED with slidingWindowSize: 20, for a stated and
+        # correct reason -- a time window on a low-traffic service never
+        # accumulates enough calls to decide anything, so the breaker would stay
+        # closed while the downstream was entirely broken.
+        #
+        # The reason was right and the consequence was not. A COUNT window's
+        # TIME SPAN varies inversely with traffic, so the busier the service, the
+        # less evidence the breaker demands before cutting it off. T-5.10
+        # measured what that costs at 1200 req/s, where 20 calls is SEVENTEEN
+        # MILLISECONDS of traffic:
+        #
+        #   forwarded to core, successful   84,350
+        #   short-circuited, never sent    133,931
+        #   actually failed                    457
+        #   slow calls (>5s)                     0
+        #
+        # 293 requests discarded per real failure. One GC pause fills a 17ms
+        # window, the failure rate crosses 50%, and the breaker opens for 10s --
+        # six hundred times the span of traffic that made the decision. Five
+        # half-open probes then meet a still-busy service, and it reopens. The
+        # stack oscillated between serving and serving nothing, and throughput
+        # at 1600 req/s came out BELOW what it serves comfortably at 400.
+        #
+        # TIME_BASED makes the decision span constant at every rate. The original
+        # low-traffic concern is now carried by minimumNumberOfCalls instead,
+        # which is what that setting is for.
+        #
+        # THE TRADE, STATED: below ~2 req/s the breaker can no longer open,
+        # because 20 calls will not arrive in a 10s window. That is deliberate.
+        # A dead downstream at low traffic costs a handful of requests that hit
+        # the response-timeout; a 17ms window at high traffic costs a ten-second
+        # blackout of a service that was working. The second failure is far more
+        # expensive and it is the one that was actually observed.
+        slidingWindowType: TIME_BASED
+        # Seconds, not calls, now that the type is TIME_BASED.
+        slidingWindowSize: 10
+        # Below this the failure rate is noise, and this is now also what stops a
+        # near-idle service from tripping on a couple of unlucky calls.
+        minimumNumberOfCalls: 20
         failureRateThreshold: 50
-        # Long enough that a restarting downstream is not hammered, short enough
-        # that recovery is not gated on a human noticing.
-        waitDurationInOpenState: 10s
-        permittedNumberOfCallsInHalfOpenState: 5
+        # Two seconds, not ten. Every second open discards a full second of
+        # traffic -- 1200 requests at the rate above -- so the open state is now
+        # priced against what it costs rather than against how long a JVM takes
+        # to restart. automaticTransitionFromOpenToHalfOpen means recovery is
+        # probed without a request having to arrive and be rejected first.
+        waitDurationInOpenState: 2s
+        # Twenty probes rather than five. At any real rate this is a few
+        # milliseconds of exposure, and it makes the recovery decision a
+        # measurement instead of a coin toss: with five, three unlucky calls
+        # re-opened the breaker for another ten seconds.
+        permittedNumberOfCallsInHalfOpenState: 20
         automaticTransitionFromOpenToHalfOpenEnabled: true
-        # A slow downstream is a failure too. Without this, calls that time out
-        # individually never trip the breaker and the gateway keeps queueing.
+        # A slow downstream is a failure too. 5s never once fired in T-5.10 --
+        # `slow` stayed at 0 through a run that pushed 2000 req/s -- because the
+        # measured p99 is ~24ms healthy and ~148ms at the knee, so 5s was two
+        # hundred times the worst case the system actually produces. 1s is ~40x
+        # the healthy p99: still far outside normal, and inside the 10s
+        # response-timeout, so slowness is detected before the transport gives
+        # up rather than after.
         slowCallRateThreshold: 50
-        slowCallDurationThreshold: 5s
+        slowCallDurationThreshold: 1s
         registerHealthIndicator: true
+        # ---------------------------------------------------------------------
+        # SHED LOAD IS NOT A DOWNSTREAM FAILURE (T-5.11)
+        # ---------------------------------------------------------------------
+        #
+        # The reactive Spring Cloud CircuitBreaker nests these two controls in a
+        # fixed order, and the order is not the one the YAML suggests. From
+        # ReactiveResilience4JCircuitBreaker.run():
+        #
+        #   fallback( timeLimiter( circuitBreaker( bulkhead( proxy ) ) ) )
+        #
+        # The BREAKER IS OUTSIDE THE BULKHEAD. So every request the bulkhead
+        # refuses raises BulkheadFullException *inside* the breaker's call, and
+        # without this line the breaker counts the gateway's own admission
+        # control as evidence that core is failing.
+        #
+        # That is a self-reinforcing loop and it recreates exactly the outage
+        # T-5.10 measured: concurrency rises, the bulkhead sheds, the shed calls
+        # read as a 100% failure rate, the breaker opens, and a downstream that
+        # was merely busy is cut off entirely. The bulkhead only becomes a
+        # graceful-degradation mechanism once its rejections stop being counted.
+        #
+        # `ignoreExceptions` is the right verb, not `recordExceptions`: ignored
+        # calls are excluded from the window altogether rather than recorded as
+        # successes, so shedding neither opens the breaker nor papers over a
+        # genuine failure rate while it is happening.
+        #
+        # CallNotPermittedException is NOT listed. The breaker never records its
+        # own rejections, and naming it here would be cargo cult.
+        ignoreExceptions:
+          - io.github.resilience4j.bulkhead.BulkheadFullException
     instances:
       core:
         baseConfig: default
@@ -85,7 +162,47 @@ resilience4j:
         # Caps how much of the gateway one downstream can consume. Without it a
         # single slow service occupies every worker and takes the others down
         # with it -- the failure this whole card exists to prevent.
+        #
+        # ---------------------------------------------------------------------
+        # WHY THIS IS STILL 50, AND WHAT IS NOW KNOWN ABOUT IT (T-5.11)
+        # ---------------------------------------------------------------------
+        #
+        # T-5.10 recorded this bulkhead as INERT and attributed that to reactive
+        # Spring Cloud Gateway not applying Resilience4j bulkheads at all. That
+        # attribution is WRONG and is retracted in docs/slos.md. It is applied:
+        # ReactiveResilience4JCircuitBreaker.run() decorates the call via
+        # ReactiveResilience4jBulkheadProvider using the breaker's own id, so
+        # `name: core` on the route resolves this instance.
+        # ReactiveBulkheadWiringTest asserts that path against the real upstream
+        # classes, and two cluster runs confirmed it: 109,195 and 337,679
+        # rejections recorded, against a metric that had previously never moved.
+        #
+        # It was inert because 50 per pod is above any concurrency this stack
+        # reaches -- Little's Law on the T-5.10 curve puts the whole tier at ~40
+        # in flight at its knee, against a budget of 150 at three replicas.
+        #
+        # LOWERING IT WAS TRIED AND MADE THINGS WORSE. 8 per pod capped served
+        # throughput at ~250 req/s; 16 per pod restored the low end and then
+        # collapsed to 55 req/s at 1600 offered. The cause is not the breaker --
+        # `failed` was 0 and `not_permitted` was 0 in both runs, so the
+        # ignoreExceptions line below does its job and the circuit never opened.
+        # The cause is that a permit is held for the whole gateway-side request,
+        # and at the knee the NODES are at 97-100% CPU with a load average of 30
+        # on four cores (T-5.12). Permit hold time is then dominated by run-queue
+        # delay, so the limit tightens hardest exactly when it should not.
+        #
+        # A concurrency limit cannot be sized against a saturated host. The
+        # number stays at its unmeasured default until the cluster is fixed --
+        # requests aligned with usage, cluster-autoscaler actually reachable,
+        # and the trace pipeline up so the hold time can be attributed to a span
+        # rather than inferred. docs/slos.md carries the measurements.
         maxConcurrentCalls: 50
+        # MUST STAY 0, AND NOT FOR TUNING REASONS. SemaphoreBulkhead.tryEnterBulkhead
+        # calls semaphore.tryAcquire() when this is 0 and the BLOCKING
+        # tryAcquire(timeout, unit) when it is not -- and the caller here is a
+        # Netty event loop thread. Any non-zero wait parks an event loop under
+        # exactly the overload it was configured to survive. BlockHound (see
+        # JHipsterBlockHoundIntegration) fails the build on it.
         maxWaitDuration: 0
     instances:
       core:

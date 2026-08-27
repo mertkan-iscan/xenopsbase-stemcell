@@ -29,6 +29,7 @@ something, and against tests that assert a call **returned**.
 | Contract | — | — | none yet (T-5.4, #43) |
 | End-to-end | `make smoke ENV=<env>` | the **deployed** environment | `smoke.yml` after every deploy; gates promotion |
 | Load | `make load ENV=<env>` | k6, **in-cluster** | none yet — CI cannot reach the cluster (#207) |
+| Scalability | `make scale-test ENV=<env>` | k6, **in-cluster**, open model | none — it is exploratory by design (T-5.10) |
 | Chaos | — | — | none yet (T-5.7, #46) |
 | Security | CodeQL, dependency review, image scan, SBOM | GitHub Actions | `codeql.yml`, `security.yml`, `secrets.yml` |
 
@@ -79,6 +80,19 @@ presigned URLs with a bare `HttpClient`, outside the application, so "bytes do n
 is what the test actually exercises rather than what it asserts. `ExtensionSeamsIT` has 13 tests
 each aimed at how a seam fails *silently*. `DeadDownstreamIT` asserts behaviour against a refused
 connection.
+
+**Covers the overload path, since T-5.11.** `BulkheadIT` puts a socket that accepts and never
+answers behind the gateway route and drives the three cases the T-5.10 measurements turned on: a
+request meeting a full bulkhead is refused without being forwarded, twenty such refusals leave the
+circuit breaker `CLOSED` (the breaker sits *outside* the bulkhead, so uncounted-for shedding reads
+to it as the downstream failing — that feedback loop is the outage T-5.10 measured, arriving by a
+new route), and a timed-out request is no longer described to the caller as having had no effect.
+
+`ReactiveBulkheadWiringTest` sits underneath it, built from the upstream Spring Cloud classes rather
+than from a Spring context. It asserts *what the library does* — that the reactive circuit breaker
+decorates the call with a bulkhead at all, resolves it by the breaker's own id, and nests it inside
+the breaker — because that is the half that changes under an upgrade rather than under an edit here.
+T-5.10 got this wrong from a reading of the docs; a test is what makes the correction re-checkable.
 
 **Covers identity, in core, since T-4.2 (#36).** `KeycloakTestcontainer` starts a real Keycloak
 preloaded with `platform/envs/dev/keycloak/realm-import.yaml` — the production realm file, not a
@@ -201,6 +215,35 @@ settle, far too short for memory growth or connection leaks.
 the cluster (#195). Running it through the public edge from a runner would work and would measure
 the wrong thing.
 
+### Scalability
+
+**Covers, since T-5.10**, where the system stops scaling and what it does after that.
+`infra/load/scalability.js` run by `make scale-test`, in-cluster, with the cluster's own replica and
+HPA state sampled from outside and joined into one report.
+
+**Why it is not `make load` with bigger numbers.** `load` is a **closed** model: fixed VUs, so a slow
+response slows the generator with it and the offered rate falls to whatever the system can serve. It
+is structurally incapable of overloading anything, which is correct for a latency gate and useless
+for finding a ceiling. This one offers a fixed req/s regardless of latency, so a system that cannot
+keep up visibly fails to keep up.
+
+**It is deliberately not a gate.** `load` exits non-zero on a breached threshold. This one has no
+thresholds: its job is to find the ceiling, so a run that reaches the ceiling has succeeded. Failing
+the run for arriving at its own answer would train everyone to ignore the exit code.
+
+**It reports served throughput, not delivered requests.** A step where every response is a 503 has
+excellent latency — rejections are fast — and the first version of the report called that 100%
+throughput. Errors and served rate are printed to the left of the milliseconds because the
+milliseconds are actively misleading without them.
+
+**Does not cover recovery.** The run goes from peak load to idle and never asks whether an open
+circuit breaker closes on its own once load drops below the knee.
+
+**Does not cover writes, the edge, or sustained load** — the same exclusions as `load`, for the same
+reasons.
+
+Numbers, and what the first run found: [slos.md](slos.md#scalability--where-it-stops-and-what-happens-next-t-510).
+
 ### Chaos — not built (T-5.7, #46)
 
 **Will cover** behaviour against the SLOs when a dependency degrades rather than dies.
@@ -208,6 +251,18 @@ the wrong thing.
 **Why it is separate from integration:** connection-refused is immediate and deterministic, and
 `DeadDownstreamIT` covers it. A *hung* downstream is not — testing it means waiting out a real
 timeout, which is the point of a chaos drill and poison in a unit suite.
+
+`BulkheadIT` (T-5.11) does put a hung downstream in the integration suite, which is the exception
+that proves the rule: it can only afford to because the time limiter is turned down to 500 ms for
+that test, and because two of its three cases never reach the socket at all. A drill against
+production timeouts is still the missing piece.
+
+**One thing T-5.11 changed here.** `DeadDownstreamIT`'s "refused connection" was, on Windows, a
+*dropped* one — the route pointed at port 1, which that platform drops rather than refuses, so the
+time limiter fired and the test spent 20 s exercising a timeout while claiming to exercise a
+refusal. Nothing could see the difference while the fallback returned one fixed sentence for every
+cause. It now points at a port that was bound and then closed, which every platform refuses, and
+the suite runs in 3 s.
 
 ### Security
 

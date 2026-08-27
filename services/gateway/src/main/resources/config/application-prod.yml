@@ -97,10 +97,37 @@ management:
           transport: grpc
   tracing:
     sampling:
-      # Everything, which is right for dev and wrong for a busy production
-      # service -- overridden by TRACING_SAMPLE_PROBABILITY rather than by
-      # editing this. Boot's own default is 0.1.
-      probability: ${TRACING_SAMPLE_PROBABILITY:1.0}
+      # ---------------------------------------------------------------------
+      # 0.1, AND THE COMMENT THAT USED TO BE HERE WAS THE WARNING (T-5.12)
+      # ---------------------------------------------------------------------
+      #
+      # This said "everything, which is right for dev and wrong for a busy
+      # production service -- overridden by TRACING_SAMPLE_PROBABILITY rather
+      # than by editing this". Nothing ever overrode it, and the prod profile
+      # is what dev runs, so every request in every load test created spans in
+      # both services.
+      #
+      # What that cost is not what T-5.10 looked for. It A/B-tested 1.0 against
+      # 0.01 and found the difference INSIDE the services was noise -- 4.85m vs
+      # 5.08m CPU per request -- and concluded tracing was not where the cost
+      # went. The measurement was correct and the conclusion was too narrow: it
+      # measured the emitters and never the collectors.
+      #
+      # T-5.12 measured the collectors. Under the same load, on the same nodes:
+      #
+      #   alloy       993m-1197m per pod, against a 50m request
+      #   tempo       ~1650m, against a 100m request, and OOMKilled 16 times
+      #
+      # Tempo was never Ready for the whole of T-5.10 and T-5.11, so not one
+      # span was ever stored. The tracing was not merely expensive, it was
+      # expensive AND absent -- the worst available combination, and it took
+      # the telemetry needed to diagnose the load tests down with it.
+      #
+      # 0.1 is Boot's own default and one trace in ten at 1000 req/s is still a
+      # hundred a second, which is not a sampling problem for anything this
+      # project needs to see. The env var still overrides, and it is still the
+      # right way to raise it for a specific investigation.
+      probability: ${TRACING_SAMPLE_PROBABILITY:0.1}
 
 spring:
   devtools:

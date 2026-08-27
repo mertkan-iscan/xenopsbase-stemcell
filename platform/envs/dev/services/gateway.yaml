@@ -180,8 +180,42 @@ spec:
           # event. Bursting into idle capacity is the better trade for a
           # latency-sensitive service; the memory limit stays, because memory
           # is not compressible and the failure mode is the node, not this pod.
+          #
+          # ---------------------------------------------------------------
+          # THE SCHEDULING FLOOR WAS THE BUG (T-5.12)
+          # ---------------------------------------------------------------
+          #
+          # Everything above is sound reasoning about the HPA, and it produced
+          # a cpu request of 500m against a pod that measurably draws
+          # 1068m-1255m at the knee. The consequence is not an HPA problem. It
+          # is that **the scheduler and the kernel both believe the number**:
+          #
+          #   during the T-5.11 runs, at 1200 req/s offered
+          #     node CPU              100% / 98.4% / 97.3%
+          #     load average          30.07 and 22.87, on four cores
+          #     node CPU *requested*  55% and 56%
+          #     Pending app pods      0
+          #
+          # A node 100% busy with a run queue seven times its core count still
+          # reads as half empty, so the scheduler keeps packing pods onto it,
+          # nothing is ever Pending, and the cluster-autoscaler -- which wakes
+          # only for Pending pods -- has never once been asked for a node under
+          # real traffic. T-5.10 recorded that as "no new servers came up
+          # because nothing ever asked for one" without naming this as the
+          # cause.
+          #
+          # 1000m is the measured draw of a pod at the point the HPA currently
+          # decides to add one, so the booking now means what it says. It is
+          # NOT a peak: bursting above it is still allowed, because there is
+          # still no CPU limit, for the reason given above.
+          #
+          # THIS CHANGES THE HPA AND hpa.yaml HAS BEEN CHANGED WITH IT. The
+          # target there is a percentage OF this number, so doubling the
+          # request halves the effective trigger unless the target is halved
+          # too. The two files are one decision; the scale-out point is
+          # deliberately unchanged at 1000m per pod.
           resources:
-            requests: {cpu: 500m, memory: 640Mi}
+            requests: {cpu: 1000m, memory: 640Mi}
             limits: {memory: 768Mi}
           volumeMounts:
             - {name: tmp, mountPath: /tmp}
