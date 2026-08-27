@@ -77,6 +77,32 @@ spec:
             # and scale-down never happens.
             - --skip-nodes-with-system-pods=false
             - --skip-nodes-with-local-storage=false
+            # SCALE-DOWN TIMERS, SHORTENED FOR A CLUSTER WHOSE JOB IS TESTING
+            # (T-5.16).
+            #
+            # Both default to ten minutes, and both were being paid in full
+            # after every load run: a node stayed for ten minutes of being
+            # unneeded, and no scale-down could start within ten minutes of the
+            # scale-up that the run itself had caused. Combined with the HPAs'
+            # own windows that is roughly twenty-five minutes before the cluster
+            # is back on its floor -- long enough that the next run gets
+            # launched on the previous one's hardware and its numbers are
+            # quietly wrong. T-5.15 is the record of that happening.
+            #
+            # Two minutes, not zero. The reason ten minutes is the upstream
+            # default is that a node removed the instant it looks idle gets
+            # re-provisioned by the next burst, and a Hetzner server takes
+            # minutes to boot, join and pull images -- so an over-eager timer
+            # buys thrash and pays a cold start for it. Two minutes is long
+            # enough to ride out the gap between steps of a ramp and short
+            # enough that a finished run does not hold a server for the length
+            # of a coffee break.
+            #
+            # This is a DEV posture. A production cluster serving real traffic
+            # should be nearer the default, because there the cost of thrash is
+            # paid by users rather than by a test.
+            - --scale-down-unneeded-time=2m
+            - --scale-down-delay-after-add=2m
           env:
             - name: HCLOUD_TOKEN
               valueFrom:

@@ -337,3 +337,76 @@ fi
 
 echo ""
 echo "  artifacts: ${OUTDIR}"
+
+# ---------------------------------------------------------------------------
+# PUT THE CLUSTER BACK ON ITS FLOOR (T-5.16)
+# ---------------------------------------------------------------------------
+#
+# The preflight above refuses to start above BASELINE_NODES. That check is only
+# useful if something actually gets the cluster back down, and left alone it
+# takes roughly twenty-five minutes -- long enough that the next run is launched
+# on the last one's hardware, which is exactly the mistake the preflight exists
+# to prevent.
+#
+# WHAT IS ACTUALLY BEING WAITED ON, because it is not the autoscaler:
+#
+#   gateway HPA   300s stabilisation, then 1 pod / 120s   -> 2 replicas at ~420s
+#   core HPA      600s stabilisation, then 1 pod / 180s   -> 1 replica  at ~780s
+#   autoscaler    node unneeded (< 50% of REQUESTS) for scale-down-unneeded-time
+#
+# Core's thirteen minutes dominate, and that number is deliberate: hpa.yaml
+# explains that scaling core down discards a warm Hibernate cache and JIT
+# profile, which T-5.6 measured at 35% worse p95 cold against warm. It is part
+# of what the test measures and it is NOT shortened here for convenience.
+#
+# Scaling the Deployments by hand does not help either, and it is worth writing
+# down why: an HPA's scale-down stabilisation takes the MAXIMUM recommendation
+# over its window, so for those first 300/600 seconds the HPA's desired count is
+# still the scaled-out one and it restores whatever you set. The wait is real.
+#
+# So this reports rather than hurries. It names which of the three things it is
+# still waiting for, so an operator watching the tail of a run knows whether to
+# wait or to go and do something else.
+RESET_AFTER="${RESET_AFTER:-true}"
+RESET_TIMEOUT_SEC="${RESET_TIMEOUT_SEC:-1800}"
+
+if [ "$RESET_AFTER" != "true" ]; then
+  echo ""
+  echo "  RESET_AFTER=false: leaving the cluster as the run left it."
+  echo "  The next run will refuse to start until it is back to ${BASELINE_NODES} nodes."
+  exit 0
+fi
+
+echo ""
+echo "--- returning to the floor ---"
+echo "  waiting for ${BASELINE_NODES} nodes; the binding constraint is core's HPA (~13 min)"
+
+reset_deadline=$(( $(date +%s) + RESET_TIMEOUT_SEC ))
+while :; do
+  now_nodes="$(kubectl get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+  now_gw="$(kubectl -n "$NAMESPACE" get deploy gateway -o jsonpath='{.status.replicas}' 2>/dev/null)"
+  now_core="$(kubectl -n "$NAMESPACE" get deploy core -o jsonpath='{.status.replicas}' 2>/dev/null)"
+
+  if [ "${now_nodes:-0}" -le "$BASELINE_NODES" ]; then
+    echo "  at the floor: ${now_nodes} nodes, gateway ${now_gw}, core ${now_core}"
+    break
+  fi
+
+  if [ "$(date +%s)" -ge "$reset_deadline" ]; then
+    echo "  TIMED OUT after ${RESET_TIMEOUT_SEC}s at ${now_nodes} nodes (gateway ${now_gw}, core ${now_core})." >&2
+    echo "  Something is holding a node that the autoscaler cannot drain -- check:" >&2
+    echo "    kubectl -n kube-system logs deploy/cluster-autoscaler --tail=50 | grep -i unremovable" >&2
+    echo "  The next run will refuse to start until this is resolved." >&2
+    exit 1
+  fi
+
+  # Which of the three is it? Saying "waiting" without saying what for is how an
+  # operator ends up staring at a terminal for thirteen minutes.
+  if [ "${now_gw:-0}" -gt 2 ] || [ "${now_core:-0}" -gt 1 ]; then
+    waiting_on="HPAs (gateway ${now_gw}/2, core ${now_core}/1)"
+  else
+    waiting_on="autoscaler's scale-down timer; pods are already at minimum"
+  fi
+  echo "  ${now_nodes} nodes, waiting on ${waiting_on}"
+  sleep 30
+done
