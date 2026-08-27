@@ -135,7 +135,7 @@ agent_nodepools = [
 #
 # 2m, not 0: long enough to ride out the quiet gap between steps of a ramp,
 # short enough that a finished run does not hold a server for a coffee break.
-cluster_autoscaler_scale_down_unneeded_time  = "2m"
+cluster_autoscaler_scale_down_unneeded_time   = "2m"
 cluster_autoscaler_scale_down_delay_after_add = "2m"
 
 autoscaler_nodepools = [
