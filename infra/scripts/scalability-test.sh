@@ -91,10 +91,80 @@ echo " output: ${OUTDIR}"
 echo "=================================================================="
 echo ""
 
+# ---------------------------------------------------------------------------
+# EVERY RUN STARTS FROM THE SAME CLUSTER, OR THE NUMBERS ARE NOT COMPARABLE
+# (T-5.15)
+# ---------------------------------------------------------------------------
+#
+# This was learned the expensive way. Six runs were compared against each other
+# and against a "baseline" as though they measured the same system:
+#
+#   fixed / bulkhead / bulkhead16   started at 3 nodes
+#   t512                            started at 4
+#   t513                            started at 4, peaked at 5
+#
+# A node is 3700m of schedulable CPU on this cluster, so t512 opened with 50%
+# more hardware than the baseline it was reported against and t513 with more
+# again. Part of every improvement in those tables is a server, not a change,
+# and nothing in the output said so.
+#
+# It happens silently because the cluster-autoscaler's scale-down chain is long:
+# the HPA's own stabilisation window (300s gateway, 600s core) has to expire
+# before a node drops under the autoscaler's 50%-of-REQUESTS threshold, and only
+# then does its 10-minute scale-down-unneeded-time start. A run launched twenty
+# minutes after the previous one begins on the previous one's hardware.
+#
+# So: refuse to start above the floor rather than warn about it. A warning in a
+# 900-line log is a warning nobody reads, and the cost of being wrong here is an
+# entire run plus every conclusion drawn from it.
+BASELINE_NODES="${BASELINE_NODES:-3}"
+
 echo "--- state before ---"
 kubectl -n "$NAMESPACE" get hpa
 kubectl -n "$NAMESPACE" get deploy -o wide 2>/dev/null | head -5
 kubectl get nodes --no-headers | awk '{print "  node " $1 " " $2}'
+echo ""
+
+NODES_AT_START="$(kubectl get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+if [ "$NODES_AT_START" -gt "$BASELINE_NODES" ]; then
+  cat >&2 <<EOM
+==================================================================
+ REFUSING TO START: the cluster has not returned to its floor.
+
+   nodes now       ${NODES_AT_START}
+   baseline        ${BASELINE_NODES}
+
+ ${NODES_AT_START} nodes is more hardware than the runs this one will be compared
+ against, and the extra capacity would be read as an improvement. The
+ autoscaled nodes from a previous run have not been reclaimed yet.
+
+ What has to happen first, in order:
+
+   1. the HPAs return to minReplicas   (stabilisation: 300s gateway,
+                                        600s core, then 1 pod / 180s)
+   2. the emptied nodes fall below the autoscaler's utilisation
+      threshold, which is 50% of REQUESTS, not of usage
+   3. scale-down-unneeded-time elapses  (10m, and no scale-down at all
+                                        within 10m of the last scale-up)
+
+ Typically 20-30 minutes after the last request. To start the clock now:
+
+   kubectl -n ${NAMESPACE} scale deploy/gateway --replicas=2
+   kubectl -n ${NAMESPACE} scale deploy/core --replicas=1
+
+ Watch it with:
+
+   kubectl get nodes -w
+
+ If you genuinely mean to measure a larger cluster, say so explicitly and
+ the comparison becomes your problem rather than a silent one:
+
+   BASELINE_NODES=${NODES_AT_START} make scale-test ENV=${ENVIRONMENT}
+==================================================================
+EOM
+  exit 1
+fi
+echo "  starting from ${NODES_AT_START} nodes (baseline ${BASELINE_NODES})"
 echo ""
 
 # ---------------------------------------------------------------------------
