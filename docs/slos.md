@@ -854,15 +854,63 @@ A **9× spread**, and it maps to pod age: the two replicas the HPA added mid-run
 The per-request CPU figures above are not comparable across pods in this state, because a pod at 72
 req/s is mostly paying fixed overhead.
 
-**Hypothesis, not measured:** k6 reaches the gateway through its ClusterIP Service, so kube-proxy
-picks a backend **per connection**, not per request. With HTTP keep-alive, one connection carries
-many requests for its whole life, and replicas that appear after the connections were established
-only ever receive new ones. If that is right, the effect is worst exactly when the HPA has just
-acted, which is when the new capacity is most needed.
+**Hypothesis:** k6 reaches the gateway through its ClusterIP Service, so kube-proxy picks a backend
+**per connection**, not per request. With HTTP keep-alive one connection carries many requests for
+its whole life, and replicas that appear after the connections were established only ever receive
+new ones. If that is right, the effect is worst exactly when the HPA has just acted, which is when
+the new capacity is most needed.
 
-It is directly testable — compare each pod's share over the life of a single step, or count
-established connections per pod — and nothing should be tuned on the strength of it until someone
-has. The remaining hot node (load 17.25) is the one hosting the pod serving 669 req/s.
+## The Service balances connections, not requests (T-5.17)
+
+**Confirmed.** Two runs, both from a verified cold 3-node start, same ramp, same pods, one variable
+changed: `NO_CONN_REUSE=true` makes every request its own connection, which turns the Service's
+per-connection balancing into per-request balancing.
+
+Per-pod request rate at the 1600 req/s step:
+
+| | pods | spread |
+|---|---|---:|
+| keep-alive **on** | 669 / 497 / 128 / 72 | **9.3×** |
+| keep-alive **off** | **404 / 399 / 396 / 396** | **1.0×** |
+
+Nothing else could produce that. Not warmup — the pods are the same age in both runs. Not
+readiness — they were in Endpoints throughout. Not a broken Service — it distributes perfectly once
+the connections stop being sticky.
+
+The corroborating detail from the earlier run is exact: the two replicas were **Ready at t+67s and
+served ~0 req/s until t+340s**, while k6 sat on its 120 `preAllocatedVUs` creating no new
+connections. The pool first grew past 120 at **t+320s**, and their share then climbed as it grew to
+127, 154, 231, 303. Ready pods received nothing for **four and a half minutes** because no client
+had a reason to open a socket.
+
+### What it costs
+
+| offered | keep-alive on | **keep-alive off** | 5xx on | **5xx off** |
+|---:|---:|---:|---:|---:|
+| 800 | 799 | 796 | 0.1% | 0.1% |
+| 1200 | 1110 | **1168** | 7.3% | **0.1%** |
+| 1600 | **996** | **1571** | 36.3% | **1.6%** |
+| 2000 | 1263 | **1560** | 35.8% | **11.0%** |
+
+The 1600 step is the tell: **996 → 1571, errors 36.3% → 1.6%.** That step runs inside the
+node-provisioning window (T-5.16), so the cluster was short-handed *and* unable to use the replicas
+it did have. The two defects compound.
+
+### This is not a recommendation to turn keep-alive off
+
+A handshake per request is not how any real client behaves, and it is not free: gateway peak CPU
+went from 3,229m to 6,248m at the 800 req/s step for the same served rate. `NO_CONN_REUSE` is a
+diagnostic that isolates one variable, and it has now done its job.
+
+**The finding is about the HPA, not about k6.** Horizontal scale-out is far less effective than the
+replica count suggests for any client holding long-lived connections — which is every service mesh
+sidecar, every connection-pooling client, and the ingress itself. A replica that receives no
+traffic is capacity that was paid for and not delivered.
+
+**Unmeasured, and deliberately not chosen here:** periodic connection recycling at the client, an
+L7 proxy that balances per request rather than per connection, or `ingress-nginx` upstream
+keepalive tuning for traffic arriving from outside. Each is a different trade and this document's
+recurring lesson is what happens when one is picked before it is measured.
 
 ### What this does not cover
 
