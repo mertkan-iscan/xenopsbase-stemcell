@@ -586,6 +586,17 @@ hpa-local: ## Rehearse the gateway HPA on a throwaway local k3s cluster (T-2.8)
 load: ## Load baseline: k6 in-cluster against the gateway, thresholds are the SLOs (T-5.6)
 	@bash $(SCRIPTS)/load-test.sh "$(ENV)"
 
+.PHONY: load-write
+load-write: ## What does a database WRITE cost, and what does it cost a read? (T-5.15)
+	@# `load` measures reads only, deliberately -- see docs/slos.md. This measures
+	@# POST /api/documents, which INSERTs a row and presigns a PUT it never sends,
+	@# so no byte reaches object storage and the number is the row rather than
+	@# Hetzner. Three scenarios: the read alone, the write alone, then both at
+	@# once, so the mixed numbers have a control from the same run.
+	@#
+	@# It writes rows and then deletes them. KEEP_ROWS=true keeps them.
+	@bash $(SCRIPTS)/write-load-test.sh "$(ENV)"
+
 .PHONY: scale-test
 scale-test: ## Where does it stop scaling, and does the HPA govern it? (T-5.10)
 	@# Not `load` with bigger numbers. `load` is a CLOSED model -- a slow response
