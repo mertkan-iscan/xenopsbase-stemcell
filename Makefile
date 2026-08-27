@@ -586,6 +586,17 @@ hpa-local: ## Rehearse the gateway HPA on a throwaway local k3s cluster (T-2.8)
 load: ## Load baseline: k6 in-cluster against the gateway, thresholds are the SLOs (T-5.6)
 	@bash $(SCRIPTS)/load-test.sh "$(ENV)"
 
+.PHONY: scale-test
+scale-test: ## Where does it stop scaling, and does the HPA govern it? (T-5.10)
+	@# Not `load` with bigger numbers. `load` is a CLOSED model -- a slow response
+	@# slows the generator with it, so it can never overload anything. This offers a
+	@# fixed req/s regardless of latency, which is the only way saturation becomes
+	@# visible, and samples replica counts from outside while it runs.
+	@#
+	@# Long by design: the steps are sized to let an HPA actually react. Override
+	@# with CORE_STEPS / GW_STEPS / STEP_SEC / GAP_SEC for a quick pass.
+	@bash $(SCRIPTS)/scalability-test.sh "$(ENV)"
+
 .PHONY: cold-rebuild
 cold-rebuild: ## THE DRILL: destroy, rebuild, and prove a document survived it (T-7.2)
 	@bash $(SCRIPTS)/cold-rebuild.sh "$(ENV)"

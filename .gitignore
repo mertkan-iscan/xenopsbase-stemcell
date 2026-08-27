@@ -94,6 +94,15 @@ infra/dev/.logs/
 # The numbers worth keeping go in docs/slos.md.
 k6-baseline-*.log
 
+# Scalability run artifacts: k6 log, cluster timeline, events, report (T-5.10).
+# The report is the thing worth keeping, and it belongs in docs/slos.md when a
+# run says something new -- not as a directory of every run anyone ever did.
+.scale-runs/
+
+# scalability-charts.py imports scalability-report.py by path, which makes
+# CPython write bytecode next to the scripts.
+infra/scripts/__pycache__/
+
 # Packer writes the candidate snapshot id here so validate-golden-image.sh knows
 # exactly which image the build just made, rather than guessing at "the newest
 # candidate" and promoting the wrong one when two builds overlap (T-1.20). It is a
