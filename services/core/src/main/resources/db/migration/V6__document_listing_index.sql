@@ -1,0 +1,75 @@
+-- V6 — the index the document listing actually needs (T-5.15).
+--
+-- WHAT WAS WRONG
+--
+-- V3 indexed (owner, created_at DESC) because listings are always scoped to the
+-- caller and sorted newest-first. That reasoning was right about the shape of
+-- the query and wrong about its predicate: DocumentRepository.findByOwnerAndStatus
+-- filters on status too, and status was not in the index.
+--
+-- So a listing walked (owner, created_at DESC) newest-first and visited the heap
+-- for every row to check status, stopping once it had 20 AVAILABLE ones. That is
+-- fine while PENDING rows are rare. It is not fine when they are not, and they
+-- are exactly the rows that accumulate: initiateUpload() commits PENDING, only
+-- completeUpload() promotes it, and a client that asks for a URL and never
+-- uploads leaves one behind for ever, because reapAbandonedUploads() is
+-- deliberately not scheduled anywhere.
+--
+-- Worse, those rows sort to the FRONT. A PENDING row has the current timestamp,
+-- so it lands ahead of every AVAILABLE row in a newest-first scan: the query
+-- must skip all of them before it reaches the first row it can return. The count
+-- query behind Spring's Page pays the same cost again.
+--
+-- WHAT IT COST, MEASURED (infra/load/write.js, 2026-08-27, p95)
+--
+--   ~18 rows,  no writes in flight    37.5ms
+--   ~35k rows, writes in flight       77.7ms
+--    37k rows, NO writes in flight    87.9ms
+--
+-- The third line is the one that indicts the index. Removing the concurrent
+-- writes entirely made the listing SLOWER, because by then the table held more
+-- PENDING rows. The cost was never contention; it was 37,000 index entries being
+-- skipped one at a time.
+--
+-- THE FIX
+--
+-- (owner, status, created_at DESC) matches the predicate exactly. Postgres seeks
+-- straight to the caller's AVAILABLE rows in created_at order and reads twenty,
+-- and the PENDING rows are not on the path at all -- the listing stops caring how
+-- many there are. The count query becomes an index-only scan over one contiguous
+-- range.
+--
+-- Column order is the predicate first, both equalities, then the sort key. The
+-- reverse would work for neither.
+
+CREATE INDEX ix_document_owner_status_created_at ON document (owner, status, created_at DESC);
+
+-- The old one is now strictly redundant, and redundant is not free: every INSERT
+-- maintains it, and after one load-test run it had bloated to 806 pages (6.4 MB)
+-- for 18 live rows, because a B-tree returns its entries to VACUUM but not its
+-- pages.
+--
+-- Redundant is checked rather than assumed. Every query this table serves:
+--
+--   findByIdAndOwner            id is the primary key; that index serves it
+--   findByOwnerAndStatus        the new index above, exactly
+--   findByStatusAndCreatedAtBefore  ix_document_pending_created_at, kept below
+--
+-- Nothing filters on owner ALONE, which is the only query the old index could
+-- serve that the new one cannot -- (owner, status, created_at) cannot produce
+-- created_at order without a status equality. A fork that adds an owner-scoped
+-- listing across both statuses should put that index back rather than widening
+-- this one.
+DROP INDEX ix_document_owner_created_at;
+
+-- ix_document_pending_created_at stays. It backs the reaper, which queries by
+-- status and created_at with no owner, and the new index leads with owner -- so
+-- it cannot serve that scan.
+
+-- A NOTE FOR FORKS WITH DATA. This is a plain CREATE INDEX inside Flyway's
+-- transaction, which takes a SHARE lock: reads continue, writes to `document`
+-- block until the build finishes. On a stemcell-sized table that is milliseconds.
+-- On a large one it is a write outage during deploy, and the alternative is
+-- CREATE INDEX CONCURRENTLY with `-- flyway:executeInTransaction=false`, which
+-- does not block writes but cannot be rolled back and leaves an INVALID index
+-- behind if it fails. Choose deliberately; do not inherit this line by accident.
