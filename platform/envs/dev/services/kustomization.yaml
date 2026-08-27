@@ -39,34 +39,50 @@ resources:
 # two no longer move together.
 images:
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/core
-    # Commit e841ae1 -- the Hikari pool is sized against the DATABASE rather
-    # than against this service (T-2.18, #259). maximum-pool-size 20 -> 12 and
-    # minimum-idle 5 -> 2, because both are multiplied by the HPA's replica
-    # count: at 20 and three replicas core alone claimed 60 of the database's
-    # 100 connections, and minimum-idle is held per replica.
+    # Commit c805107 -- trace sampling drops from 1.0 to 0.1 (T-5.12, #307).
     #
-    # The other half of that fix -- pinning Keycloak's pool, which defaulted to
-    # 100 and was the larger problem -- deployed immediately through the
-    # Keycloak CR. This is the half that needed an image.
+    # The value it replaces carried its own warning: "everything, which is right
+    # for dev and wrong for a busy production service -- overridden by
+    # TRACING_SAMPLE_PROBABILITY rather than by editing this". Nothing ever
+    # overrode it, and the prod profile is what dev runs.
     #
-    # Carries e7acc9b (correlation id on spans, T-3.8), 1c81e0d (infra usage
-    # endpoint, T-3.16), and 1329471 (the RFC 9457 problem document is
-    # serialised rather than string-formatted, T-5.12).
-    digest: sha256:95b746fd4085d0cfe85342b00f94764c48c054da8312cdf076241c031a2a32bb
+    # What that cost is not what T-5.10 looked for. It A/B-tested 1.0 against
+    # 0.01, measured 4.85m vs 5.08m CPU per request INSIDE the services, and
+    # correctly called that noise. It never measured the collectors: alloy drew
+    # 993m-1197m against a 50m request and tempo ~1650m against 100m, while
+    # being OOMKilled 16 times and never once reaching Ready. No span reached
+    # storage during any run in T-5.10 or T-5.11.
+    #
+    # Carries e841ae1 (Hikari pool sized against the database, T-2.18, #259),
+    # e7acc9b (correlation id on spans, T-3.8), 1c81e0d (infra usage endpoint,
+    # T-3.16), and 1329471 (the RFC 9457 problem document is serialised rather
+    # than string-formatted, T-5.12).
+    digest: sha256:a357f19a53edd0e97f505d53f007b34fdcd7eea2dd6f6f0254932e928d45906e
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway
-    # Commit 2e44a9e -- a logged-in administrator finally holds the role they
-    # were granted (T-3.20, #186). Two defects, either of which alone made
-    # every hasAuthority rule on the session path refuse everyone: the
-    # authorities were built from the UserInfo response, where Keycloak never
-    # puts realm roles, and AuthoritiesConstants still named ROLE_ADMIN, which
-    # no token this realm issues has ever contained. /api/admin/**,
-    # /management/**, /v3/api-docs/** and health show-details were all dead.
-    # Carries f7ef7d7 (tokens in the WebSession, T-3.19), which is what makes
-    # `replicas: 2` in gateway.yaml true rather than intended,
-    # 5efdc48 (asset requests are not navigation, T-3.18),
-    # d861dbf (trusted-proxies reverted to '.*', T-3.15),
-    # 1dbbfe5 (failed login restarts at /, T-3.17),
-    # e7acc9b (correlation id on spans, T-3.8), 4ccd88f (sessions in Valkey,
-    # T-2.11), 6d965b8 (CSP without 'unsafe-inline'/'unsafe-eval'), 806e8be
-    # (logout origin from the request) and f430d36.
-    digest: sha256:8f850bc98b03d25de7c16dd168964a295394eec0bd20129ce6a46610d7dd4563
+    # Commit c805107 -- the gateway can shed load without the circuit breaker
+    # counting it as core failing, and the fallback stops telling the caller
+    # something it cannot know (T-5.11, #307). Trace sampling drops to 0.1 here
+    # too; see the note on core above for why that mattered more than the A/B
+    # test suggested.
+    #
+    # The load-bearing line is `ignoreExceptions: BulkheadFullException`. The
+    # runtime nests these as fallback(timeLimiter(circuitBreaker(bulkhead))), so
+    # the breaker is OUTSIDE the bulkhead and every shed request lands inside its
+    # window. Measured on this cluster across two runs: 109,195 and 337,679
+    # rejections recorded, `failed` 0, `not_permitted` 0 -- the circuit never
+    # opened once, against 133,931 short-circuits in the run before it.
+    #
+    # FallbackResource returned one fixed sentence for every reason it was
+    # reached, including a TimeLimiter timeout where the request may well have
+    # committed. "It had no effect" is the one part of that body a caller acts
+    # on. It now derives the detail, the Retry-After and a gateway.fallback
+    # counter from the actual cause.
+    #
+    # Carries 2e44a9e (a logged-in administrator finally holds the role they
+    # were granted, T-3.20, #186), f7ef7d7 (tokens in the WebSession, T-3.19),
+    # 5efdc48 (asset requests are not navigation, T-3.18), d861dbf
+    # (trusted-proxies reverted to '.*', T-3.15), 1dbbfe5 (failed login restarts
+    # at /, T-3.17), e7acc9b (correlation id on spans, T-3.8), 4ccd88f (sessions
+    # in Valkey, T-2.11), 6d965b8 (CSP without 'unsafe-inline'/'unsafe-eval'),
+    # 806e8be (logout origin from the request) and f430d36.
+    digest: sha256:5b4c23a98be0db990fba1b839d0aea11bd948a24fa83a6de178a63ff34744235
