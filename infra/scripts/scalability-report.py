@@ -282,7 +282,21 @@ def scaling_section(rows, events_path, out):
     _, nodes_hi = span(rows, "nodes")
     nodes_lo, _ = span(rows, "nodes")
     _, pending_hi = span(rows, "pending")
-    out.append("  nodes %s   peak Pending app pods %s" % (fmt_range(nodes_lo, nodes_hi), pending_hi))
+
+    # THE NODE COUNT THIS RUN *STARTED* WITH, not just the range it covered
+    # (T-5.15). A node is 3700m of schedulable CPU here, so two runs that opened
+    # on different counts are not measuring the same system -- and reading the
+    # range alone hides it, because a run that began on a previous run's
+    # leftover node looks identical to one that earned it.
+    #
+    # scalability-test.sh refuses to start above the floor. This prints the
+    # number anyway, in the artifact, so a report read six weeks later does not
+    # depend on anyone remembering which cluster it came from.
+    started_on = rows[0].get("nodes") if rows else None
+    out.append(
+        "  nodes %s   started on %s   peak Pending app pods %s"
+        % (fmt_range(nodes_lo, nodes_hi), started_on if started_on is not None else "?", pending_hi)
+    )
     if pending_hi:
         out.append("  A Pending pod means the HPA's decision was not schedulable. The ceiling")
         out.append("  measured past that point is the node's, not the application's.")

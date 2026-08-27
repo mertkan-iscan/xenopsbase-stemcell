@@ -753,6 +753,34 @@ cluster-autoscaler listens to.
 | 1600 | 901 | 1037 | **1578** | 43.5% | **1.3%** |
 | 2000 | 570 | 1347 | **1823** | 71.4% | **8.7%** |
 
+> ### These three columns are not the same cluster (T-5.15)
+>
+> | run | nodes at start | peak |
+> |---|---:|---:|
+> | T-5.10 baseline, and every T-5.11 run | **3** | 3 |
+> | T-5.12 | **4** | 4 |
+> | T-5.13 | **4** | 5 |
+>
+> A node is 3,700m of schedulable CPU here, so T-5.12 opened with **50% more
+> hardware** than the baseline it is reported against, and T-5.13 with more again.
+> **Part of every improvement in the table above is a server rather than a change,
+> and the amount is not separated out.** Nothing in the tooling said so at the
+> time; `scalability-test.sh` now refuses to start above the node floor and the
+> report prints `started on N`.
+>
+> It happened because the autoscaler's scale-down chain is long — the HPA's own
+> stabilisation window has to expire before a node falls under a 50%-of-requests
+> threshold, and only then does a 10-minute unneeded timer start — so a run
+> launched twenty minutes after the previous one silently inherits its hardware.
+>
+> **What this does and does not put in doubt.** The throughput comparisons above
+> are confounded and should be read as "this configuration on this cluster",
+> not as the effect of the config change alone. The mechanism findings are not:
+> the trace breakdown (core at 0.51% of end-to-end), the per-request CPU penalty
+> from co-location (1.7x), Tempo's OOM loop, and the autoscaler firing on Pending
+> are each internally consistent measurements that do not rest on comparing two
+> runs. Re-measuring the throughput curve from a cold 3-node start is owed.
+
 **1200 req/s is now served in full with zero errors**, against 580 and 51.6% at the start of this
 work. At 2000 offered the stack serves **3.2× what it did** with errors down from 71.4% to 8.7%,
 and p95 at 1200 req/s is 72.1 ms against 393.7 ms.
