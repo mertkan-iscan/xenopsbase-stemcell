@@ -1,0 +1,36 @@
+# Routes argocd-dev.xenopsoftware.com to the Argo CD server.
+#
+# Argo CD installs itself from Terraform (infra/terraform/cluster/bootstrap.tf)
+# rather than from this repository -- it is the thing that reconciles this
+# repository, so it cannot be reconciled by it. Its ingress can live here
+# though: an Ingress is an ordinary object in the argocd namespace, and putting
+# it here means adding it did not require a cluster apply.
+#
+# NO backend-protocol ANNOTATION, ON PURPOSE. The chart runs the server with
+# `server.insecure: true`, so it listens on plain HTTP and the default HTTP
+# backend protocol is correct. Setting HTTPS here would talk TLS to a listener
+# that is not serving it, and the symptom is a 502 with nothing in the Argo CD
+# logs, because the connection never becomes a request.
+#
+# The web UI is what this publishes. `argocd` the CLI speaks gRPC and needs
+# `--grpc-web` through an HTTP/1.1 ingress; it also needs the Access service
+# token, which the dashboard policy deliberately does not carry. Use the
+# port-forward for CLI work.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: argocd-server
+  namespace: argocd
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: argocd-dev.xenopsoftware.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: argo-cd-argocd-server
+                port:
+                  number: 80

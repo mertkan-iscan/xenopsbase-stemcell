@@ -36,6 +36,37 @@ extra_hostnames = [
   {
     hostname = "auth-dev.xenopsoftware.com"
     service  = "http://ingress-nginx-controller.ingress-nginx.svc.cluster.local:80"
+
+    # NOT behind Access, and this is the one entry here where that is load
+    # bearing rather than a default. See the variable's description.
+    access = false
+  },
+
+  # The operator dashboards. Every one of them goes to the same ingress
+  # controller as the application does -- the tunnel delivers by hostname and
+  # ingress-nginx routes by Host header, so four dashboards cost four Ingress
+  # objects and no new entry point.
+  #
+  # All four are behind Access. Two of them have no login of their own.
+  {
+    hostname = "grafana-dev.xenopsoftware.com"
+    service  = "http://ingress-nginx-controller.ingress-nginx.svc.cluster.local:80"
+    access   = true
+  },
+  {
+    hostname = "prometheus-dev.xenopsoftware.com"
+    service  = "http://ingress-nginx-controller.ingress-nginx.svc.cluster.local:80"
+    access   = true
+  },
+  {
+    hostname = "alertmanager-dev.xenopsoftware.com"
+    service  = "http://ingress-nginx-controller.ingress-nginx.svc.cluster.local:80"
+    access   = true
+  },
+  {
+    hostname = "argocd-dev.xenopsoftware.com"
+    service  = "http://ingress-nginx-controller.ingress-nginx.svc.cluster.local:80"
+    access   = true
   },
 ]
 

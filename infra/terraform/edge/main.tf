@@ -9,6 +9,12 @@ locals {
 
   tunnel_name = "xenopsbase-${var.environment}"
 
+  # Extra hostnames that opted into Access. Kept as a local so the opt-in is
+  # read once and every consumer below agrees about what is protected.
+  access_dashboard_hostnames = var.manage_access ? toset([
+    for h in var.extra_hostnames : h.hostname if h.access
+  ]) : toset([])
+
   # A tunnel is reached by CNAME to this synthetic hostname. It is derived from
   # the tunnel's UUID, which does not change when the cluster is rebuilt --
   # which is the whole reason DNS is stable here.
@@ -340,6 +346,48 @@ resource "cloudflare_zero_trust_access_application" "app" {
   ]
 }
 
+# The operator dashboards -- Grafana, Prometheus, Alertmanager, Argo CD.
+#
+# A separate resource from the application above rather than one for_each over
+# both, because the two are protected for different reasons and by different
+# policies. Merging them would also rekey the existing application in state,
+# and a destroy-and-recreate of an Access application means app-dev is public
+# for the width of the apply.
+#
+# WHY THIS MATTERS MORE HERE THAN FOR THE APPLICATION. Prometheus and
+# Alertmanager have no authentication of their own at all -- there is no login
+# to fail. Access is not defence in depth for those two, it is the only control,
+# and Alertmanager's API can silence alerts. Grafana and Argo CD do have their
+# own logins, so for them Access is the outer layer.
+#
+# TEAM ONLY, DELIBERATELY. The service token is absent from this list. It exists
+# so CI can drive the application through smoke and promotion (see
+# .github/workflows/smoke.yml); nothing automated reads a dashboard. Including
+# it anyway would hand every CI run the ability to silence alerting, which is a
+# wider grant than anything asked for it.
+resource "cloudflare_zero_trust_access_application" "dashboard" {
+  for_each = local.access_dashboard_hostnames
+
+  account_id = var.account_id
+
+  # The leftmost label, so the Zero Trust dashboard lists these as
+  # "xenopsbase-dev grafana-dev" rather than four near-identical names.
+  name   = "xenopsbase-${var.environment} ${split(".", each.value)[0]}"
+  domain = each.value
+  type   = "self_hosted"
+
+  # Matches the application. Re-authenticating mid-session while chasing a
+  # graph is the fastest way to make people stop opening the graph.
+  session_duration = "24h"
+
+  policies = [
+    {
+      id         = cloudflare_zero_trust_access_policy.team[0].id
+      precedence = 1
+    },
+  ]
+}
+
 resource "cloudflare_zero_trust_access_policy" "team" {
   count = var.manage_access ? 1 : 0
 
@@ -384,5 +432,18 @@ check "access_has_someone_to_admit" {
   assert {
     condition     = !var.manage_access || length(var.access_allowed_emails) > 0
     error_message = "manage_access = true with an empty access_allowed_emails admits no human. Set it in env/<environment>.secrets.tfvars."
+  }
+}
+
+# Refuses the combination that publishes a dashboard with nothing in front of
+# it. `access = true` on an extra hostname reads as "this one is protected", but
+# every Access resource here is gated on manage_access -- so with manage_access
+# off the flag is silently ignored and the hostname is served to the internet.
+# For Prometheus and Alertmanager that is an unauthenticated hostname, since
+# neither has a login of its own.
+check "access_opt_in_needs_access_enabled" {
+  assert {
+    condition     = var.manage_access || length([for h in var.extra_hostnames : h.hostname if h.access]) == 0
+    error_message = "extra_hostnames opts a hostname into Access but manage_access is false, which would publish it with no Access in front of it. Set manage_access = true, or drop the access flag."
   }
 }

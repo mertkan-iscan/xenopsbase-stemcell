@@ -49,11 +49,16 @@ spec:
         kustomize.buildOptions: "--enable-alpha-plugins --enable-exec"
 
       params:
-        # No TLS on the Argo API itself. Nothing reaches it from outside the
-        # cluster: there is no ingress for it, and the public surface is one
-        # tunnel (T-1.6). Access is by port-forward over the existing admin
-        # path, so terminating TLS here would protect a hop that is already
-        # inside the cluster.
+        # No TLS on the Argo API itself.
+        #
+        # This stayed correct when Argo CD gained an ingress. TLS terminates at
+        # Cloudflare's edge; from there the tunnel, ingress-nginx and this
+        # server are all in-cluster hops, so serving TLS here would protect a
+        # connection that never leaves the cluster.
+        #
+        # It is also what the ingress depends on: with the default HTTP backend
+        # protocol, an ingress in front of a TLS-serving Argo CD returns 502
+        # with nothing in the Argo logs. See platform/envs/dev/argocd.
         server.insecure: true
 
     # Deliberately trimmed for a small dev cluster. ADR-0004 accepted Argo CD's

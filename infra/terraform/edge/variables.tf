@@ -154,10 +154,18 @@ variable "extra_hostnames" {
 
     Same one-label-below-apex rule as `hostname`: Universal SSL covers the apex
     and *.example.com only.
+
+    `access` puts Cloudflare Access in front of that hostname. It is off by
+    default because the original member of this list is Keycloak, which must
+    NOT be behind Access: the OIDC flow redirects the browser here to log in,
+    and an Access interstitial in that path breaks the back-channel code
+    exchange. Opting in per hostname keeps that a stated decision rather than
+    something a later addition inherits by accident.
   EOT
   type = list(object({
     hostname = string
     service  = string
+    access   = optional(bool, false)
   }))
   default = []
 

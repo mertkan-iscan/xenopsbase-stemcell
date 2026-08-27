@@ -12,3 +12,6 @@ resources:
   - alerts-connections.yaml
   - dashboard-platform.yaml
   - tempo.yaml
+  # Grafana, Prometheus and Alertmanager on their own hostnames, behind
+  # Cloudflare Access (T-8.6 extended).
+  - ingress.yaml
