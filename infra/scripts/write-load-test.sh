@@ -192,9 +192,16 @@ spec:
         - name: k6
           image: ${K6_IMAGE}
           args: ["run", "/scripts/write.js"]${ENV_BLOCK}
+          # 1000m, matching scalability-test.sh. 200m was enough at the default
+          # ten VUs and is not enough at fifty: a CPU-starved generator reports
+          # its own scheduling delay as the application's latency, and reports it
+          # as a clean number with no sign that anything was wrong. There is no
+          # CPU limit, so this is a floor rather than a ceiling -- the request is
+          # what the scheduler guarantees when the node is busy, which is exactly
+          # when a load test is running.
           resources:
-            requests: {cpu: 200m, memory: 256Mi}
-            limits:   {memory: 512Mi}
+            requests: {cpu: 1000m, memory: 512Mi}
+            limits:   {memory: 1Gi}
           volumeMounts:
             - {name: scripts, mountPath: /scripts}
       volumes:
