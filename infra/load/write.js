@@ -75,9 +75,25 @@
 // read_after managed 36.0ms on 39,000 -- the emptiest table producing the
 // slowest read. See WARM-UP below; the first 90 seconds are now discarded.
 //
-// And with row count neutral and the JVM warm, the subtraction this file was
-// built for finally works. mixed_read minus read_after is the cost of concurrent
-// writes to a reader, measured at 1.5ms -- about 4% at 36 writes/s.
+// WHAT THIS FILE STILL CANNOT MEASURE: CONTENTION
+//
+// The obvious next step is mixed_read minus read_after -- the same read with and
+// without concurrent writes. It was reported once as +1.5ms and then, on the
+// very next run, as -8.1ms: reads came out FASTER with writes in flight. A
+// quantity that changes sign is not measuring what its name says.
+//
+// The cause is the closed model, and it is structural rather than a matter of
+// load. In `mixed`, roughly one VU in five is occupied by a write at any
+// instant, so only about eight of the ten are issuing reads -- against ten in
+// read_after. Fewer concurrent reads means shorter queues and lower per-read
+// latency, and that offset is mixed into the subtraction along with whatever
+// contention exists. More VUs do not fix it; the two effects scale together.
+//
+// Measuring contention needs reads and writes as INDEPENDENT concurrent
+// scenarios with their own VU counts, so read concurrency is held fixed while
+// the write rate varies -- or an open model, where both offered rates are held
+// regardless of latency. Neither is this file. Do not quote a contention number
+// from it.
 //
 // THE COST: rows accumulate. reapAbandonedUploads() exists but is deliberately
 // not scheduled, so nothing removes them on its own. write-load-test.sh counts
@@ -296,10 +312,10 @@ export const options = {
     // stopped caring how many PENDING rows the owner holds, which is what the
     // migration predicted and the only claim it could be judged on.
     //
-    // With row count neutral, the subtraction this file was built for finally
-    // works: mixed_read minus read_after is 1.5ms, about 4%. That is the cost of
-    // 36 writes/s to a concurrent reader, and it was invisible while a 52ms
-    // index scan sat on top of it.
+    // read_after is NOT a contention control, however much the arrangement
+    // invites reading it as one. mixed_read minus read_after came out +1.5ms on
+    // one run and -8.1ms on the next, because a closed model gives `mixed` fewer
+    // VUs issuing reads than read_after has. See the header.
     //
     // read_after keeps running. It is now the regression detector for the index
     // itself: if it ever separates from read_control again, either the index was

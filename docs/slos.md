@@ -983,13 +983,59 @@ mixed_read   77.7ms -> 37.5ms p95
 records `6 | document listing index | 2026-08-27 20:23:39 | success`, and `document` now carries
 `ix_document_owner_status_created_at` with the old index gone.
 
-With row count neutral, the subtraction the mixed scenario exists for finally works:
-
-> `mixed_read` − `read_after` = **1.5ms, about 4%.** That is what 36 writes/s costs a concurrent
-> reader. It was invisible while a 52ms index scan sat on top of it.
-
 `read_after` keeps running as the regression detector for the index itself: if it separates from
 `read_control` again, either the index was dropped or the query stopped matching it.
+
+### What this test still cannot measure: contention
+
+With row count neutral it is tempting to read `mixed_read` − `read_after` as the cost of concurrent
+writes to a reader. **It is not, and the two runs disagree about its sign:**
+
+| Run | `mixed_read` | `read_after` | difference |
+|---|---|---|---|
+| post-V6 | 37.5ms | 36.0ms | **+1.5ms** |
+| post-warm-up | 24.4ms | 32.6ms | **−8.1ms** |
+
+Reads came out *faster* with writes in flight. A quantity that changes sign between runs is not
+measuring what its name says.
+
+The cause is the closed model, and it is structural rather than a matter of load. In `mixed`,
+roughly one VU in five is occupied by a write at any instant, so only about eight of the ten are
+issuing reads — against ten in `read_after`. Fewer concurrent reads means shorter queues and lower
+per-read latency, and that offset sits inside the subtraction alongside whatever contention exists.
+**Raising `VUS` does not fix it**: both effects scale together.
+
+Measuring contention needs reads and writes as independent concurrent scenarios with their own VU
+counts, so read concurrency is held fixed while the write rate varies — or an open model, where both
+offered rates hold regardless of latency. Neither exists yet. No contention figure should be quoted
+from this file until one does.
+
+It is also worth naming what ten VUs cannot reach: 2 core replicas × `maximum-pool-size: 12` is 24
+Hikari connections, and the gateway's bulkhead permits 50 concurrent calls. Ten in-flight requests
+engage neither. Whatever contention exists in this application starts somewhere above where this
+test currently looks.
+
+### The warm-up run, 2026-08-27
+
+90s warm-up then the four scenarios, 236,635 requests, zero failures, zero circuit-breaker
+fallbacks, 54,881 rows written and cleaned up. Every threshold green.
+
+| Scenario | median | p95 | p99 | rate | threshold p95 | headroom |
+|---|---|---|---|---|---|---|
+| `read_control` | 13.0ms | 38.2ms | 56.2ms | 454/s | 90ms | 2.4x |
+| `write_only` | 20.1ms | 47.1ms | 62.4ms | 321/s | 130ms | 2.8x |
+| `mixed_read` | 11.3ms | 24.4ms | 34.4ms | 426/s | 100ms | 4.1x |
+| `mixed_write` | 16.5ms | 32.2ms | 42.3ms | 106/s | 125ms | 3.9x |
+| `read_after` | 14.0ms | 32.6ms | 44.1ms | 468/s | 90ms | 2.8x |
+
+**The warm-up did its job.** `read_control` fell from 55.7ms to 38.2ms p95, and its gap to
+`read_after` closed from 19.7ms to 5.6ms. Its threshold — borrowed from `read_after` and marked
+provisional — lands at 2.4x the measured p95, near enough to the 2.5x rule that it needs no
+re-deriving.
+
+`mixed_read` and `mixed_write` now sit at about 4x, looser than the rule. Left alone deliberately:
+`mixed_read` moved 37.5 → 24.4ms between two runs, so the slack is covering real run-to-run
+variance rather than generosity.
 
 ### Why `read_control` is now the slowest read, and the warm-up that fixes it
 
