@@ -155,7 +155,7 @@ spec:
           configMap: {name: ${CM}}
 EOF
 
-echo "  job ${JOB} submitted; four scenarios, about 7m20s total; streaming…"
+echo "  job ${JOB} submitted; 90s warm-up then four scenarios, about 8m55s total; streaming…"
 echo ""
 
 kubectl -n "$NAMESPACE" wait --for=condition=Ready pod -l "job-name=${JOB}" --timeout=180s >/dev/null 2>&1
@@ -251,18 +251,19 @@ if [ "${succeeded:-0}" = "1" ]; then
   echo "    latency_mixed_write     the write, with reads in flight"
   echo "    latency_read_after      the read, grown table, NO writes in flight"
   echo ""
-  echo "  READ read_after FIRST. It is the control that says what the difference"
-  echo "  between read_control and mixed_read actually means:"
+  echo "  THE TWO SUBTRACTIONS THAT CARRY THE RESULT:"
   echo ""
-  echo "    read_after near mixed_read   -> the slowdown is the ROW COUNT. The"
-  echo "                                    listing index does not carry status,"
-  echo "                                    so PENDING rows sort to the front of"
-  echo "                                    the scan and the query skips them all."
-  echo "                                    The mixed number says nothing about"
-  echo "                                    contention."
-  echo "    read_after near read_control -> the slowdown IS contention, and the"
-  echo "                                    mixed scenario measured what it set"
-  echo "                                    out to measure."
+  echo "    read_after - read_control   the cost of ROW COUNT. Should be near"
+  echo "                                zero: V6 indexes (owner, status,"
+  echo "                                created_at DESC), so a listing no longer"
+  echo "                                walks past the PENDING rows. If this"
+  echo "                                separates again, the index was dropped or"
+  echo "                                the query stopped matching it."
+  echo "    mixed_read - read_after     the cost of CONCURRENT WRITES to a"
+  echo "                                reader. Measured at 1.5ms (~4%) at 36"
+  echo "                                writes/s on 2026-08-27."
+  echo ""
+  echo "  The first 90s are warm-up and are not in any of these numbers."
   echo "  full output: ${JOB}.log"
   echo "=================================================================="
   exit 0
