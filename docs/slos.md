@@ -781,6 +781,55 @@ cluster-autoscaler listens to.
 > are each internally consistent measurements that do not rest on comparing two
 > runs. Re-measuring the throughput curve from a cold 3-node start is owed.
 
+### Re-measured from a cold 3-node start
+
+Owed, and now done. Same ramp, same parameters, cluster verified back at its floor —
+`started on 3`, gateway 2, core 1 — against the T-5.10 baseline, which started the same way:
+
+| offered | baseline (3 nodes) | **cold3 (3 nodes)** | 5xx baseline | **5xx now** |
+|---:|---:|---:|---:|---:|
+| 200 | 200 | 200 | 0% | 0% |
+| 400 | 400 | 400 | 0% | 0% |
+| 800 | 768 | **799** | 3.9% | **0.1%** |
+| 1200 | 580 | **1110** | 51.6% | **7.3%** |
+| 1600 | 901 | 996 | 43.5% | 36.3% |
+| 2000 | 570 | **1263** | 71.4% | **35.8%** |
+
+**The improvement is real and it is smaller than reported.** At 2000 req/s offered the honest
+figure is **2.2×**, not the 3.2× taken from a run that opened on extra hardware. At 1200 req/s it
+is 1.9× with errors down from 51.6% to 7.3%.
+
+### The cost of one-replica-per-node, which had not been measured
+
+The 1600 req/s step served **996** — *below* the 1200 step's 1110. That dip is not noise and it is
+not the application:
+
+| t | nodes | Pending | gw | core |
+|---:|---:|---:|---:|---:|
+| 199s | 3 | **1** | 3 | 1 |
+| 340s | 3 | **2** | 3 | 2 |
+| 410s | 3 | **3** | 3 | 2 |
+| 481s | 3 | **3** | 4 | 2 |
+| **551s** | **5** | 1 | 4 | 2 |
+| 622s | 5 | 0 | 4 | 2 |
+
+From the first Pending pod at ~t+190s to nodes arriving at t+551s is **six minutes short-handed**,
+and the 1600 req/s step ran t+490–600 — squarely inside that window. By the 2000 step the nodes
+were in and throughput recovered to 1263.
+
+**T-5.13's anti-affinity converts an HPA scale-up into a node provisioning wait.** Before it, a new
+replica needed a scheduling slot and appeared in seconds; now it needs a whole node, and a Hetzner
+server takes minutes to boot, join, pull and start a JVM. That is the correct steady-state
+behaviour — a replica is worth a node's capacity or it is not worth having — and it is a materially
+worse burst response, which the T-5.13 numbers could not show because those nodes were already
+running.
+
+Both halves are now on the record. Nothing is changed on the strength of this: options exist
+(a warm `min_nodes: 1` in the autoscaled pool, or `preferred` anti-affinity plus a topology spread
+constraint) and each trades standing cost or steady-state efficiency for burst response. None has
+been measured, and the pattern this document keeps recording is what happens when one is picked
+before it has been.
+
 **1200 req/s is now served in full with zero errors**, against 580 and 51.6% at the start of this
 work. At 2000 offered the stack serves **3.2× what it did** with errors down from 71.4% to 8.7%,
 and p95 at 1200 req/s is 72.1 ms against 393.7 ms.
