@@ -53,30 +53,40 @@ agent_nodepools = [
 # continuously to be ready for a load that arrives during working sessions --
 # which is the cost model ADR-0002 exists to avoid.
 #
-# max_nodes = 3, and WHAT THE POOL IS ACTUALLY FOR (T-2.23, #306).
+# max_nodes = 2, and WHAT THE POOL IS ACTUALLY FOR (T-2.23, #306).
 #
 # This said "max_nodes = 2 is headroom for the platform growing underneath --
 # Loki and Prometheus are the ones that move -- and NOT for application
-# replicas". That was contradicted by the workload it sits under. gateway.yaml
-# requires one replica per node and maxReplicas is 4, so at ceiling the gateway
-# needs four untainted nodes -- and its own comment says so: "the autoscaled
-# pool is min 0 / max 2 against two static workers, so four replicas have four
-# nodes available -- exactly enough."
+# replicas". The number was right and the sentence was wrong.
 #
-# Both statements cannot hold. The pool was declared off-limits to application
-# replicas while being sized exactly to seat them, which left ZERO nodes for the
-# platform growth it was supposedly reserved for. A Loki or Prometheus that grew
-# while the gateway sat at ceiling had nowhere to go.
+# gateway.yaml requires one replica per node and maxReplicas is 4, so at ceiling
+# the gateway needs four untainted nodes -- two static plus two from this pool.
+# Its own comment says exactly that: "four replicas have four nodes available --
+# exactly enough". So the pool IS for application replicas, and the claim that
+# it was reserved for platform growth was never true of the running system.
 #
-# max_nodes = 3 resolves it: four untainted nodes for the gateway at ceiling,
-# and one left over for the platform. min_nodes is still 0, so the third node
-# bills only while it is needed and the ADR-0002 cost model is untouched.
+# RAISING IT TO 3 WAS TRIED, AND REVERTED. The reasoning was that a spare node
+# would restore the platform headroom the sentence promised. A load test on
+# 2026-08-29 disproved it: with max_nodes = 3 the cluster went to SIX nodes and
+# the third autoscaled node ended up carrying one core replica, while the four
+# gateway replicas sat on the two static workers and only two autoscaled nodes.
 #
-# The general rule this restores: the autoscaler's ceiling must exceed what the
-# scheduled workloads can demand, or peak load and platform growth compete for
-# the same node and one of them loses. Sizing it to EXACTLY the application
-# ceiling leaves no margin for anything else in the cluster.
+#   max_nodes = 2   core=3 gateway=4   0 Pending   5 nodes   full ceiling placed
+#   max_nodes = 3   core=2 gateway=4   0 Pending   6 nodes   less load, more nodes
 #
+# The autoscaler adds a node whenever a pod is Pending, and during a ramp a core
+# replica is briefly Pending on CPU. Given a slot it will take one; given none it
+# waits, and the pods land anyway -- which is what the max_nodes = 2 run shows.
+# Spare capacity next to a scaling workload is not headroom, it is a node that
+# gets used and billed.
+#
+# So the honest position: this pool is sized to exactly seat the application at
+# its HPA ceiling, and there is NO headroom for platform growth on top of that.
+# If Loki or Prometheus grows while the gateway is at ceiling, something will be
+# Pending. That is a real limitation of a two-worker dev cluster rather than a
+# thing to fix by raising a number, and it is written here so the next person
+# reads it before repeating the experiment.
+
 # This used to say the HPA ceilings were "3.5 cores of NEW demand beyond the
 # current floor, and one extra cx33 (4 vCPU) absorbs it". The arithmetic counted
 # the ceiling TOTAL instead of the delta: 4 gateway and 3 core at 500m is 3,500m
@@ -216,7 +226,7 @@ autoscaler_nodepools = [
     server_type = "cx33"
     location    = "fsn1"
     min_nodes   = 0
-    max_nodes   = 3
+    max_nodes   = 2
     # No network_scope, same as the static pool above. The module is handed
     # `autoscaler_nodepools = []`, and the network a scaled node joins comes
     # from network_id in manifests/30-cluster-autoscaler.
