@@ -102,7 +102,21 @@ spec:
           # data-path component changes what is running without a commit, and
           # the tag is kept alongside only so a reader knows which version the
           # digest is.
-          image: valkey/valkey@sha256:e706d1213aaba6896c162bb6a3a9e1894e1a435f28f8f856d14fab2e10aa098b  # 8.1.4-alpine
+          #
+          # BUMPED because the first scan of it found what nobody had looked at
+          # (T-6.10, #332). The previous digest carried 30 findings, 3 of them
+          # CRITICAL, the worst being CVE-2026-31789 -- a heap buffer overflow
+          # in OpenSSL, fixed in libcrypto3 3.5.6-r0 against the 3.5.4-r0 that
+          # image shipped. This one carries 3.5.7-r0.
+          #
+          # It had been running in dev since T-2.11, unscanned, because
+          # security.yml only looked at the images this repository builds. That
+          # is the whole argument for T-6.8 in one image.
+          #
+          # The trailing comment names the tag this digest was resolved from and
+          # the date, rather than a patch version: `8.1-alpine` moves, so a bare
+          # version would not let a reader get back to this exact build.
+          image: valkey/valkey@sha256:e0eb7c480958d32bdc4357a74bdd70653ae15f2f9b4c93c4a5a9fad1dc471c84  # 8.1-alpine, resolved 2026-08-28; libcrypto3 3.5.7-r0
           args: ["/etc/valkey/valkey.conf"]
           ports:
             - {name: valkey, containerPort: 6379}
