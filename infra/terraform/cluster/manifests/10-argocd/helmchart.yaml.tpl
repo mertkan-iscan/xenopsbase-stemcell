@@ -78,9 +78,53 @@ spec:
       # rather than a problem to solve now.
       enabled: false
 
+      # BUT IT MUST STILL DECLARE ITSELF (T-2.23, #306).
+      #
+      # Because the disable does not take effect, this controller runs with no
+      # requests at all -- which makes it BestEffort. A BestEffort pod is
+      # invisible to the scheduler when it places anything else, and it is the
+      # first thing the kubelet evicts under node memory pressure. So the
+      # component that reconciles ApplicationSets is the one most likely to be
+      # killed exactly when the cluster is under strain.
+      #
+      # Measured at 35-51Mi and 1-2m on an idle cluster; 64Mi is the same 1.25x
+      # factor used below, rounded up. Small numbers, but declared ones: the
+      # scheduler can only work with what it is told.
+      resources:
+        requests: {cpu: 25m, memory: 64Mi}
+
+    # ARGO CD'S REQUESTS COME FROM MEASUREMENT, NOT FROM THE CHART (T-2.23, #306).
+    #
+    # THE FACTOR: requests are 1.25x measured steady-state usage, rounded up to a
+    # round number. Written down because a number nobody can re-derive is a
+    # number nobody can check.
+    #
+    # Measured on dev, 2026-08-29, with core and gateway deployed and the
+    # platform idle:
+    #
+    #   component     was      measured   now     note
+    #   controller    256Mi    823Mi      1Gi     was 3.2x under
+    #   repo-server   128Mi    193Mi      256Mi   was 1.5x under
+    #   server        128Mi     73Mi      96Mi    was over-booked
+    #   redis          64Mi     20Mi      32Mi    was over-booked
+    #
+    # WHY UNDER-REQUESTING IS A SCHEDULING DEFECT, not a tuning nit: the
+    # scheduler places by REQUESTS. A controller declared at 256Mi that needs
+    # 823Mi means every placement decision involving it is wrong by 567Mi -- the
+    # node accepts it, then discovers the truth later under memory pressure, by
+    # evicting something. dev.tfvars already records that exact failure as
+    # settled history (T-1.12, #133); the mechanism underneath it was never
+    # addressed.
+    #
+    # CPU IS DELIBERATELY LEFT ALONE. Measured draw is 1-6m per pod, far under
+    # the requests here, but that is an IDLE cluster: the controller bursts
+    # while reconciling and the repo-server while rendering manifests. Sizing
+    # CPU down from a quiet measurement would book capacity correctly for the
+    # only moment it does not matter. Memory is the axis that gets pods evicted,
+    # and memory is what this changes.
     server:
       resources:
-        requests: {cpu: 50m, memory: 128Mi}
+        requests: {cpu: 50m, memory: 96Mi}
 
     # KSOPS: the cost ADR-0004 knowingly accepted when choosing Argo CD over
     # Flux, which decrypts SOPS natively. Argo needs the binary injected into
@@ -88,7 +132,7 @@ spec:
     # render time rather than anything decrypted being stored in the cluster.
     repoServer:
       resources:
-        requests: {cpu: 50m, memory: 128Mi}
+        requests: {cpu: 50m, memory: 256Mi}
 
       initContainers:
         # NOT the viaductoss/ksops image, despite that being the recipe in most
@@ -143,7 +187,8 @@ spec:
           value: /home/argocd/.config/sops/age/keys.txt
     controller:
       resources:
-        requests: {cpu: 100m, memory: 256Mi}
+        # The one that matters: 823Mi measured against a 256Mi request.
+        requests: {cpu: 100m, memory: 1Gi}
     redis:
       resources:
-        requests: {cpu: 25m, memory: 64Mi}
+        requests: {cpu: 25m, memory: 32Mi}

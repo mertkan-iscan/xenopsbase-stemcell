@@ -53,9 +53,40 @@ agent_nodepools = [
 # continuously to be ready for a load that arrives during working sessions --
 # which is the cost model ADR-0002 exists to avoid.
 #
-# max_nodes = 2 is headroom for the platform growing underneath -- Loki and
-# Prometheus are the ones that move -- and NOT for application replicas.
+# max_nodes = 2, and WHAT THE POOL IS ACTUALLY FOR (T-2.23, #306).
 #
+# This said "max_nodes = 2 is headroom for the platform growing underneath --
+# Loki and Prometheus are the ones that move -- and NOT for application
+# replicas". The number was right and the sentence was wrong.
+#
+# gateway.yaml requires one replica per node and maxReplicas is 4, so at ceiling
+# the gateway needs four untainted nodes -- two static plus two from this pool.
+# Its own comment says exactly that: "four replicas have four nodes available --
+# exactly enough". So the pool IS for application replicas, and the claim that
+# it was reserved for platform growth was never true of the running system.
+#
+# RAISING IT TO 3 WAS TRIED, AND REVERTED. The reasoning was that a spare node
+# would restore the platform headroom the sentence promised. A load test on
+# 2026-08-29 disproved it: with max_nodes = 3 the cluster went to SIX nodes and
+# the third autoscaled node ended up carrying one core replica, while the four
+# gateway replicas sat on the two static workers and only two autoscaled nodes.
+#
+#   max_nodes = 2   core=3 gateway=4   0 Pending   5 nodes   full ceiling placed
+#   max_nodes = 3   core=2 gateway=4   0 Pending   6 nodes   less load, more nodes
+#
+# The autoscaler adds a node whenever a pod is Pending, and during a ramp a core
+# replica is briefly Pending on CPU. Given a slot it will take one; given none it
+# waits, and the pods land anyway -- which is what the max_nodes = 2 run shows.
+# Spare capacity next to a scaling workload is not headroom, it is a node that
+# gets used and billed.
+#
+# So the honest position: this pool is sized to exactly seat the application at
+# its HPA ceiling, and there is NO headroom for platform growth on top of that.
+# If Loki or Prometheus grows while the gateway is at ceiling, something will be
+# Pending. That is a real limitation of a two-worker dev cluster rather than a
+# thing to fix by raising a number, and it is written here so the next person
+# reads it before repeating the experiment.
+
 # This used to say the HPA ceilings were "3.5 cores of NEW demand beyond the
 # current floor, and one extra cx33 (4 vCPU) absorbs it". The arithmetic counted
 # the ceiling TOTAL instead of the delta: 4 gateway and 3 core at 500m is 3,500m
@@ -72,10 +103,61 @@ agent_nodepools = [
 # anything, and a k6 load will never produce a scale-up -- which is what the
 # last clause always said, and what the corrected arithmetic now agrees with.
 #
-# That property is worth keeping and is T-2.8's fourth criterion now: the fixed
-# workers are sized for peak application load, so the application never waits
-# for a node to appear before it can serve. It stops being true the moment
-# someone raises an HPA ceiling or a request past what two cx33s can seat.
+# THE MEMORY AXIS, MEASURED (T-2.23, #306). Everything above is CPU. The memory
+# arithmetic had never been done, so here it is -- with the caveat that it is
+# NOT what binds first.
+#
+# With Argo CD's requests corrected from measurement (the controller was
+# declared at 256Mi and using 823Mi) and the apps at their HPA ceiling:
+#
+#   all-namespace requests, measured 2026-08-29   10744Mi
+#     after the Argo CD correction                11576Mi
+#     with the apps at their ceiling              14584Mi
+#   less what the tainted control plane carries      672Mi
+#   to seat on the two fixed workers              13912Mi
+#   two cx33 allocatable                          14306Mi
+#                                                 => 97% booked
+#
+# 97% looks alarming and is largely fiction: keycloak books 2918Mi against
+# 869Mi used, and cluster-wide requests exceed actual usage by 3.3GB (0.69x).
+# Only argocd (2.0x) and kube-system (1.4x) under-declare.
+#
+# WHAT ACTUALLY BINDS IS NODE COUNT, NOT MEMORY. The gateway's one-replica-per-
+# node rule means four replicas need four nodes regardless of how much memory
+# each node has; a bigger node type would not help. The load test confirmed it:
+# every FailedScheduling event named `Insufficient cpu` and anti-affinity, and
+# none named memory.
+#
+# Correcting keycloak's over-declaration is its own measurement and its own
+# card. This block is here so the next person to raise an HPA ceiling knows the
+# memory numbers are recorded and that node count is the constraint to check
+# first.
+
+# THAT LAST CLAUSE WAS WRONG, AND A LOAD TEST SHOWED IT (T-2.23, #306).
+#
+# This used to say the fixed workers "are sized for peak application load, so
+# the application never waits for a node to appear before it can serve", and
+# above it that "a k6 load will never produce a scale-up". `make load` on
+# 2026-08-29 produced one:
+#
+#   01:33:37  core=1 gateway=2   2 Pending   3 nodes
+#   01:34:20  core=1 gateway=4   0 Pending   5 nodes
+#   01:36:29  core=3 gateway=4   0 Pending   5 nodes   <- ceiling, all placed
+#   01:57:31  core=1 gateway=2   0 Pending   3 nodes   <- drained
+#
+# The SLOs held throughout -- 472,105 checks, zero failures, p95 11.93ms.
+#
+# It waits for a node BY DESIGN, and the design is right. gateway.yaml requires
+# one replica per node because T-5.12 measured two on one node costing 1.7x the
+# CPU for the same work, and it says plainly that "the fourth replica goes
+# Pending, and Pending is the one signal the cluster-autoscaler listens to".
+# Pending is the mechanism, not a fault.
+#
+# So the correct statement is the opposite of the old one: the fixed workers
+# seat the application at its FLOOR, and reaching the HPA ceiling requires the
+# autoscaled pool by design. What the scheduler actually reported when it
+# blocked was `Insufficient cpu` and `didn't match pod anti-affinity rules` --
+# memory was never mentioned.
 #
 # cx33 to match the fixed workers. A smaller type would schedule pods that then
 # cannot get the CPU the HPA sized them against, and the autoscaler would keep
