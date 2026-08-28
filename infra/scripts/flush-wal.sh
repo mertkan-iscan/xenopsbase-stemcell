@@ -49,7 +49,53 @@ cd "$ROOT" || exit 1
 
 ENVIRONMENT="${1:-dev}"
 NAMESPACE="${DB_NAMESPACE:-database}"
-TIMEOUT="${FLUSH_TIMEOUT:-120}"
+# LONGER THAN THE ARCHIVER'S OWN CADENCE (T-7.13, #295).
+#
+# This was 120s against an `archive_timeout` of 300s -- a window shorter than
+# the thing it waits on. pg_switch_wal() closes the segment and the archiver
+# normally ships it in seconds, so the short window usually worked; but an
+# archiver that has just failed backs off, and then 120s cannot succeed on
+# timing alone. `make down` refused to proceed while archiving was demonstrably
+# healthy, with base backups 20 minutes old and WAL 4 minutes old in the same
+# run.
+#
+# 420s is one full archive_timeout period (300s) plus the 120s this originally
+# allowed, so a segment that has to wait out a complete cycle plus a retry still
+# fits. It is a ceiling, not a delay: the wait exits as soon as the segment
+# lands, which is usually within seconds.
+TIMEOUT="${FLUSH_TIMEOUT:-420}"
+
+# THE BUCKET IS THE FACT (T-7.13, #295).
+#
+# This used to watch `archived_count` increase, which is the archiver's claim
+# about its own work rather than the thing being asked. verify-backup.sh gets
+# this right one script over and says why: "The bucket is the fact; the
+# Cluster's green condition is a claim about it." The question here is whether
+# the switched segment reached object storage, and that is directly checkable.
+#
+# barman-cloud lays WAL out as <server>/wals/<first 16 chars>/<segment>.gz --
+# verified against the live bucket rather than assumed.
+BUCKET="xenopsbase-${ENVIRONMENT}-pg-backups"
+ENDPOINT="${HETZNER_S3_ENDPOINT:-https://fsn1.your-objectstorage.com}"
+CLUSTER_YAML="$ROOT/platform/envs/${ENVIRONMENT}/database/cluster.yaml"
+SERVER_NAME="$(sed -n 's/^[[:space:]]*serverName:[[:space:]]*\([A-Za-z0-9_-]*\).*/\1/p' "$CLUSTER_YAML" 2>/dev/null | head -1)"
+
+# Credentials are NOT required. flush-wal runs even under SKIP_BACKUP_CHECK=1 --
+# which is exactly the half-destroyed recovery path T-7.10 (#291) recommends --
+# so refusing to run without them would block the one command that unsticks a
+# failed drill. When they are absent the counter check is used instead, and the
+# output says which check actually ran rather than implying the stronger one.
+CAN_READ_BUCKET=0
+if [ -n "${TF_VAR_hetzner_s3_access_key:-}" ] && [ -n "${TF_VAR_hetzner_s3_secret_key:-}" ] && [ -n "$SERVER_NAME" ]; then
+  export AWS_ACCESS_KEY_ID="$TF_VAR_hetzner_s3_access_key"
+  export AWS_SECRET_ACCESS_KEY="$TF_VAR_hetzner_s3_secret_key"
+  CAN_READ_BUCKET=1
+fi
+
+# Is this exact segment in object storage?
+segment_archived() {
+  aws --endpoint-url "$ENDPOINT" s3api head-object     --bucket "$BUCKET"     --key "${SERVER_NAME}/wals/${1:0:16}/${1}.gz" >/dev/null 2>&1
+}
 
 # This project's kubeconfig, unconditionally -- an inherited KUBECONFIG points
 # at whatever cluster the developer last used, and this one issues a write.
@@ -94,24 +140,52 @@ echo "    switched at segment ${segment}"
 # afterwards, and destroying between the two loses exactly what this was meant
 # to save.
 deadline=$(( $(date +%s) + TIMEOUT ))
-while :; do
-  after="$(kubectl -n "$NAMESPACE" exec "${PRIMARY##*/}" -c postgres -- \
-    psql -U postgres -tAc "select archived_count from pg_stat_archiver;" 2>/dev/null | tr -d '[:space:]')"
-  failed="$(kubectl -n "$NAMESPACE" exec "${PRIMARY##*/}" -c postgres -- \
-    psql -U postgres -tAc "select last_failed_wal from pg_stat_archiver;" 2>/dev/null | tr -d '[:space:]')"
+waited=0
 
-  if [ -n "$after" ] && [ -n "$before" ] && [ "$after" -gt "$before" ]; then
-    echo "    archived (count ${before} -> ${after})"
-    exit 0
+while :; do
+  if [ "$CAN_READ_BUCKET" = "1" ]; then
+    # The question, asked directly.
+    if segment_archived "$segment"; then
+      echo "    ${segment}.gz is in ${BUCKET} (${waited}s) — nothing committed is at risk"
+      exit 0
+    fi
+  else
+    after="$(kubectl -n "$NAMESPACE" exec "${PRIMARY##*/}" -c postgres -- \
+      psql -U postgres -tAc "select archived_count from pg_stat_archiver;" 2>/dev/null | tr -d '[:space:]')"
+    if [ -n "$after" ] && [ -n "$before" ] && [ "$after" -gt "$before" ]; then
+      echo "    archiver count rose ${before} -> ${after} (${waited}s)"
+      echo "    NOTE: this is the archiver's claim, not the bucket. No object-storage"
+      echo "    credentials in the environment, so the segment itself was not checked."
+      echo "    source ~/.xenopsbase.env to get the stronger check."
+      exit 0
+    fi
   fi
 
   if [ "$(date +%s)" -ge "$deadline" ]; then
-    echo "    WAL did not archive within ${TIMEOUT}s." >&2
-    [ -n "$failed" ] && echo "    last failed segment: ${failed}" >&2
+    echo "    ${segment} did not reach the archive within ${TIMEOUT}s." >&2
+
+    # ONLY A FAILURE THAT IS ACTUALLY CURRENT (T-7.13, #295).
+    #
+    # last_failed_wal is sticky in pg_stat_archiver: it keeps naming the last
+    # segment that ever failed, long after it succeeded. This reported
+    # `00000018.history` as the problem while that same file sat archived in
+    # the bucket -- pointing the operator at a red herring while telling them
+    # they were about to lose data. Comparing the two timestamps is the whole
+    # fix: a failure older than the last success is history, not news.
+    failed="$(kubectl -n "$NAMESPACE" exec "${PRIMARY##*/}" -c postgres -- \
+      psql -U postgres -tAc "select case when last_failed_time > last_archived_time then last_failed_wal else '' end from pg_stat_archiver;" 2>/dev/null | tr -d '[:space:]')"
+    if [ -n "$failed" ]; then
+      echo "    the archiver is currently failing, most recently on: ${failed}" >&2
+    else
+      echo "    the archiver reports no failure more recent than its last success," >&2
+      echo "    so this looks like a slow ship rather than a broken archive." >&2
+    fi
+
     echo "    Destroying now would lose everything committed since the last" >&2
     echo "    successful archive. Check: make backup-status ENV=${ENVIRONMENT}" >&2
     exit 1
   fi
 
   sleep 3
+  waited=$(( waited + 3 ))
 done
