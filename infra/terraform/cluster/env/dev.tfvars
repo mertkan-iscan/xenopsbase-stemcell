@@ -72,6 +72,38 @@ agent_nodepools = [
 # anything, and a k6 load will never produce a scale-up -- which is what the
 # last clause always said, and what the corrected arithmetic now agrees with.
 #
+# THE MEMORY AXIS, RE-DERIVED (T-2.23, #306). Everything above is CPU. The
+# memory arithmetic had never been done, and it does not come out the same way.
+#
+# With Argo CD's requests corrected from measurement (#306 -- the controller was
+# declared at 256Mi and using 823Mi), and the apps at their HPA ceiling of
+# 3 core and 4 gateway:
+#
+#   all-namespace requests, measured 2026-08-29   10744Mi
+#     after the Argo CD correction                11576Mi
+#     with the apps at their ceiling              14584Mi
+#   less what the tainted control plane carries      672Mi
+#   to seat on the two fixed cx33 workers         13912Mi
+#   two cx33 allocatable                          14306Mi
+#                                                 => 97% booked
+#
+# So on CPU the ceiling leaves 2555m free and five pods of room; on MEMORY it
+# leaves 394Mi across both workers, under 3%. The fourth criterion below --
+# "the fixed workers are sized for peak application load, so the application
+# never waits for a node to appear" -- holds on CPU and is marginal on memory.
+#
+# It is marginal rather than broken, and the distinction matters: 2918Mi of that
+# total is booked by keycloak against 869Mi actually used, so most of the
+# pressure is other namespaces over-declaring rather than real consumption.
+# Cluster-wide the ratio is 0.69x -- requests exceed usage by 3.3GB. The
+# scheduler cannot know that, which is exactly why it is a problem: it places by
+# requests, and by requests these workers are nearly full at ceiling.
+#
+# Not fixed here, deliberately. Correcting keycloak's over-declaration is its
+# own measurement and its own card; this comment exists so the next person to
+# raise an HPA ceiling or a memory request knows which axis binds first, and
+# that it is no longer CPU.
+
 # That property is worth keeping and is T-2.8's fourth criterion now: the fixed
 # workers are sized for peak application load, so the application never waits
 # for a node to appear before it can serve. It stops being true the moment
