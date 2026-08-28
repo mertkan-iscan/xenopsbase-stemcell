@@ -131,6 +131,104 @@ jobs:
           exit-code: '1'
 
   # ---------------------------------------------------------------------------
+  platform-images:
+    name: platform image list
+    # Same trigger as `image`: after main, on a clock, or by hand. A pull
+    # request that ADDS an off-the-shelf image therefore does not get it scanned
+    # until merge, which is a real gap and is called out on #329 rather than
+    # papered over -- closing it means deciding what a third-party CVE should do
+    # to somebody else's pull request, and that belongs with T-6.2.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Which images does platform/ declare
+        id: list
+        run: |
+          # Printed as well as captured. A matrix that materialises out of a
+          # JSON blob nobody can read is one nobody can check.
+          python infra/scripts/platform-images.py
+          echo "matrix=$(python infra/scripts/platform-images.py --matrix)" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  platform-image:
+    name: platform image scan
+    needs: platform-images
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      # Derived from the manifests, not listed here. See
+      # infra/scripts/platform-images.py for why restating it would rebuild the
+      # weakness this job exists to fix.
+      matrix: ${{ fromJSON(needs.platform-images.outputs.matrix) }}
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: What is being scanned, and how precisely
+        run: |
+          echo "image:        ${{ matrix.ref }}"
+          echo "declared in:  ${{ matrix.declared_in }}"
+          if [ "${{ matrix.pinned }}" = "true" ]; then
+            echo "pinned:       by digest — this is exactly what the kubelet pulls"
+          else
+            echo "pinned:       BY TAG ONLY — this describes whatever the tag means now,"
+            echo "              which is not necessarily what the kubelet pulled. Findings"
+            echo "              are reported; this image cannot fail the job. See #330."
+          fi
+
+      - name: Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ matrix.ref }}
+          format: sarif
+          output: trivy-platform-${{ matrix.name }}.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          # Report first, gate second — the same split the `image` job uses, so
+          # a failure still lands in the Security tab rather than leaving it
+          # empty on the run that mattered.
+          exit-code: '0'
+
+      - name: Upload findings
+        if: always()
+        uses: github/codeql-action/upload-sarif@42947a340483f03ba47bb1a039b2c519aab3df85 # v3.37.8
+        with:
+          sarif_file: trivy-platform-${{ matrix.name }}.sarif
+          category: trivy-platform-${{ matrix.name }}
+
+      # THE GATE, AND WHY IT IS CONDITIONAL
+      #
+      # Only digest-pinned images can fail this job. Not squeamishness about
+      # third-party findings -- a precision argument. A digest names one
+      # artefact, so a finding against it is a fact about what is running and
+      # the fix is deterministic: repin. A tag does not, so failing on it would
+      # block merges on a scan of something the cluster may not even be running.
+      #
+      # It also puts the incentive the right way round. Pinning an image buys
+      # you a gate; leaving it on a tag buys you a report. Four of the six are
+      # tag-pinned today and #330 tracks changing that.
+      - name: Fail on high or critical
+        if: matrix.pinned
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ matrix.ref }}
+          format: table
+          severity: HIGH,CRITICAL
+          # Same reasoning as the `image` job: a CRITICAL with no available fix
+          # cannot be actioned here, and failing on it makes the gate
+          # permanently red for reasons nobody can resolve.
+          ignore-unfixed: true
+          exit-code: '1'
+
+  # ---------------------------------------------------------------------------
   sbom:
     name: SBOM
     if: github.event_name != 'pull_request'
