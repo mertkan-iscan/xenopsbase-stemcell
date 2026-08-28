@@ -78,6 +78,21 @@ spec:
       # rather than a problem to solve now.
       enabled: false
 
+      # BUT IT MUST STILL DECLARE ITSELF (T-2.23, #306).
+      #
+      # Because the disable does not take effect, this controller runs with no
+      # requests at all -- which makes it BestEffort. A BestEffort pod is
+      # invisible to the scheduler when it places anything else, and it is the
+      # first thing the kubelet evicts under node memory pressure. So the
+      # component that reconciles ApplicationSets is the one most likely to be
+      # killed exactly when the cluster is under strain.
+      #
+      # Measured at 35-51Mi and 1-2m on an idle cluster; 64Mi is the same 1.25x
+      # factor used below, rounded up. Small numbers, but declared ones: the
+      # scheduler can only work with what it is told.
+      resources:
+        requests: {cpu: 25m, memory: 64Mi}
+
     # ARGO CD'S REQUESTS COME FROM MEASUREMENT, NOT FROM THE CHART (T-2.23, #306).
     #
     # THE FACTOR: requests are 1.25x measured steady-state usage, rounded up to a
