@@ -215,6 +215,19 @@ jobs:
       # It also puts the incentive the right way round. Pinning an image buys
       # you a gate; leaving it on a tag buys you a report. Four of the six are
       # tag-pinned today and #330 tracks changing that.
+      #
+      # AND WHY IT NEEDS AN IGNORE FILE (T-6.10, #332)
+      #
+      # `ignore-unfixed` filters on whether a fixed PACKAGE exists. For an image
+      # this repository does not build, what decides whether anyone here can act
+      # is whether a fixed IMAGE exists, and those differ. The first run of this
+      # job proved it: curl was red for a c-ares fix that Alpine had shipped and
+      # curlimages had not rebuilt against, so there was nothing to repin to.
+      #
+      # .trivyignore carries those, each with the evidence that no rebuilt image
+      # exists. It is passed HERE ONLY -- the reporting step above does not read
+      # it, so an ignored finding still reaches the Security tab and still
+      # appears in the run. It stops failing a build; it does not vanish.
       - name: Fail on high or critical
         if: matrix.pinned
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -226,6 +239,7 @@ jobs:
           # cannot be actioned here, and failing on it makes the gate
           # permanently red for reasons nobody can resolve.
           ignore-unfixed: true
+          trivyignores: .trivyignore
           exit-code: '1'
 
   # ---------------------------------------------------------------------------
