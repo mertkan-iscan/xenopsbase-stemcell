@@ -80,3 +80,29 @@ extra_hostnames = [
 # access_allowed_emails is deliberately NOT here. It is a personal identifier
 # and this file is public; it lives in dev.secrets.tfvars.
 manage_access = true
+
+# TEMPORARY — THE T-3.18 EXPERIMENT (#175). PUT THIS BACK TO true.
+#
+# Access is removed from app-dev.xenopsoftware.com, and from nothing else, to
+# test the last untested variable on that card: whether a browser crossing
+# cloudflareaccess.com mid-flow is what orphans the saved OIDC authorization
+# request.
+#
+# Everything reachable without a browser has already been excluded. 105
+# automated runs of the authorization-code flow found their saved authorization
+# request 105 times, across both replicas, with a positive control proving the
+# harness could see the failure. The card has been open since 2026-08-22 on
+# exactly this question.
+#
+# THIS DOES NOT TOUCH THE DASHBOARDS. grafana-dev, prometheus-dev,
+# alertmanager-dev and argocd-dev keep their Access applications, which matters
+# because Prometheus and Alertmanager have no login of their own -- see the note
+# above the dashboard resource in main.tf. Setting manage_access = false would
+# have removed those too, and the service token with them.
+#
+# WHAT IS EXPOSED: app-dev answers without an Access challenge. The Keycloak
+# login and the WAF ruleset are both still in force, so this is the outer layer
+# on one hostname of a disposable environment, not an open door.
+#
+# REVERT: delete this line, then apply the edge module. #175 tracks it.
+access_protect_app = false
