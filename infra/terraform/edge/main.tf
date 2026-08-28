@@ -323,7 +323,12 @@ resource "cloudflare_zero_trust_access_service_token" "automation" {
 }
 
 resource "cloudflare_zero_trust_access_application" "app" {
-  count = var.manage_access ? 1 : 0
+  # access_protect_app is the T-3.18 experiment switch and is true everywhere
+  # except while that investigation is running. It gates THIS resource only --
+  # the dashboards, policies and service token below are deliberately outside
+  # it, because Prometheus and Alertmanager have no login of their own and
+  # Access is their only control.
+  count = var.manage_access && var.access_protect_app ? 1 : 0
 
   account_id = var.account_id
   name       = "xenopsbase-${var.environment}"

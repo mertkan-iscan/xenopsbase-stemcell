@@ -175,6 +175,48 @@ variable "extra_hostnames" {
   }
 }
 
+variable "access_protect_app" {
+  description = <<-EOT
+    Keep Cloudflare Access in front of the APPLICATION hostname specifically
+    (T-3.18, #175). Default true. Independent of manage_access on purpose.
+
+    THIS EXISTS FOR ONE EXPERIMENT, AND SHOULD BE TRUE EVERYWHERE ELSE.
+
+    #175 is an intermittent login dead-end that only a real browser reproduces.
+    Everything reachable without one has been excluded -- 105 automated attempts
+    through the authorization-code flow found their saved authorization request
+    105 times, across both replicas. The remaining untested variable is the
+    browser crossing cloudflareaccess.com mid-flow, and the only way to test it
+    is to take Access out of that path and see whether the failures stop.
+
+    WHY NOT JUST SET manage_access = false
+
+    Because it removes far more than the application. `manage_access` also gates
+    `local.access_dashboard_hostnames`, so turning it off destroys the Access
+    applications for grafana-dev, prometheus-dev, alertmanager-dev and
+    argocd-dev -- and as the comment above the dashboard resource says,
+    Prometheus and Alertmanager have NO authentication of their own. Access is
+    not defence in depth for those two, it is the only control, and
+    Alertmanager's API can silence alerting.
+
+    It would also destroy the service token that CI's smoke run drives the
+    application with.
+
+    So this variable removes Access from the application hostname and nothing
+    else. The dashboards, the policies and the service token are untouched.
+
+    WHAT IS EXPOSED WHILE IT IS FALSE
+
+    app-dev answers without an Access challenge. It is not open: the gateway
+    still requires a Keycloak login for anything authenticated, and the WAF
+    ruleset still applies. What is lost is the outer layer, on one hostname, in
+    a disposable environment.
+  EOT
+
+  type    = bool
+  default = true
+}
+
 variable "manage_access" {
   description = <<-EOT
     Put Cloudflare Access in front of the application hostname (T-8.6, #149).
