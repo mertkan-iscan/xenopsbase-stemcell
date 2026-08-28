@@ -168,23 +168,52 @@ while :; do
     # initialising or waiting on a dependency has not failed at all, and the
     # initContainer T-3.24 added makes that second state both common and
     # correct: Init:0/1 while Keycloak comes up is the fix working, not a fault.
-    echo "" >&2
-    echo "Pods that are not Running:" >&2
-    # `print` rather than `printf` with an escaped newline: the escape did
-    # not survive being written into this file and awk died on an
-    # unterminated string, so the list was empty in the one run that needed
-    # it. sprintf keeps the columns; print supplies the line ending.
-    kc get pods -A --no-headers 2>/dev/null \n      | awk '$4!="Running" && $4!="Completed" {print sprintf("  %-14s %-44s %-28s restarts=%s", $1, $2, $4, $5)}' >&2
+    # Gathered ONCE, into a variable. Asking twice raced a cluster that changes
+    # between calls and produced a count that disagreed with the list under it.
+    #
+    # No line continuations anywhere in here. The previous two attempts at this
+    # block were both broken by an escape that did not survive being written
+    # into the file -- first a newline inside the awk program, which killed awk
+    # on an unterminated string, then a backslash-n where a continuation was
+    # meant, which fed `n` to kubectl as an argument and produced nothing at
+    # all. Both times the list was empty in the one run that needed it.
+    notrunning=$(kc get pods -A --no-headers 2>/dev/null | awk '$4!="Running" && $4!="Completed" {print sprintf("  %-14s %-44s %-28s restarts=%s", $1, $2, $4, $5)}')
+    listed=$(printf '%s' "$notrunning" | grep -c '[^[:space:]]')
+    failing=$(printf '%s' "$notrunning" | grep -Ec 'CrashLoopBackOff|Error|ImagePullBackOff|ErrImagePull|CreateContainerConfigError')
 
-    # Failing, not merely unfinished. Includes the Init: variants, which is how
-    # a crash-looping initContainer presents.
-    failing=$(kc get pods -A --no-headers 2>/dev/null       | awk '$4 ~ /CrashLoopBackOff|Error|ImagePullBackOff|ErrImagePull|CreateContainerConfigError/'       | wc -l | tr -d ' ')
-
     echo "" >&2
+    if [ "${listed:-0}" -gt 0 ]; then
+      echo "Pods that are not Running:" >&2
+      echo "$notrunning" >&2
+      echo "" >&2
+    fi
+
     if [ "${failing:-0}" -gt 0 ]; then
       echo "NOT GOING TO FINISH: ${failing} pod(s) above are failing and being backed off." >&2
       echo "  Waiting longer repeats the same failure. Read them:" >&2
       echo "    kubectl logs -n <namespace> <pod> --previous" >&2
+    elif [ "${listed:-0}" -eq 0 ]; then
+      # THE CASE THAT READ AS SUCCESS (T-2.24, #327).
+      #
+      # An Application is unhealthy and yet every pod in the cluster is Running
+      # or Completed. Nothing is failing, and -- the part that matters -- nothing
+      # is PENDING either. So the workload the Application declares was never
+      # created, which is a controller that has not reconciled rather than a slow
+      # start, and no amount of waiting changes it.
+      #
+      # The first version of this classifier only looked at pod states, found
+      # nothing wrong, and printed STILL CONVERGING about a cluster that never
+      # would. That is the failure this whole message exists to prevent, so it is
+      # worth stating plainly: an empty list is not evidence of health, it is
+      # evidence that nothing is even trying.
+      echo "NOTHING IS EVEN STARTING: no pod is failing, and none is pending either." >&2
+      echo "  Every pod in the cluster is Running or Completed while an Application above is" >&2
+      echo "  not Healthy, which means the workload it declares was never created. That is a" >&2
+      echo "  controller or operator that has not reconciled, not a slow start." >&2
+      echo "  Look at what the Application owns, and at whatever should have acted on it:" >&2
+      echo "    kubectl -n argocd get app <name> -o json | jq .status.resources" >&2
+      echo "  #327 is exactly this shape: a Prometheus CR carrying no status at all and no" >&2
+      echo "  StatefulSet behind it, on a cluster where every single pod was healthy." >&2
     else
       echo "STILL CONVERGING: nothing is crash-looping or failing to pull." >&2
       echo "  Every pod above is pulling, initialising, or waiting on a dependency -- slow" >&2
