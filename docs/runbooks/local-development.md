@@ -13,6 +13,29 @@ Two, and the second is found for you.
 - **A JDK 25.** `infra/scripts/java-home.sh` locates one; if it cannot, it says which JDKs it found
   and why none qualified.
 
+### Or skip both: the devcontainer
+
+`.devcontainer/` (T-4.4) carries the JDK, Node, Terraform and kubectl this repository expects, so
+"works on my machine" and "works in CI" stop being separate claims. Open the repository in VS Code
+and choose **Reopen in Container**, or start a **GitHub Codespace** on the branch.
+
+The versions are not chosen there. Three are copied from where they are already declared — the
+pom's `<java.version>`, `engines.node` in `package.json`, and `TF_VERSION` in
+`.github/workflows/terraform.yml` — and kubectl is derived at create time from `k3s_version` in
+`infra/packer/versions.pkrvars.hcl`, which is the one place this repository records what Kubernetes
+version its clusters run. Because copies drift, the container checks itself on every create, and
+you can ask it at any time:
+
+```bash
+make devcontainer-verify
+```
+
+It carries no age key, no `sops`, no `hcloud` and no kubeconfig, and the reasons are printed when
+the container is created. Everything under `infra/` that *applies* rather than validates is
+therefore a host operation, on purpose.
+
+The inner loop below is identical either way.
+
 ## One command
 
 ```bash

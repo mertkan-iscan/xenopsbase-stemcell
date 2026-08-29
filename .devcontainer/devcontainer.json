@@ -1,0 +1,125 @@
+// The development container (T-4.4, #38).
+//
+// WHAT THIS IS FOR
+//
+// docs/runbooks/local-development.md states the prerequisites as "two, and the
+// second is found for you": Docker, and a JDK 25. That is true and it is the
+// inner loop. It is not the whole repository -- Terraform, kubectl and Node are
+// needed the moment anyone touches infra/, platform/ or the formatter, and each
+// is a version that has to match something.
+//
+// This container is where those versions come from, so that "it works on my
+// machine" and "it works in CI" stop being separate claims.
+//
+// VERSIONS ARE DECLARED ONCE, AND CHECKED -- NOT RESTATED
+//
+// Three of the four pins below already exist elsewhere in this repository:
+//
+//   JDK 25         services/*/pom.xml  <java.version>, and CI's setup-java
+//   Node 24        services/*/package.json  engines.node
+//   Terraform      .github/workflows/terraform.yml  TF_VERSION
+//
+// A devcontainer feature needs a literal at build time, so these are written
+// twice by construction -- which is exactly the drift infra/packer/versions.pkrvars.hcl
+// exists to prevent for k3s. post-create.sh therefore runs verify-versions.sh,
+// which reads the declarations back out of those files and FAILS the container
+// when they disagree with what got installed. The number here is a copy; the
+// file it came from stays the source of truth.
+//
+// kubectl is not listed at all, for the same reason: post-create.sh derives it
+// from `k3s_version` in infra/packer/versions.pkrvars.hcl, which is the one
+// place this repository records what Kubernetes version its clusters run.
+{
+  "name": "xenopsbase-stemcell",
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+
+  "features": {
+    // Corretto, matching `distribution: corretto` in .github/workflows/services.yml.
+    // A different vendor's 25 would build fine and would still be a second
+    // toolchain nobody chose.
+    "ghcr.io/devcontainers/features/java:1": {
+      "version": "25",
+      "jdkDistro": "amzn",
+      "installMaven": false
+    },
+
+    // Maven comes from ./mvnw, never from the image. The wrapper pins the
+    // Maven version in the repository; an image-installed `mvn` on PATH is how
+    // somebody ends up building with a different one and not knowing.
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "24"
+    },
+
+    // Must match TF_VERSION in .github/workflows/terraform.yml. tflint is
+    // included because terraform.yml runs it on every plan, so a PR should be
+    // able to fail here rather than only in CI.
+    "ghcr.io/devcontainers/features/terraform:1": {
+      "version": "1.14.8",
+      "tflint": "latest",
+      "terragrunt": "none"
+    },
+
+    // Docker from the host, not a nested daemon. Testcontainers and
+    // `make dev-up` both want a real Docker, and docker-in-docker costs a
+    // privileged container and a second image cache for no benefit here.
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+      "moby": false
+    },
+
+    // `gh` is how the release, rollback and issue workflows are driven.
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+
+  // `make dev-up` brings up Postgres, Keycloak, MinIO and both services, and
+  // the services are JVMs. Four cores and 8 GB is the floor at which that is
+  // not painful; Codespaces refuses a machine smaller than this rather than
+  // letting somebody discover it during a 94-second startup that never ends.
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "8gb",
+    "storage": "32gb"
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "vscjava.vscode-java-pack",
+        "vmware.vscode-boot-dev-pack",
+        "hashicorp.terraform",
+        "ms-kubernetes-tools.vscode-kubernetes-tools",
+        "esbenp.prettier-vscode",
+        "redhat.vscode-yaml",
+        "github.vscode-github-actions"
+      ],
+      "settings": {
+        // Everything that runs in this container runs on Linux. A CRLF file
+        // written here fails at the shebang, which .gitattributes already
+        // guards against on commit -- this stops it being written in the first
+        // place.
+        "files.eol": "\n",
+        "java.configuration.updateBuildConfiguration": "interactive",
+        // Spotless owns Java formatting (`make format`, enforced by
+        // `make format-check` in CI and by the pre-commit hook), so the IDE
+        // must not have a second opinion about it. Two formatters produce a
+        // diff nobody wrote.
+        "java.format.enabled": false,
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+
+  // The port `make dev-up` prints first. The rest (8081 core, 9080 Keycloak,
+  // 9001 MinIO console) are deliberately not forwarded by default: they are
+  // debugging surfaces, and Codespaces makes a forwarded port a URL.
+  "forwardPorts": [8080],
+  "portsAttributes": {
+    "8080": {
+      "label": "application (gateway)",
+      "onAutoForward": "notify"
+    }
+  },
+
+  "remoteUser": "vscode"
+}
