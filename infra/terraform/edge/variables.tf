@@ -173,6 +173,18 @@ variable "extra_hostnames" {
     condition     = alltrue([for h in var.extra_hostnames : length(regexall("\\.", h.hostname)) == 2])
     error_message = "Every extra hostname must be exactly one label below the apex (two dots total); deeper names are not covered by Cloudflare's Universal SSL certificate."
   }
+
+  # Moved from check "access_opt_in_needs_access_enabled" for the reason above:
+  # it warned, and warnings do not stop applies. This one is worth more than a
+  # warning because the failure is silent and public -- every Access resource in
+  # this module is gated on manage_access, so with it off an `access = true`
+  # flag is ignored rather than honoured, and the hostname is served to the
+  # internet while reading as protected. Two of the dashboards behind it have no
+  # login of their own.
+  validation {
+    condition     = var.manage_access || length([for h in var.extra_hostnames : h.hostname if h.access]) == 0
+    error_message = "extra_hostnames opts a hostname into Access but manage_access is false, which would publish it with no Access in front of it. Set manage_access = true, or drop the access flag."
+  }
 }
 
 variable "access_protect_app" {
@@ -236,19 +248,85 @@ variable "manage_access" {
   default     = false
 }
 
-variable "access_allowed_emails" {
+variable "access_group_id" {
   description = <<-EOT
-    Email addresses permitted through Cloudflare Access.
+    The Cloudflare Access group whose members are admitted (T-6.11, #335).
 
-    Supplied from env/<environment>.secrets.tfvars, which is gitignored: this
-    is a personal identifier and this repository is public, the same reasoning
-    that keeps firewall_source_cidrs out of it.
+    A UUID, and deliberately in the TRACKED tfvars rather than the gitignored
+    ones: a group id identifies a container, not a person, so it is publishable
+    in a way the membership is not.
 
-    Access authenticates these with Cloudflare's built-in one-time PIN, so no
-    identity provider has to be configured to make it work.
+    WHY A GROUP RATHER THAN A LIST OF ADDRESSES
+
+    This was `access_allowed_emails`, supplied from env/<env>.secrets.tfvars
+    because the addresses are personal and this repository is public. That made
+    the policy unreconcilable from CI: the runner rebuilt the gitignored file
+    with only account_id and zone_id, so the variable fell back to [], and every
+    CI run planned to rewrite the team policy with an empty include. Cloudflare
+    refuses that -- after the apply had already destroyed the Access
+    application, leaving the module half-applied.
+
+    Moving membership into Cloudflare removes the problem rather than working
+    around it. There is nothing secret left for CI to be missing, so no
+    repository secret, no reconstruction step, and no value that differs between
+    a local apply and a CI one.
+
+    THE COST, STATED
+
+    Membership is now console-managed state that Terraform does not describe --
+    the thing ADR-0002 is otherwise against. It is accepted here because the
+    alternative was worse: the addresses were already outside the repository,
+    and the previous arrangement additionally meant nobody could reconcile the
+    policy at all. Terraform cannot manage the group either, because managing it
+    would need the member addresses and CI would then plan to empty it -- the
+    same failure one resource sideways.
+
+    THE RESIDUAL RISK, AND WHAT CHECKS IT
+
+    A group deleted or emptied in the console is invisible to Terraform. The id
+    stays a well-formed UUID, the plan is clean, the policy applies, and the
+    result is a policy that admits nobody -- this card's failure arriving by
+    another road.
+
+    `make preflight edge` asks Cloudflare whether this id resolves, and fails on
+    404. That probe needs Account / Access: Groups / Read on the edge token,
+    which is a NARROWER permission than the module's others: read-only, because
+    Terraform must never manage this group.
+
+    The permission was missing when this was written -- the probe was refused on
+    exactly this endpoint (403, "Authentication error") and held back until it
+    was added. The 403 arm survives in preflight so that losing it again is
+    caught there rather than by a policy that quietly admits nobody.
   EOT
-  type        = list(string)
-  default     = []
+  type        = string
+  default     = ""
+
+  # A VALIDATION, NOT A `check` BLOCK, AND THE DIFFERENCE IS THE WHOLE CARD.
+  #
+  # This assertion existed before T-6.11, as check "access_has_someone_to_admit"
+  # in main.tf, described as refusing the combination that locks everyone out.
+  # A check block CANNOT refuse anything: a failed assertion is a WARNING and
+  # `terraform plan` still exits 0. Measured on Terraform 1.14.8 against that
+  # exact condition -- "Warning: Check block assertion failed", exit code 0. So
+  # the guard this repository believed it had let an empty include through to
+  # Cloudflare, which rejected it partway into an apply.
+  #
+  # Variable validation is evaluated before any provider is configured, so this
+  # fails with nothing contacted and nothing changed -- the acceptance criterion
+  # "applies from CI without error, or fails before making any change", met by
+  # the second half.
+  #
+  # An assertion that must STOP something belongs here. A check block is for
+  # reporting a condition nobody is expected to act on immediately.
+  validation {
+    condition     = !var.manage_access || var.access_group_id != ""
+    error_message = "manage_access = true needs access_group_id: a team policy with an empty include admits no human, and Cloudflare refuses it partway through an apply. Set it in env/<environment>.tfvars -- the group id is in the Cloudflare dashboard under Zero Trust / Access controls / Policies, on the Rule groups tab."
+  }
+
+  validation {
+    condition     = var.access_group_id == "" || can(regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", var.access_group_id))
+    error_message = "access_group_id must be a UUID, as shown in the dashboard's Group ID field."
+  }
 }
 
 variable "access_service_token_name" {
