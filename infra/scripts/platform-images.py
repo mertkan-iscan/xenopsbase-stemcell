@@ -32,31 +32,55 @@ its `image` job.
 WHAT IS NOT, AND WHY IT CANNOT BE
 
 Images pulled by the Helm-sourced Applications -- cert-manager, ingress-nginx,
-kube-prometheus-stack, loki, tempo, alloy, cloudnative-pg -- are not referenced
+kube-prometheus-stack, loki, alloy, cloudnative-pg -- are not referenced
 anywhere in this repository. The chart decides them at render time. Nothing that
 reads this tree can enumerate them, and a scan that quietly covered a smaller
 set than its name suggests is worse than one that states its boundary. Covering
 those means asking the CLUSTER what it is running rather than asking the repo
 what it declares, which is T-6.2.
 
-AN IMAGE WITHOUT A DIGEST IS SCANNED ANYWAY, AND SAID OUT LOUD
+(Tempo is NOT in that list, though a reader would expect it to be: Grafana's
+Tempo charts are deprecated, so platform/envs/dev/observability/tempo.yaml is
+written out here and its image is therefore in scope. Its header says why.)
+
+A REMOTE KUSTOMIZE BASE IS THE SAME BOUNDARY, less obviously (T-6.9, #330).
+platform/components/keycloak-operator/kustomization.yaml pulls the operator's own
+release kustomization by ref, and that manifest -- not this tree -- names
+quay.io/keycloak/keycloak-operator. The cluster runs it; nothing here reads it.
+It is out of scope for the same reason a chart is, and is worth naming because
+the keycloak IMAGE is in the list directly above it, which makes it easy to read
+the operator as covered too.
+
+AN IMAGE WITHOUT A DIGEST IS NOW AN ERROR (T-6.9, #330)
 
 A tag moves. Scanning `keycloak:26.7.1` describes whatever that tag meant at scan
-time, which is not necessarily what the kubelet pulled. That is weaker than a
-digest and it is not nothing, so such images are scanned and flagged rather than
-skipped or treated as an error.
+time, which is not necessarily what the kubelet pulled -- and with
+`imagePullPolicy: IfNotPresent`, two nodes can hold two different builds of one
+tag with nothing reporting the difference.
 
-Not an error, deliberately. Four of the six images here are tag-pinned today:
-cloudflared, cloudnative-pg's postgresql, keycloak and tempo. Failing on them
-would make this job red from its first run for reasons predating it, and
+The first version of this script scanned such images and flagged them rather than
+failing, because four of the six were tag-pinned on the day it was written:
+cloudflared, cloudnative-pg's postgresql, keycloak and tempo. Failing then would
+have made the job red from its first run for reasons predating it, and
 security.yml says at the top why that is self-defeating -- "a check that always
-fails is one people learn to skip", which this repository has now met three
-times. Pinning them is real work with an upgrade story attached -- each needs a rule
-for when its digest moves -- so it is T-6.9 (#330) rather than something
-smuggled into the change that noticed it.
+fails is one people learn to skip", which this repository had already met three
+times.
 
-Skipping them was the other option and is worse: an image would leave the scan
-silently, which is the failure this whole script exists to prevent.
+T-6.9 pinned those four, each with the rule for when its digest moves written at
+the pin. So the condition that made a warning the honest answer is gone, and a
+warning is now the weaker choice: every image here is pinned, and the way that
+stops being true is somebody adding a fifth manifest without one. That is exactly
+the case a warning would let through. It fails instead.
+
+Failing HERE rather than in the scan job is deliberate. The scan gates on findings
+against a digest, one image at a time; this gates on the SHAPE of the list, before
+any of it is scanned, so an unpinned image never becomes a matrix entry that looks
+scanned. The remedy is in the error message, because a gate whose fix has to be
+inferred is one that gets bypassed.
+
+Skipping unpinned images was the other option and remains the worst: an image
+would leave the scan silently, which is the failure this whole script exists to
+prevent.
 
 Usage:
     ./platform-images.py            # JSON array, one object per image
@@ -129,6 +153,35 @@ def discover():
         sys.exit(1)
 
     images = sorted(found.values(), key=lambda i: i["ref"])
+
+    # Every image the platform declares must name one artefact. See the module
+    # docstring for why this became an error once T-6.9 had pinned the four that
+    # were not. The message carries the remedy: the reader is somebody who just
+    # added a manifest, not somebody who knows this file.
+    unpinned = [i for i in images if not i["pinned"]]
+    if unpinned:
+        print(
+            "error: %d image(s) declared under platform/ without a digest. A tag "
+            "does not name one artefact, so it cannot be scanned as what the "
+            "kubelet actually pulled:" % len(unpinned),
+            file=sys.stderr,
+        )
+        for image in unpinned:
+            print(
+                "  %s\n      declared in: %s"
+                % (image["ref"], ", ".join(image["declared_in"])),
+                file=sys.stderr,
+            )
+        print(
+            "\nResolve each with:\n"
+            "  docker buildx imagetools inspect <ref>\n"
+            "and pin the INDEX digest, keeping the tag in a trailing comment, as\n"
+            "platform/envs/dev/cache/valkey.yaml does. Write down at the pin when\n"
+            "that digest is allowed to move -- T-6.9 (#330) did this for the four\n"
+            "images that were tag-pinned, and each rule is at its own pin.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     # Two images could share a last path segment and then collide as a SARIF
     # category, which silently overwrites one set of findings with another.
