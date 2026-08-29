@@ -60,7 +60,8 @@ than a clean file that hides the fact a mistake was ever made.
 | [0006](0006-tailscale-node-transport.md) | Tailscale node transport; the public API is closed | Accepted |
 | [0007](0007-postgres-backup-mechanism.md) | Postgres backs up through the Barman Cloud plugin | Accepted |
 | [0008](0008-durable-state-outside-terraform.md) | The durable-state boundary includes things Terraform does not create | Accepted, amended 2026-08-26 for the golden image |
-| [0009](0009-in-memory-store.md) | Valkey is the in-memory store, and it is disposable | Accepted |
+| [0009](0009-in-memory-store.md) | Valkey is the in-memory store, and it is disposable | Accepted, amended by 0011 |
+| [0011](0011-valkey-as-a-business-cache.md) | Valkey caches business data under cache-aside, and every key names its owner | Accepted |
 | [0012](0012-database-scaling.md) | How the database scales, and the evidence required before it does | Accepted |
 | [0010](0010-user-identity-durability.md) | User identity is durable; declared users carry explicit ids | Accepted |
 | [0013](0013-node-identity-is-injected.md) | A node's identity is injected before any node exists, never discovered from one | Accepted (token half; endpoint half withdrawn) |
