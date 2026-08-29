@@ -12,7 +12,27 @@ spec:
 
   # Pinned, and deliberately NOT 26.7.2, which was released the same day this
   # was written. An identity provider is the wrong component to be first on.
-  image: quay.io/keycloak/keycloak:26.7.1
+  #
+  # WHEN THIS DIGEST MOVES (T-6.9, #330)
+  #
+  # Together with the operator, never on its own. The operator is pinned by
+  # release ref in platform/components/keycloak-operator/kustomization.yaml
+  # (`?ref=26.7.1`), and it reconciles this CR against the API and the CRDs of
+  # the version it ships. Those two references name one Keycloak version in two
+  # files, so a Keycloak upgrade is: change the operator ref, resolve the image
+  # for the same tag, move both in one commit.
+  #
+  #   docker buildx imagetools inspect quay.io/keycloak/keycloak:<tag>
+  #
+  # Two other places carry this version and are NOT the cluster: infra/dev/
+  # compose.yml and infra/load/hpa-local/manifests.yaml, both local rehearsals.
+  # They stay on tags on purpose -- a laptop pulling a slightly different build
+  # is not a reproducibility claim anyone is relying on -- but they should be
+  # moved to the same version so local does not rehearse a different Keycloak.
+  #
+  # `startOptimized: false` below is required by this line existing at all, so
+  # dropping the pin is not a one-line change either. Read that comment first.
+  image: quay.io/keycloak/keycloak@sha256:f1f1f01e472c8a78df40d8f2a49a925274eda4d3d80d5f6edbb5c880ee3c01c6  # 26.7.1, resolved 2026-08-29
 
   # Required BECAUSE spec.image is set. Naming an image makes the operator
   # assume it is a custom, pre-built (augmented) image and start it with

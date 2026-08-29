@@ -83,7 +83,30 @@ spec:
           # The same image the cluster runs, so psql's version always matches
           # the server's. Pinning a different postgres image here would be a
           # second version to keep in step, and nothing would report the drift.
-          image: ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie
+          #
+          # WHEN THIS DIGEST MOVES (T-6.9, #330)
+          #
+          # When the operator's image for the Cluster moves, and only then. This
+          # pin does not choose a Postgres version; it FOLLOWS one. cluster.yaml
+          # sets no `imageName`, so CloudNativePG picks the image for the major
+          # version, and the tag above is that default rather than a choice made
+          # here.
+          #
+          # That is what makes the digest worth having and also what makes it a
+          # liability if it is left alone: a tag can be rebuilt in place, so the
+          # cluster would pull the new one on its next rollout while this Job
+          # kept running the old. The comment above claims these are the same
+          # image; the digest is what turns that claim into something a reader
+          # can check. Ask the cluster, not this file:
+          #
+          #   kubectl get cluster -n database postgres -o jsonpath='{.status.image}'
+          #
+          # If that tag is no longer the one in the trailing comment -- a minor
+          # upgrade, or an operator upgrade changing its default -- re-resolve
+          # (`docker buildx imagetools inspect ghcr.io/cloudnative-pg/postgresql:<tag>`)
+          # and move both. Verified against the running dev cluster on the date
+          # below.
+          image: ghcr.io/cloudnative-pg/postgresql@sha256:42708a75345b7a48fdd9257b071830783a97fd228529196b6313187a7198e185  # 18.4-system-trixie, resolved 2026-08-29
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

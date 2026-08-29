@@ -40,7 +40,24 @@ spec:
               app.kubernetes.io/name: cloudflared
       containers:
         - name: cloudflared
-          image: cloudflare/cloudflared:2026.8.2
+          # WHEN THIS DIGEST MOVES (T-6.9, #330)
+          #
+          # On a deliberate connector upgrade, and at no other time. cloudflared
+          # is the only path in from the internet, so a bad connector is an
+          # outage rather than a degraded component -- which is the argument for
+          # pinning it, not against it: a tag with `IfNotPresent` means each node
+          # keeps whatever it cached, so two replicas can run different
+          # connectors and nothing here reports the difference.
+          #
+          # Cloudflare does retire old connector versions, so this is not a pin
+          # that can be left alone forever. Move it by resolving the new tag
+          # (`docker buildx imagetools inspect cloudflare/cloudflared:<tag>`),
+          # updating both the digest and the trailing comment, and confirming
+          # the tunnel reconnects -- `make smoke ENV=dev` reaches the
+          # application through this connector, so it fails if the tunnel does.
+          #
+          # The index digest, as valkey.yaml uses, not a per-architecture one.
+          image: cloudflare/cloudflared@sha256:0aa26e284f05e6c77ae375b8c9c11d9eb6a448fb7bcd8d40f31cb6176189eb38  # 2026.8.2, resolved 2026-08-29
           args:
             - tunnel
             - --no-autoupdate

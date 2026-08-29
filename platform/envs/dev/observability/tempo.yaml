@@ -120,7 +120,22 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: tempo
-          image: docker.io/grafana/tempo:2.9.0
+          # WHEN THIS DIGEST MOVES (T-6.9, #330)
+          #
+          # #330 asked that "the chart and the StatefulSet must not disagree
+          # about the version". There is no chart: the header of this file
+          # records why Tempo is written out by hand, so this line is the only
+          # place a Tempo version is declared and there is nothing to disagree
+          # with. The upgrade story is therefore about the data, not a second
+          # manifest.
+          #
+          # Move it on a deliberate Tempo upgrade, having read the release notes
+          # for block-format changes -- blocks live in object storage and outlive
+          # the cluster (see the header), so a version that cannot read the
+          # existing blocks loses traces a rebuild was supposed to preserve.
+          # Resolve with `docker buildx imagetools inspect
+          # docker.io/grafana/tempo:<tag>` and update the trailing comment too.
+          image: docker.io/grafana/tempo@sha256:65a5789759435f1ef696f1953258b9bbdb18eb571d5ce711ff812d2e128288a4  # 2.9.0, resolved 2026-08-29
           args: ["-config.file=/conf/tempo.yaml"]
           ports:
             - {name: http, containerPort: 3200}
