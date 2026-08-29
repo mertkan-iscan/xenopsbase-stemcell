@@ -231,10 +231,20 @@ jobs:
       # job proved it: curl was red for a c-ares fix that Alpine had shipped and
       # curlimages had not rebuilt against, so there was nothing to repin to.
       #
-      # .trivyignore carries those, each with the evidence that no rebuilt image
-      # exists. It is passed HERE ONLY -- the reporting step above does not read
-      # it, so an ignored finding still reaches the Security tab and still
+      # .trivyignore.yaml carries those, each with the evidence that no rebuilt
+      # image exists. It is passed HERE ONLY -- the reporting step above does not
+      # read it, so an ignored finding still reaches the Security tab and still
       # appears in the run. It stops failing a build; it does not vanish.
+      #
+      # YAML RATHER THAN THE PLAIN LIST, FOR `expired_at`. A bare list of CVE
+      # IDs has no way to stop being true: #332 said an entry with no card behind
+      # it is how a documented exception becomes a permanent one. Every entry now
+      # carries a date, and trivy stops honouring it once that date passes -- so
+      # the gate reopens by itself rather than when somebody remembers.
+      #
+      # The action detects the format from the extension: a single .yaml is
+      # exported as TRIVY_IGNOREFILE, where plain files are concatenated. So this
+      # must stay ONE file, and it must keep the .yaml suffix.
       - name: Fail on high or critical
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -245,7 +255,7 @@ jobs:
           # cannot be actioned here, and failing on it makes the gate
           # permanently red for reasons nobody can resolve.
           ignore-unfixed: true
-          trivyignores: .trivyignore
+          trivyignores: .trivyignore.yaml
           exit-code: '1'
 
   # ---------------------------------------------------------------------------

@@ -1,0 +1,294 @@
+# Findings that cannot fail the platform image scan, and why (T-6.10, #332).
+#
+# HOW THIS FILE IS USED, WHICH IS NARROWER THAN THE FILENAME SUGGESTS
+#
+# It is passed ONLY to the gating step of security.yml's `platform image` job.
+# The reporting step does not read it, so everything below still reaches the
+# Security tab and is still counted in the run's output. Nothing here
+# disappears -- it stops failing a build, which is a smaller thing than being
+# ignored.
+#
+# It is NOT applied to the `image` job. Findings in core and gateway are ours to
+# fix: we choose the base image and we rebuild on demand.
+#
+# THE RULE FOR ADDING ONE
+#
+# Trivy's `ignore-unfixed` filters on whether a fixed PACKAGE exists. For an
+# image this repository does not build, the question that decides whether anyone
+# here can act is whether a fixed IMAGE exists, and those are not the same. The
+# gap between them belongs to the image publisher, and a gate that fires inside
+# it is red for something nobody here can resolve -- which security.yml's own
+# header explains is how a check stops being read.
+#
+# So an entry is justified only when BOTH hold:
+#
+#   1. no rebuilt image exists to repin to -- checked, not assumed
+#   2. the finding is recorded here with the version that would clear it
+#
+# If a rebuilt image exists, the answer is to repin. That is what happened to
+# THREE images rather than one: valkey in the change that created this file, and
+# keycloak and tempo in the change that rewrote it. Between them those repins
+# cleared 3 CRITICALs and 58 HIGHs that would otherwise be sitting here as
+# exceptions.
+#
+# WHY THIS IS NOW YAML, AND WHAT THAT BUYS
+#
+# The plain `.trivyignore` was a list of bare CVE IDs. #332 said of it: there is
+# no expiry mechanism here, so the card stays open as the thing that makes
+# someone look again -- and an entry with no card behind it is how a documented
+# exception becomes a permanent one.
+#
+# Trivy's YAML ignore file has `expired_at`. An entry past its date stops being
+# ignored and the gate goes red again, so the re-examination happens whether or
+# not anybody remembers to do it. That is a mechanism rather than an intention,
+# and it is why this file changed format.
+#
+# EVERY DATE BELOW IS THE SAME, AND IS NOT A PREDICTION
+#
+# 2026-10-29, sixty days out. It is not a guess about when any publisher will
+# rebuild -- it is the day this file gets read again. Per-entry estimates would
+# be inventing precision nobody has, and staggering them would spread the same
+# work over more red builds.
+#
+# WHEN ONE EXPIRES, THE JOB IS NOT TO PUSH THE DATE OUT. Re-scan the image, and:
+#
+#   the finding is gone       -> delete the entry
+#   a rebuilt image exists    -> repin, then delete the entry
+#   still nothing to repin to -> re-verify the evidence line, then move the date
+#
+# The scheduled scan runs Mondays, so a lapse surfaces within a week of the date
+# rather than whenever somebody next pushes.
+
+vulnerabilities:
+  # -----------------------------------------------------------------------
+  # curl -- c-ares, use-after-free / double-free. HIGH.
+  #
+  # curlimages/curl ships c-ares 1.34.6-r0; the fix is 1.34.8-r0.
+  #
+  # RE-VERIFIED 2026-08-30 by scanning the pinned digest: still 1.34.6-r0, and
+  # the tag still resolves to sha256:7c12af72... -- byte for byte the digest
+  # pinned in core.yaml and gateway.yaml. There is no newer image, so repinning
+  # is not available as a response.
+  #
+  # Reachability, for whoever revisits this: the initContainer makes exactly one
+  # HTTPS GET to the cluster's own OIDC issuer, in a loop, and exits. It
+  # resolves one hostname the platform controls. That is not an argument that
+  # the finding does not matter -- it is the context for deciding how hard to
+  # push on it.
+  - id: CVE-2026-33630
+    statement: >-
+      c-ares 1.34.6-r0 in curlimages/curl; fixed in 1.34.8-r0. Re-verified
+      2026-08-30: the tag still resolves to the pinned digest, so there is no
+      rebuilt image to repin to.
+    expired_at: 2026-10-29
+
+  # -----------------------------------------------------------------------
+  # curl and valkey -- OpenSSL, denial of service via unbounded allocation.
+  # HIGH.
+  #
+  # Affects both digest-pinned Alpine images, as libcrypto3 and libssl3, and on
+  # valkey as openssl too. The fix is 3.5.8-r0 and both carry 3.5.7-r0.
+  #
+  # RE-VERIFIED 2026-08-30 by scanning both pinned digests: 3.5.7-r0 in each,
+  # unchanged since this entry was written. It survived the valkey repin rather
+  # than being fixed by it, which is the clearest demonstration in this file
+  # that a fix existing and a fix being available to us are different questions.
+  - id: CVE-2026-14456
+    statement: >-
+      OpenSSL 3.5.7-r0 in curlimages/curl and valkey/valkey; fixed in 3.5.8-r0.
+      Re-verified 2026-08-30 against both pinned digests; neither carries
+      3.5.8-r0 and there is no rebuilt image to repin to.
+    expired_at: 2026-10-29
+
+  # -----------------------------------------------------------------------
+  # cloudflared and tempo -- the Go standard library. 9 HIGH.
+  #
+  # Both are Go binaries with the toolchain's stdlib compiled in, so the only
+  # remedy is a release built on a newer Go. Neither has one:
+  #
+  #   cloudflared  Go v1.26.4   cloudflare/cloudflared:latest resolves to
+  #                             sha256:0aa26e28... -- byte for byte the pinned
+  #                             digest. 2026.8.2 is the newest release.
+  #   tempo        Go v1.26.5   2.10.8 is the newest release (2026-08-13) and
+  #                             is what this change repins TO. It carries 8 of
+  #                             the 9 below; the 2.9.0 pin carried all 9 plus
+  #                             44 more.
+  #
+  # The fix is Go 1.25.13 / 1.26.6, published 2026-08-13/14 -- after tempo
+  # 2.10.8 was built and after cloudflared 2026.8.2 (2026-08-14). Both
+  # publishers are one toolchain release behind, which is the ordinary case this
+  # file exists for and the one most likely to clear itself before the date
+  # below.
+  #
+  # CVE-2026-39822 is cloudflared only; tempo's 1.26.5 already has it.
+  - id: CVE-2026-33818
+    statement: >-
+      Go stdlib in cloudflared (v1.26.4) and tempo (v1.26.5); fixed in Go
+      1.26.6. The newest release of each was built before the Go fix, so there
+      is no rebuilt image to repin to.
+    expired_at: 2026-10-29
+  - id: CVE-2026-39821
+    statement: >-
+      Go stdlib in cloudflared (v1.26.4) and tempo (v1.26.5); fixed in Go
+      1.26.6. The newest release of each was built before the Go fix, so there
+      is no rebuilt image to repin to.
+    expired_at: 2026-10-29
+  - id: CVE-2026-39822
+    statement: >-
+      Go stdlib in cloudflared (v1.26.4); fixed in Go 1.26.5. cloudflared
+      2026.8.2 is the newest release and :latest resolves to the pinned digest.
+      Already fixed in tempo.
+    expired_at: 2026-10-29
+  - id: CVE-2026-46600
+    statement: >-
+      Go stdlib in cloudflared (v1.26.4) and tempo (v1.26.5); fixed in Go
+      1.26.6. The newest release of each was built before the Go fix, so there
+      is no rebuilt image to repin to.
+    expired_at: 2026-10-29
+  - id: CVE-2026-56853
+    statement: >-
+      Go stdlib in cloudflared (v1.26.4) and tempo (v1.26.5); fixed in Go
+      1.26.6. The newest release of each was built before the Go fix, so there
+      is no rebuilt image to repin to.
+    expired_at: 2026-10-29
+  - id: CVE-2026-56858
+    statement: >-
+      Go stdlib in cloudflared (v1.26.4) and tempo (v1.26.5); fixed in Go
+      1.26.6. The newest release of each was built before the Go fix, so there
+      is no rebuilt image to repin to.
+    expired_at: 2026-10-29
+  - id: CVE-2026-56859
+    statement: >-
+      Go stdlib in cloudflared (v1.26.4) and tempo (v1.26.5); fixed in Go
+      1.26.6. The newest release of each was built before the Go fix, so there
+      is no rebuilt image to repin to.
+    expired_at: 2026-10-29
+  - id: CVE-2026-56860
+    statement: >-
+      Go stdlib in cloudflared (v1.26.4) and tempo (v1.26.5); fixed in Go
+      1.26.6. The newest release of each was built before the Go fix, so there
+      is no rebuilt image to repin to.
+    expired_at: 2026-10-29
+  - id: CVE-2026-56862
+    statement: >-
+      Go stdlib in cloudflared (v1.26.4) and tempo (v1.26.5); fixed in Go
+      1.26.6. The newest release of each was built before the Go fix, so there
+      is no rebuilt image to repin to.
+    expired_at: 2026-10-29
+
+  # -----------------------------------------------------------------------
+  # postgresql -- util-linux, Debian trixie. 36 findings, 4 distinct CVEs.
+  #
+  # ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie carries util-linux
+  # 2.41-5 across nine packages -- bsdutils, libblkid1, liblastlog2-2,
+  # libmount1, libsmartcols1, libuuid1, login, mount, util-linux -- and the fix
+  # is 2.41.5-0+deb13u1 in every case. Nine packages times four CVEs is the 36.
+  #
+  # THE NEWER IMAGE WAS CHECKED AND DOES NOT HELP. 18.6-system-trixie
+  # (sha256:b95a2b38...) was scanned on 2026-08-30 and reports the SAME 36
+  # findings at the SAME 2.41-5. So this is not a stale pin: cloudnative-pg has
+  # not rebuilt against the patched Debian package on either minor.
+  #
+  # Which is why this is an entry and not a repin. Bumping the database image
+  # two minor versions for zero change in findings would be an unrelated
+  # PostgreSQL upgrade wearing a security card's name.
+  - id: CVE-2026-53612
+    statement: >-
+      util-linux 2.41-5 in cloudnative-pg/postgresql; fixed in
+      2.41.5-0+deb13u1. 18.6-system-trixie scanned 2026-08-30 carries the same
+      2.41-5, so a newer minor is not a repin target either.
+    expired_at: 2026-10-29
+  - id: CVE-2026-53613
+    statement: >-
+      util-linux 2.41-5 in cloudnative-pg/postgresql; fixed in
+      2.41.5-0+deb13u1. 18.6-system-trixie scanned 2026-08-30 carries the same
+      2.41-5, so a newer minor is not a repin target either.
+    expired_at: 2026-10-29
+  - id: CVE-2026-53614
+    statement: >-
+      util-linux 2.41-5 in cloudnative-pg/postgresql; fixed in
+      2.41.5-0+deb13u1. 18.6-system-trixie scanned 2026-08-30 carries the same
+      2.41-5, so a newer minor is not a repin target either.
+    expired_at: 2026-10-29
+  - id: CVE-2026-53615
+    statement: >-
+      util-linux 2.41-5 in cloudnative-pg/postgresql; fixed in
+      2.41.5-0+deb13u1. 18.6-system-trixie scanned 2026-08-30 carries the same
+      2.41-5, so a newer minor is not a repin target either.
+    expired_at: 2026-10-29
+
+  # -----------------------------------------------------------------------
+  # keycloak -- mssql-jdbc. HIGH. The odd one out in this file.
+  #
+  # This is the ONLY entry not waiting on a publisher rebuild, and the only one
+  # where the version arithmetic does not mean what it looks like. Keycloak
+  # 26.7.2 bundles com.microsoft.sqlserver:mssql-jdbc 13.2.1, and the advisory's
+  # fixed-version list is:
+  #
+  #   10.2.4.jre11, 11.2.4.jre11, 12.2.1.jre11, 12.6.5.jre11, 12.8.2.jre11,
+  #   12.10.2.jre11, 13.2.1.jre11
+  #
+  # Every entry carries a .jre11 classifier and the bundled jar does not, so the
+  # comparison never matches -- including against 13.2.1.jre11, which is the
+  # same release as what is installed. No repin can satisfy this, because there
+  # is no version of the artefact whose name would match.
+  #
+  # Second, and independently: this platform runs PostgreSQL (CloudNativePG).
+  # The SQL Server driver ships in the Keycloak distribution and is never
+  # loaded. That is context for how hard to push, not the reason for the entry.
+  #
+  # Kept on the same date as everything else. If Keycloak drops the bundled
+  # driver, or trivy's matcher learns the classifier, this disappears on its own
+  # and the entry should go with it.
+  - id: CVE-2025-59250
+    statement: >-
+      mssql-jdbc 13.2.1 bundled in keycloak 26.7.2. Every fixed version in the
+      advisory carries a .jre11 classifier the bundled jar does not, including
+      13.2.1.jre11 -- the same release as installed -- so no repin can satisfy
+      the match. The driver is unused; this platform runs PostgreSQL.
+    expired_at: 2026-10-29
+
+# THE GATE SCANS FOR SECRETS TOO, WHICH IS EASY TO FORGET
+#
+# The trivy action runs vuln AND secret scanning by default, and the gating step
+# does not narrow it. So the platform image gate can fail on something that is
+# not a CVE at all -- and did: postgresql was red for a private key long after
+# its 36 package findings were accounted for. #332's own table recorded that as
+# "36 HIGH + 1 HIGH" and the second number is this, not an OS package.
+#
+# Keep this section. Narrowing the gate to `scanners: vuln` would have been the
+# quick way to green and would have thrown away secret detection across all six
+# images to silence one known-benign file.
+secrets:
+  # -----------------------------------------------------------------------
+  # postgresql -- Debian's snakeoil key. HIGH.
+  #
+  # /etc/ssl/private/ssl-cert-snakeoil.key is the self-signed placeholder the
+  # Debian `ssl-cert` package generates in its own postinst, at image build
+  # time. Trivy is right that it is an asymmetric private key; it is wrong that
+  # it is a secret. It is not a credential anybody issued, it grants access to
+  # nothing, and it is regenerated per build rather than shared between them.
+  # The finding's own provenance says so: "added by RUN |2 PG_VERSION=18.4".
+  #
+  # SCOPED BY PATH, deliberately. Ignoring the `private-key` rule outright would
+  # mean a real key committed into any of the six images scans clean. This
+  # suppresses one file in one location and nothing else.
+  #
+  # THE LEADING SLASH IS LOAD-BEARING. `etc/ssl/...` matches nothing and the
+  # finding comes straight back; trivy compares against the path as it reports
+  # it, which is absolute. Measured both ways -- the relative form failed the
+  # gate and looked exactly like a correct entry.
+  #
+  # Dated like everything else, though this one will be renewed rather than
+  # resolved: the key is inherent to the Debian base and no rebuild removes it.
+  # The thing worth re-checking on the date is that the path still matches and
+  # that it is still the only secret finding.
+  - id: private-key
+    paths:
+      - /etc/ssl/private/ssl-cert-snakeoil.key
+    statement: >-
+      Debian ssl-cert snakeoil placeholder in cloudnative-pg/postgresql,
+      generated at image build time by the package postinst. Not an issued
+      credential and grants access to nothing. Scoped to this one path so a real
+      key elsewhere still fails the gate.
+    expired_at: 2026-10-29

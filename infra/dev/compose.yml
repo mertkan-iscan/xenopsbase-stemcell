@@ -31,7 +31,7 @@ services:
       retries: 30
 
   keycloak:
-    image: quay.io/keycloak/keycloak:26.7.1
+    image: quay.io/keycloak/keycloak:26.7.2
     command: ["start-dev", "--import-realm", "--http-port=9080"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin

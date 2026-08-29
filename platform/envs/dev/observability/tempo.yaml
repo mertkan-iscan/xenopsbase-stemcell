@@ -135,7 +135,28 @@ spec:
           # existing blocks loses traces a rebuild was supposed to preserve.
           # Resolve with `docker buildx imagetools inspect
           # docker.io/grafana/tempo:<tag>` and update the trailing comment too.
-          image: docker.io/grafana/tempo@sha256:65a5789759435f1ef696f1953258b9bbdb18eb571d5ce711ff812d2e128288a4  # 2.9.0, resolved 2026-08-29
+          #
+          # 2.9.0 -> 2.10.8 (T-6.10, #332), and the block-format question above
+          # was the thing to answer before moving. 2.10 REMOVES vParquet2: an
+          # installation still holding vParquet2 blocks cannot read them after
+          # the upgrade. Two independent reasons it does not apply here.
+          #
+          # This deployment has only ever run 2.9.0 -- `git log --follow` on
+          # this file shows one version, first on a tag and then this digest --
+          # and vParquet4 has been the default encoding since 2.6, which is what
+          # an unset block version means. So nothing here ever wrote vParquet2.
+          # And `block_retention: 168h` above means no block outlives a week
+          # regardless of what wrote it.
+          #
+          # vParquet4 remains the default in 2.10, so this bump does not change
+          # the format being written either. The other 2.10 breaking changes are
+          # a default HTTP port move (80 -> 3200, and the config below sets 3200
+          # explicitly) and tenant-ID validation, which needs multitenancy this
+          # does not enable.
+          #
+          # The config in this file was run through `-config.verify=true` under
+          # both 2.9.0 and 2.10.8: clean under each.
+          image: docker.io/grafana/tempo@sha256:f0561deb1c68ec44d6e6e7e4487f30106c4e5e768642077695b37958b105812a  # 2.10.8, resolved 2026-08-29
           args: ["-config.file=/conf/tempo.yaml"]
           ports:
             - {name: http, containerPort: 3200}
