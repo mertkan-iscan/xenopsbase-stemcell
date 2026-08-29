@@ -74,6 +74,31 @@ kubectl get namespace argocd >/dev/null 2>&1 || {
   exit 1
 }
 
+short="${EXPECTED_SHA:0:7}"
+
+# THE REVISION IS WAITED FOR, NOT SAMPLED ONCE (T-6.7, #195)
+#
+# This loop used to wait only for Synced and Healthy, then compare revisions
+# once, after it had exited. On a merge that is always the wrong moment to look:
+# every application is ALREADY Synced and Healthy against the PREVIOUS commit, so
+# the loop broke on its first iteration and the comparison ran seconds later,
+# against a cluster Argo CD had not polled yet.
+#
+# That is not a theory about what could happen. Every push-triggered run of this
+# check between 2026-08-27 and 2026-08-29 failed this way, in about 25 seconds
+# of a 600-second budget, and the only green one in that window is a run where
+# no cluster existed and the workflow skipped the check entirely. It had never
+# once verified a deploy.
+#
+# The two files said so and the code did not. deploy-status.yml: "rollout-status
+# .sh polls internally until this expires, so it does the waiting ... 'not yet'
+# is the expected answer for the first couple of attempts and must not read as a
+# failure". And the branch below printed "this is normal for the first few
+# minutes after a merge. It is a failure only if it persists" -- and then exited
+# non-zero without ever checking whether it persisted.
+#
+# So the revision is now part of the loop condition. Waiting is what distinguishes
+# "has not arrived yet" from "is not going to".
 deadline=$(( $(date +%s) + TIMEOUT ))
 while :; do
   # One call, then parse. Asking per-application races a sync that changes
@@ -90,37 +115,6 @@ while :; do
 
   not_ready="$(echo "$snapshot" | awk -F'\t' '$2 != "Synced" || $3 != "Healthy"')"
 
-  if [ -z "$not_ready" ]; then
-    break
-  fi
-
-  now=$(date +%s)
-  if [ "$now" -ge "$deadline" ]; then
-    echo ""
-    echo "  NOT READY after ${TIMEOUT}s:"
-    echo "$not_ready" | awk -F'\t' '{printf "    %-24s %-12s %s\n", $1, $2, $3}'
-    echo ""
-    echo "=================================================================="
-    echo "ROLLOUT FAILED — see above."
-    echo "=================================================================="
-    exit 1
-  fi
-
-  echo "  waiting ($(echo "$not_ready" | wc -l | tr -d ' ') application(s) not ready)…"
-  sleep 10
-done
-
-echo ""
-echo "$snapshot" | awk -F'\t' '{printf "  %-24s %-8s %-8s %s\n", $1, $2, $3, substr($4,1,8)}'
-echo ""
-
-FAILED=0
-if [ -n "$EXPECTED_SHA" ]; then
-  # The check that stops this being a green tick with no content. Synced and
-  # Healthy says the cluster matches SOME revision; only this says it matches
-  # the one that was promoted.
-  short="${EXPECTED_SHA:0:7}"
-
   # Only Applications sourced from git. A Helm-sourced one reports its CHART
   # VERSION in this field -- `1.11.1`, `v1.21.1`, `88.5.0` -- not a commit. So
   # comparing every Application against a git SHA marks cert-manager, loki and
@@ -130,35 +124,80 @@ if [ -n "$EXPECTED_SHA" ]; then
   # Found the first time this ran with SHA= set, immediately after fixing #193
   # so that it could run at all.
   git_apps="$(echo "$snapshot" | awk -F'\t' '$4 ~ /^[0-9a-f]{40}$/')"
+  mismatched=""
+  no_git_apps=""
 
-  if [ -z "$git_apps" ]; then
-    # Never pass by finding nothing to compare. That is the shape of failure
-    # this repository keeps meeting: a check reporting success having checked
-    # nothing at all.
-    echo "  no git-sourced application reported a revision — nothing was compared"
-    FAILED=1
+  if [ -n "$EXPECTED_SHA" ]; then
+    if [ -z "$git_apps" ]; then
+      # Never pass by finding nothing to compare. That is the shape of failure
+      # this repository keeps meeting: a check reporting success having checked
+      # nothing at all. Kept inside the loop because an Application whose status
+      # has not been populated yet reports an empty revision, and that is a
+      # not-yet rather than a verdict.
+      no_git_apps=1
+    else
+      mismatched="$(echo "$git_apps" | awk -F'\t' -v want="$short" '$1 != "" && substr($4,1,7) != want {print $1"\t"substr($4,1,7)}')"
+    fi
   fi
 
-  mismatched="$(echo "$git_apps" | awk -F'\t' -v want="$short" '$1 != "" && substr($4,1,7) != want {print $1"\t"substr($4,1,7)}')"
-  if [ -n "$mismatched" ]; then
-    echo "  EXPECTED revision ${short}, but:"
-    echo "$mismatched" | awk -F'\t' '{printf "    %-24s is at %s\n", $1, $2}'
+  if [ -z "$not_ready" ] && [ -z "$mismatched" ] && [ -z "$no_git_apps" ]; then
+    break
+  fi
+
+  now=$(date +%s)
+  if [ "$now" -ge "$deadline" ]; then
     echo ""
-    echo "  Argo CD polls rather than being notified, so this is normal for the"
-    echo "  first few minutes after a merge. It is a failure only if it persists."
-    FAILED=1
-  else
-    echo "  revision ${short}: every git-sourced application matches"
-    echo "  (Helm-sourced applications report a chart version and are not compared)"
+    echo "$snapshot" | awk -F'\t' '{printf "  %-24s %-8s %-8s %s\n", $1, $2, $3, substr($4,1,8)}'
+    echo ""
+    # Which of the two failures this is decides what somebody does next, so it
+    # is stated rather than left to be inferred from a generic timeout.
+    if [ -n "$not_ready" ]; then
+      echo "  NOT READY after ${TIMEOUT}s:"
+      echo "$not_ready" | awk -F'\t' '{printf "    %-24s %-12s %s\n", $1, $2, $3}'
+    fi
+    if [ -n "$no_git_apps" ]; then
+      echo "  no git-sourced application reported a revision — nothing was compared"
+    fi
+    if [ -n "$mismatched" ]; then
+      echo "  EXPECTED revision ${short} after ${TIMEOUT}s, but:"
+      echo "$mismatched" | awk -F'\t' '{printf "    %-24s is at %s\n", $1, $2}'
+      echo ""
+      echo "  Argo CD polls roughly every 3 minutes, so this waited well past"
+      echo "  normal lag. The commit has not arrived rather than not arrived yet."
+    fi
+    echo ""
+    echo "=================================================================="
+    if [ -n "$not_ready" ]; then
+      echo "ROLLOUT FAILED — see above."
+    else
+      echo "ROLLOUT INCOMPLETE — healthy, but not running the expected commit."
+    fi
+    echo "=================================================================="
+    exit 1
   fi
+
+  waiting_for=""
+  [ -n "$not_ready" ] && waiting_for="$(echo "$not_ready" | wc -l | tr -d ' ') application(s) not ready"
+  if [ -n "$mismatched" ]; then
+    [ -n "$waiting_for" ] && waiting_for="${waiting_for}, "
+    waiting_for="${waiting_for}$(echo "$mismatched" | wc -l | tr -d ' ') not yet at ${short}"
+  fi
+  [ -n "$no_git_apps" ] && waiting_for="no application has reported a revision yet"
+  echo "  waiting (${waiting_for})…"
+  sleep 10
+done
+
+echo ""
+echo "$snapshot" | awk -F'\t' '{printf "  %-24s %-8s %-8s %s\n", $1, $2, $3, substr($4,1,8)}'
+echo ""
+
+if [ -n "$EXPECTED_SHA" ]; then
+  echo "  revision ${short}: every git-sourced application matches"
+  echo "  (Helm-sourced applications report a chart version and are not compared)"
 fi
 
 echo "=================================================================="
-if [ "$FAILED" -eq 0 ]; then
-  echo "ROLLOUT OK — every application Synced and Healthy."
-else
-  echo "ROLLOUT INCOMPLETE — healthy, but not yet running the expected commit."
-fi
+echo "ROLLOUT OK — every application Synced and Healthy${EXPECTED_SHA:+ at ${short}}."
 echo "=================================================================="
 
-exit "$FAILED"
+exit 0

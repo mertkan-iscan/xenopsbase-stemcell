@@ -152,6 +152,12 @@ jobs:
           # which is the distinction #195 asked for. A timeout means it never
           # arrived; a Degraded application means it arrived and broke. The
           # script says which.
+          #
+          # THIS PARAGRAPH DESCRIBED AN INTENTION, NOT THE CODE, UNTIL T-6.7.
+          # The script waited for Synced and Healthy and then compared revisions
+          # ONCE, after the wait -- so on a merge it broke out immediately
+          # (everything was already healthy at the previous commit), compared,
+          # and failed in about 25 seconds of these 600. It is true now.
           ROLLOUT_TIMEOUT: "600"
         run: |
           # The expected SHA is only meaningful when this commit CHANGED
@@ -180,9 +186,16 @@ jobs:
             echo "::notice::${ENVIRONMENT} is Synced and Healthy${EXPECT:+ at ${GITHUB_SHA}}."
           else
             echo ""
-            echo "::error::${ENVIRONMENT} did not reach a Synced and Healthy state within 10 minutes."
+            # Deliberately does NOT name the failure. There are two -- an
+            # application that never became Healthy, and one that is healthy but
+            # never advanced to this commit -- and the script's last lines say
+            # which. Restating one of them here produced a run whose summary said
+            # "did not reach a Synced and Healthy state" about a cluster where
+            # every application was Synced and Healthy, at the previous commit.
+            echo "::error::${ENVIRONMENT} did not reach ${GITHUB_SHA} within 10 minutes. See the output above."
             echo "Argo CD polls about every 3 minutes, so this is longer than lag."
-            echo "The output above names which application is not Synced or not Healthy."
+            echo "The output above names which application is not Synced, not Healthy,"
+            echo "or still at an older revision."
             echo "To force one:"
             echo "  kubectl -n argocd patch application <name> --type merge -p '{\"operation\":{\"sync\":{}}}'"
             exit 1
