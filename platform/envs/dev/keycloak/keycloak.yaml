@@ -140,6 +140,61 @@ spec:
         name: keycloak-clients
         key: GATEWAY_CLIENT_SECRET
 
+    # THE HEAP, PINNED — AND THE REASON THE REQUEST BELOW IS WHAT IT IS
+    # (T-2.26, #340)
+    #
+    # The stock image sets -XX:MaxRAMPercentage=70, so the heap ceiling was
+    # whatever 70% of the memory LIMIT happened to be. That made the two numbers
+    # a matched pair that nothing declared: raise the limit and the JVM quietly
+    # grants itself a bigger heap; lower it and the JVM can OOM against a
+    # ceiling nobody moved on purpose.
+    #
+    # An absolute -Xmx is chosen over a percentage precisely because it does NOT
+    # follow the limit. These two values must be changed together, by someone
+    # who has done the arithmetic below, and a percentage would let one move
+    # without the other.
+    - name: JAVA_OPTS_APPEND
+      value: "-Xms256m -Xmx512m"
+
+  # MEASURED, NOT PICKED (T-2.26, #340). `make resource-audit` re-derives it.
+  #
+  # From the running pod on 2026-08-29, `jcmd 1 GC.heap_info`:
+  #
+  #   heap committed        184Mi     (live set 87Mi)
+  #   metaspace committed   130Mi
+  #   pod RSS               550Mi
+  #
+  #   non-heap  = RSS - committed heap = 550 - 184  = ~360Mi
+  #               metaspace, code cache, thread stacks, GC structures, direct
+  #               buffers, and the process itself
+  #
+  #   -Xmx512m  = 2.8x the committed heap, 5.9x the live set. Headroom chosen
+  #               against the measurement rather than against the limit
+  #   ceiling   = 512 + 360                        = 872Mi
+  #   request   = limit = 896Mi, the next round figure above the ceiling
+  #
+  # WHY THE REQUEST IS NOT 1.25x MEASURED USAGE, WHICH IS THE RULE ELSEWHERE
+  #
+  # T-2.23 (#306) sets requests at 1.25x measured steady state. That rule is
+  # right for a process whose footprint is its working set, and wrong for a JVM:
+  # an idle JVM's RSS is a FLOOR that grows toward its heap ceiling and comes
+  # back down slowly, so 1.25x an idle reading books a number the process is
+  # entitled to exceed by hundreds of megabytes. That is what was here before --
+  # 768Mi requested against a heap permitted to reach 896Mi.
+  #
+  # For a JVM the factor belongs on the HEAP, not on the pod. Pick the heap from
+  # the measurement, then the request follows arithmetically. That is the
+  # derivation this card asked for.
+  #
+  # The limit drops 1280 -> 896Mi and the heap ceiling 896 -> 512Mi, so the pod
+  # can balloon less than before. The risk that buys: a genuine leak now reaches
+  # the ceiling sooner and OOMs rather than growing quietly. That is the correct
+  # failure for dev -- the pod restarts and the graph shows it -- but it is a
+  # change of behaviour, not only of numbers.
+  #
+  # CPU is deliberately untouched, for the reason #306 gives: measured draw is
+  # single-digit millicores on an idle cluster, and sizing CPU down from a quiet
+  # measurement books capacity correctly only for the moment it does not matter.
   resources:
-    requests: {cpu: 200m, memory: 768Mi}
-    limits: {memory: 1280Mi}
+    requests: {cpu: 200m, memory: 896Mi}
+    limits: {memory: 896Mi}

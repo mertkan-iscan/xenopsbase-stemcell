@@ -107,20 +107,36 @@ agent_nodepools = [
 # arithmetic had never been done, so here it is -- with the caveat that it is
 # NOT what binds first.
 #
-# With Argo CD's requests corrected from measurement (the controller was
-# declared at 256Mi and using 823Mi) and the apps at their HPA ceiling:
+# RE-DERIVED (T-2.26, #340). The first version of this block said 97% booked at
+# HPA ceiling. It was wrong by two measurement errors, both in the same
+# direction, and the corrected figure is 86%. What the errors were and why they
+# are easy to make is in infra/scripts/resource-audit.py, which now produces
+# these numbers instead of anybody producing them by hand:
 #
-#   all-namespace requests, measured 2026-08-29   10744Mi
-#     after the Argo CD correction                11576Mi
-#     with the apps at their ceiling              14584Mi
-#   less what the tainted control plane carries      672Mi
-#   to seat on the two fixed workers              13912Mi
+#   - 1700Mi of the 10744Mi was keycloak's realm-import Job, which had already
+#     SUCCEEDED. A finished pod reserves nothing.
+#   - core and gateway were each counted with their wait-for-oidc initContainer
+#     ADDED to their containers. A pod's request is
+#     max(sum(containers), max(initContainers)); init containers overlap, they
+#     do not add.
+#
+# Measured 2026-08-29 with `make resource-audit`, apps at floor, and reconciled
+# against the kubelet's own Allocated resources on all three nodes:
+#
+#   all-namespace requests, Running pods only      9878Mi
+#     with the apps at their HPA ceiling          12822Mi   core 1->3, gateway 2->4
+#     with keycloak's correction (#340)           12950Mi   768 -> 896Mi
+#   less what the tainted control plane carries      532Mi
+#   to seat on the two fixed workers              12418Mi
 #   two cx33 allocatable                          14306Mi
-#                                                 => 97% booked
+#                                                 => 87% booked, 1888Mi spare
 #
-# 97% looks alarming and is largely fiction: keycloak books 2918Mi against
-# 869Mi used, and cluster-wide requests exceed actual usage by 3.3GB (0.69x).
-# Only argocd (2.0x) and kube-system (1.4x) under-declare.
+# Still tight, and now tight for reasons that are real. Cluster-wide, requests
+# exceed usage by about 3GB (0.70x). The three largest gaps are all somebody
+# else's card: observability (0.72, T-2.27 #341), argocd (0.49 at idle -- #306
+# sized it from a controller reconciling at 823Mi, which is the right basis and
+# not the idle one), and kube-system, which declares 318Mi and uses more than
+# that because eleven pods there declare nothing at all (T-2.25, #339).
 #
 # WHAT ACTUALLY BINDS IS NODE COUNT, NOT MEMORY. The gateway's one-replica-per-
 # node rule means four replicas need four nodes regardless of how much memory
@@ -128,10 +144,10 @@ agent_nodepools = [
 # every FailedScheduling event named `Insufficient cpu` and anti-affinity, and
 # none named memory.
 #
-# Correcting keycloak's over-declaration is its own measurement and its own
-# card. This block is here so the next person to raise an HPA ceiling knows the
-# memory numbers are recorded and that node count is the constraint to check
-# first.
+# This block is here so the next person to raise an HPA ceiling knows the memory
+# numbers are recorded, that node count is the constraint to check first, and
+# that the way to refresh these figures is to run the script rather than to read
+# `kubectl get pods` and add up.
 
 # THAT LAST CLAUSE WAS WRONG, AND A LOAD TEST SHOWED IT (T-2.23, #306).
 #

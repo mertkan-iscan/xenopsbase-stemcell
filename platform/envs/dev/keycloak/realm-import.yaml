@@ -15,6 +15,44 @@ metadata:
   namespace: keycloak
 spec:
   keycloakCRName: keycloak
+
+  # THE IMPORT JOB BOOKS 1700Mi UNLESS TOLD OTHERWISE (T-2.26, #340)
+  #
+  # The CRD says of this field: "Compute Resources required by Keycloak
+  # container. If not specified, the value is inherited from the Keycloak CR."
+  # It is not. Measured on 2026-08-29, with keycloak.yaml asking for 768Mi, the
+  # Job the operator created for this import asked for 1700Mi with a 2Gi limit
+  # -- the OPERATOR's own default, not ours.
+  #
+  # That was the single largest booking in the keycloak namespace and it is why
+  # T-2.23 (#306) recorded the namespace at 2918Mi against 869Mi used. The pod
+  # had already succeeded, so it was reserving nothing at the time it was
+  # measured; the figure was a measurement error, and the arithmetic built on it
+  # in dev.tfvars was wrong. See infra/scripts/resource-audit.py.
+  #
+  # But it is not ONLY a measurement error. While the Job runs -- which is during
+  # `make up`, on every cold rebuild -- 1700Mi is genuinely reserved on a worker,
+  # to import a realm this file defines in 400 lines. Stating the value makes the
+  # documented inheritance actually happen.
+  #
+  # A limit above the request on purpose, unlike keycloak.yaml, which pins both.
+  # The server's figure comes from measuring the server; there is no equivalent
+  # measurement of the import, because the Job had already finished by the time
+  # anyone looked. So this keeps room to burst rather than betting an OOM on an
+  # estimate. 896Mi of request against a heap that can still reach 70% of the
+  # 1280Mi limit is far more than importing 400 lines of realm needs -- the
+  # SERVING instance runs on a 184Mi committed heap.
+  #
+  # Changing this field makes the operator run the import again, which is safe
+  # and was not always: ADR-0010 pins an explicit `id` on every declared user, so
+  # a re-import restores the same subs and the documents keep their owner. That
+  # is the fix T-7.8 (#147) landed. It does NOT cover users created at runtime
+  # through the admin API, which ADR-0010 records as a knowing gap -- dev has
+  # none, a fork with real users would.
+  resources:
+    requests: {memory: 896Mi}
+    limits: {memory: 1280Mi}
+
   realm:
     realm: xenopsbase
     displayName: xenopsbase

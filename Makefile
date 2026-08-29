@@ -643,6 +643,10 @@ rollout-status: ## Did the deploy land? Every Argo CD app Synced and Healthy, on
 connection-budget: ## Do the HPA ceiling, the pools and max_connections add up? (T-2.18)
 	@bash $(SCRIPTS)/check-connection-budget.sh $(ENV)
 
+.PHONY: resource-audit
+resource-audit: ## What each namespace BOOKS against what it USES, read from the cluster (T-2.26)
+	@KUBECONFIG="$(CURDIR)/infra/terraform/cluster/kubeconfig" python infra/scripts/resource-audit.py $(ARGS)
+
 .PHONY: verify-resources
 verify-resources: ## Every workload we own declares CPU and memory requests (T-2.15)
 	@bash $(SCRIPTS)/verify-resources.sh
