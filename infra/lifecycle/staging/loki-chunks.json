@@ -1,0 +1,20 @@
+{
+  "Rules": [
+    {
+      "ID": "expire-old-chunks",
+      "Prefix": "",
+      "Status": "Enabled",
+      "Expiration": {
+        "Days": 30
+      }
+    },
+    {
+      "ID": "abort-incomplete-uploads",
+      "Prefix": "",
+      "Status": "Enabled",
+      "AbortIncompleteMultipartUpload": {
+        "DaysAfterInitiation": 1
+      }
+    }
+  ]
+}

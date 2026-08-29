@@ -1,0 +1,20 @@
+{
+  "Rules": [
+    {
+      "ID": "expire-old-backups",
+      "Prefix": "",
+      "Status": "Enabled",
+      "Expiration": {
+        "Days": 35
+      }
+    },
+    {
+      "ID": "abort-incomplete-uploads",
+      "Prefix": "",
+      "Status": "Enabled",
+      "AbortIncompleteMultipartUpload": {
+        "DaysAfterInitiation": 1
+      }
+    }
+  ]
+}

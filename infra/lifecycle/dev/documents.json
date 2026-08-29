@@ -1,0 +1,28 @@
+{
+  "Rules": [
+    {
+      "ID": "dev-expire-current-versions-30d",
+      "Prefix": "",
+      "Status": "Enabled",
+      "Expiration": {
+        "Days": 30
+      }
+    },
+    {
+      "ID": "expire-noncurrent-versions",
+      "Prefix": "",
+      "Status": "Enabled",
+      "NoncurrentVersionExpiration": {
+        "NoncurrentDays": 7
+      }
+    },
+    {
+      "ID": "abort-incomplete-uploads",
+      "Prefix": "",
+      "Status": "Enabled",
+      "AbortIncompleteMultipartUpload": {
+        "DaysAfterInitiation": 7
+      }
+    }
+  ]
+}

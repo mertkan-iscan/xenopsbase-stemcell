@@ -45,7 +45,7 @@ No `Filter` element, ever. So the comparison never converges: every lifecycle re
 full 3-minute timeout and then fails — **having applied the rules correctly**. Verified 2026-08-19
 against aws provider v6.60.0: 21 polls, a correct response every time, never accepted.
 
-The rules therefore live in `infra/lifecycle/*.json` and are applied by
+The rules therefore live in `infra/lifecycle/<environment>/*.json` and are applied by
 `infra/scripts/apply-lifecycle-rules.sh`, which reads them back to confirm they stuck:
 
 ```bash

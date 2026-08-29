@@ -1,0 +1,20 @@
+{
+  "Rules": [
+    {
+      "ID": "expire-old-traces",
+      "Prefix": "",
+      "Status": "Enabled",
+      "Expiration": {
+        "Days": 7
+      }
+    },
+    {
+      "ID": "abort-incomplete-uploads",
+      "Prefix": "",
+      "Status": "Enabled",
+      "AbortIncompleteMultipartUpload": {
+        "DaysAfterInitiation": 1
+      }
+    }
+  ]
+}
