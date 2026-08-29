@@ -479,10 +479,14 @@ resource "cloudflare_zero_trust_access_policy" "team" {
   name       = "xenopsbase-${var.environment} team"
   decision   = "allow"
 
+  # A group reference, not a list of addresses (T-6.11, #335). The membership
+  # lives in Cloudflare, so this include is identical in every environment and
+  # in CI -- which is the point: there is no longer a value that a runner can
+  # fail to reconstruct.
   include = [
-    for address in var.access_allowed_emails : {
-      email = {
-        email = address
+    {
+      group = {
+        id = var.access_group_id
       }
     }
   ]
@@ -508,26 +512,12 @@ resource "cloudflare_zero_trust_access_policy" "automation" {
   ]
 }
 
-# Refuses the combination that looks configured and locks everyone out: Access
-# enabled with nobody permitted. The service-token policy would still pass, so
-# CI would go on working and the failure would present as "the site asks me to
-# log in and then refuses me".
-check "access_has_someone_to_admit" {
-  assert {
-    condition     = !var.manage_access || length(var.access_allowed_emails) > 0
-    error_message = "manage_access = true with an empty access_allowed_emails admits no human. Set it in env/<environment>.secrets.tfvars."
-  }
-}
-
-# Refuses the combination that publishes a dashboard with nothing in front of
-# it. `access = true` on an extra hostname reads as "this one is protected", but
-# every Access resource here is gated on manage_access -- so with manage_access
-# off the flag is silently ignored and the hostname is served to the internet.
-# For Prometheus and Alertmanager that is an unauthenticated hostname, since
-# neither has a login of its own.
-check "access_opt_in_needs_access_enabled" {
-  assert {
-    condition     = var.manage_access || length([for h in var.extra_hostnames : h.hostname if h.access]) == 0
-    error_message = "extra_hostnames opts a hostname into Access but manage_access is false, which would publish it with no Access in front of it. Set manage_access = true, or drop the access flag."
-  }
-}
+# The two assertions that used to be `check` blocks here are now validation
+# blocks on the variables they are about, in variables.tf.
+#
+# They did not move for tidiness. Neither of them REFUSED anything: a check
+# block's failed assertion is a warning and `terraform plan` still exits 0, so
+# "Refuses the combination that ... locks everyone out" was a claim the
+# mechanism could not keep. The empty allow list reached Cloudflare and was
+# rejected mid-apply, after the run had already destroyed the Access
+# application (T-6.11, #335).

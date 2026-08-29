@@ -77,7 +77,22 @@ extra_hostnames = [
 # without the team, and does it without editing the realm, which matters: a
 # realm edit forces a re-import that orphans every existing document (#147).
 #
-# access_allowed_emails is deliberately NOT here. It is a personal identifier
-# and this file is public; it lives in dev.secrets.tfvars.
 manage_access = true
+
+# The Access group whose members are admitted. This IS here, where the addresses
+# it used to be were not: a group id names a container rather than a person, so
+# it is publishable and CI can read it like any other variable (T-6.11, #335).
+#
+# That is the whole fix. `access_allowed_emails` lived in dev.secrets.tfvars
+# because the addresses are personal, and the runner rebuilt that file with only
+# account_id and zone_id -- so CI planned to rewrite the team policy with an
+# empty include on every run, and Cloudflare refused it halfway through an
+# apply. There is now nothing secret for CI to be missing.
+#
+# Membership is managed in the Cloudflare console and Terraform does not
+# describe it. Nothing here can tell whether the group still exists or still has
+# anyone in it -- the edge token is refused on the Access Groups endpoint, which
+# is a separate permission from the Apps and Service Tokens it holds. That is
+# the accepted cost of this arrangement, recorded rather than checked.
+access_group_id = "90b02bef-7a1d-475e-823a-c5bc872549bc" # xenopsbase-admins
 
