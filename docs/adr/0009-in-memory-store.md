@@ -1,6 +1,6 @@
 # ADR-0009: Valkey is the in-memory store, and it is disposable
 
-- **Status:** Accepted
+- **Status:** Accepted, **amended by [ADR-0011](0011-valkey-as-a-business-cache.md)**
 - **Date:** 2026-08-22
 - **Task:** T-2.11
 
@@ -61,6 +61,15 @@ should not carry a copyleft dependency by default, and there is no functional co
 tokens" are listed as living inside the cluster. Losing Valkey signs everyone out and resets rate
 limit counters. Both are recoverable by the user logging in again, which is the definition of
 something the system can lose.
+
+> **Amended by [ADR-0011](0011-valkey-as-a-business-cache.md) (T-0.11).** "Disposable" is stated
+> here without a condition, and at the time it needed none: Valkey held sessions and nothing else,
+> so losing it signed everyone out and lost nothing. Once `core` caches business data, losing Valkey
+> additionally means every read reaching Postgres at once, and the claim holds **only while the
+> fallback path works** — reads falling through to the database, and startup and readiness surviving
+> an absent Valkey. ADR-0011 states that condition and the constraints that keep it true. Read the
+> two together; where they differ on caching, ADR-0011 is authoritative. The rule in the next
+> paragraph is **not** relaxed by it.
 
 That constrains what may be put in it. **Nothing may be stored in Valkey that cannot be
 reconstructed by a user retrying.** Rate limit counters qualify. Idempotency records do not, which
