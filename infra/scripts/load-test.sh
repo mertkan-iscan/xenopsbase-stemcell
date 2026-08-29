@@ -29,9 +29,23 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT" || exit 1
 
 ENVIRONMENT="${1:-dev}"
+
+# Which scenario. Defaults to the baseline so every existing caller is
+# unchanged; `make load-ratelimit` passes ratelimit.js (T-8.3, #61). Taking a
+# script rather than copying this harness means one place knows how to run k6
+# in-cluster, and a second scenario cannot drift from the first in how it is
+# launched.
+SCRIPT="${2:-baseline.js}"
 NAMESPACE="${LOAD_NAMESPACE:-apps}"
 K6_IMAGE="${K6_IMAGE:-grafana/k6:0.55.0}"
-JOB="k6-baseline-$(date -u +%Y%m%d%H%M%S)"
+JOB="k6-$(basename "$SCRIPT" .js)-$(date -u +%Y%m%d%H%M%S)"
+
+if [ ! -f "infra/load/$SCRIPT" ]; then
+  echo "error: no scenario at infra/load/$SCRIPT" >&2
+  echo "  available:" >&2
+  ls infra/load/*.js 2>/dev/null | sed 's|.*/|    |' >&2
+  exit 1
+fi
 
 # This project's kubeconfig, unconditionally. An inherited KUBECONFIG points at
 # whatever cluster the operator last used, and this one generates load.
@@ -48,14 +62,14 @@ kubectl get namespace "$NAMESPACE" >/dev/null 2>&1 || {
 }
 
 echo "=================================================================="
-echo " Load baseline: ${ENVIRONMENT}"
+echo " k6 ${SCRIPT}: ${ENVIRONMENT}"
 echo " k6 ${K6_IMAGE}, in-cluster, against the gateway Service"
 echo "=================================================================="
 
 # The script goes in as a ConfigMap rather than baked into an image, so changing
 # a scenario is a commit rather than a build.
 CM="${JOB}-script"
-kubectl -n "$NAMESPACE" create configmap "$CM" --from-file=baseline.js=infra/load/baseline.js >/dev/null || {
+kubectl -n "$NAMESPACE" create configmap "$CM" --from-file="${SCRIPT}=infra/load/${SCRIPT}" >/dev/null || {
   echo "error: could not create the script ConfigMap" >&2
   exit 1
 }
@@ -71,19 +85,19 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: ${JOB}
-  labels: {app.kubernetes.io/name: k6-baseline}
+  labels: {app.kubernetes.io/name: k6-load}
 spec:
   backoffLimit: 0
   ttlSecondsAfterFinished: 300
   template:
     metadata:
-      labels: {app.kubernetes.io/name: k6-baseline}
+      labels: {app.kubernetes.io/name: k6-load}
     spec:
       restartPolicy: Never
       containers:
         - name: k6
           image: ${K6_IMAGE}
-          args: ["run", "/scripts/baseline.js"]
+          args: ["run", "/scripts/${SCRIPT}"]
           resources:
             requests: {cpu: 200m, memory: 256Mi}
             limits:   {memory: 512Mi}
@@ -114,13 +128,13 @@ done
 echo ""
 echo "=================================================================="
 if [ "${succeeded:-0}" = "1" ]; then
-  echo "LOAD BASELINE PASSED — every threshold in infra/load/baseline.js held."
+  echo "PASSED — every threshold in infra/load/${SCRIPT} held."
   echo "  full output: ${JOB}.log"
   echo "=================================================================="
   exit 0
 fi
 
-echo "LOAD BASELINE FAILED — a threshold was breached, or k6 could not run."
+echo "FAILED — a threshold in ${SCRIPT} was breached, or k6 could not run."
 echo ""
 echo "  k6 exits non-zero on a breached threshold, which is what makes this a"
 echo "  gate. Read the THRESHOLDS block above: a line marked with a cross names"

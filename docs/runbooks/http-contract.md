@@ -183,6 +183,59 @@ low-cardinality, because nothing else would notice in time.
 answer different questions and have different lifetimes, and a sampled-out trace still needs a
 correlation id in its logs.
 
+## Rate limiting
+
+**Task:** T-8.3 (#61)
+
+Two limits, on two surfaces, and neither covers the other's.
+
+| | where | keyed on | ceiling |
+|---|---|---|---|
+| Gateway | `RequestRateLimiter` on every proxied route | the Keycloak `sub`, else the client address | 20/s sustained, 60 burst |
+| Cloudflare | `http_ratelimit` ruleset, `infra/terraform/edge` | `ip.src` + `cf.colo.id` | 300 per minute, 60s block |
+
+**What the gateway limit does not cover, by construction.** `RequestRateLimiter` is a *gateway
+filter*, so it applies to what the gateway proxies (`/services/core/**`) and not to what it serves
+itself — `/api/auth-info`, actuator, the OIDC login endpoints. It also runs *after* Spring Security,
+so an unauthenticated request is rejected with 401 before it reaches the limiter and never counts
+against a bucket.
+
+That is why the edge rule exists rather than being a second opinion. The application hostname is
+behind Cloudflare Access, so unauthenticated traffic never reaches the origin; identity is a
+different hostname that never passes through the gateway at all, and it is the only hostname on the
+zone with no Access in front. The edge rule targets exactly the hostnames where `access = false`,
+derived rather than named, so adding one adds it to the rule.
+
+**The numbers are ceilings, not tunings.** 20/s with a burst of 60 is far above a person and far
+below a script; a page load bursts tens of requests for assets and then goes quiet, which is the
+shape a token bucket is for. They are deliberately not derived from the k6 baseline, which measures
+what the pods can serve — a different question.
+
+**It fails open.** `deny-empty-key: false`: a client the resolver cannot identify is served rather
+than rejected. A limiter that fails closed turns a defect in identifying callers into an outage, and
+the edge limit is still in front. Same reasoning as ADR-0011's for the cache.
+
+**Who a client is** is the whole design, and it is in `RateLimiterConfiguration`, including the two
+ways to get it wrong that both produce one global bucket. The counters live in Valkey alongside
+sessions under a different key prefix (`request_rate_limiter.*` against
+`xenopsbase:gateway:session:*`); they are small and expire, and ADR-0009 already placed rate-limit
+counters there. Whether cache entries may share that instance is T-2.19 (#262).
+
+### Checking it
+
+```bash
+make load-ratelimit ENV=dev
+```
+
+Runs two identities at once: one floods and must be limited, one behaves and must not be. The second
+is the assertion — a limiter with one shared bucket passes the first check and fails this one.
+
+Rejections show up as `http_server_requests_seconds_count{status="429"}`. Two alerts watch it, and
+neither is "429s are high": `GatewayRequestMetricsMissing` fires when the gateway reports no request
+metrics at all — a limiter nobody can see is indistinguishable from one that was never wired — and
+`GatewayRateLimitingBroadly` fires when more than a tenth of all requests are being rejected for
+fifteen minutes, which is no longer plausibly one client.
+
 ## Known gaps
 
 **Nothing reaps `idempotency_record`.** Rows accumulate. As with the abandoned-upload reaper in

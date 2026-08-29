@@ -1,0 +1,75 @@
+# Is the rate limiter doing anything, and is it doing too much? (T-8.3, #61)
+#
+# A rate limiter is the shape of component that is invisible when it is right
+# and invisible when it is wrong. It returns 429s nobody sees, or it returns
+# none because it was never wired, and both look identical from the outside --
+# the same class of failure as #155, where two services exported no metrics at
+# all for weeks while everything reported healthy.
+#
+# So there are two rules, and they alert on opposite things.
+#
+# WHY THERE IS NO "429 RATE IS HIGH" ALERT
+#
+# Some 429s are the limiter working. A threshold on the rate would fire on a
+# single misbehaving script -- which is the system doing its job, at 3am, to
+# somebody who then learns to ignore it. What is worth waking up for is a
+# limiter rejecting a share of ALL traffic large enough that it is no longer
+# plausibly one client, and that is a ratio rather than a count.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: rate-limit
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: xenopsbase
+spec:
+  groups:
+    - name: rate-limit
+      rules:
+        # THE ONE THAT SAYS THE LIMITER IS GOVERNING SOMETHING.
+        #
+        # `absent()` rather than a threshold, for the reason
+        # alerts-application-metrics.yaml gives: a rule that needs the series to
+        # exist stays silent forever when it does not, which is precisely the
+        # state a limiter that was never wired would be in.
+        #
+        # This is deliberately not "no 429s have been seen" -- a healthy week
+        # produces none. It is "the gateway is not reporting request status at
+        # all", which is the pipeline being broken rather than the limiter being
+        # quiet.
+        - alert: GatewayRequestMetricsMissing
+          expr: absent(http_server_requests_seconds_count{namespace="apps", service="gateway"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: The gateway is reporting no request metrics
+            description: >-
+              http_server_requests_seconds_count is absent for the gateway, so neither the
+              rate limiter's rejections (T-8.3) nor anything else about request handling can
+              be observed. The limiter may be working perfectly; nothing here can tell.
+            runbook: docs/runbooks/http-contract.md#rate-limiting
+
+        # THE ONE THAT SAYS IT IS REJECTING TOO MUCH.
+        #
+        # A tenth of all requests being rejected is not one client on a loop; it
+        # is either a limit set too low for real use or something being retried
+        # into the wall. Both are worth a look and neither is an emergency, so
+        # this is a warning with a long `for`.
+        - alert: GatewayRateLimitingBroadly
+          expr: |
+            sum(rate(http_server_requests_seconds_count{namespace="apps", service="gateway", status="429"}[10m]))
+            /
+            sum(rate(http_server_requests_seconds_count{namespace="apps", service="gateway"}[10m]))
+            > 0.10
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Over 10% of gateway requests are being rate limited
+            description: >-
+              Sustained for 15 minutes, which is longer than a single client on a loop.
+              Either the ceiling in application.yml is below what real use needs, or a
+              client is retrying into it. Check which key is being limited before changing
+              the number.
+            runbook: docs/runbooks/http-contract.md#rate-limiting
