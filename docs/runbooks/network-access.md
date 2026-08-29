@@ -31,7 +31,7 @@ Once per tailnet, not per cluster.
    |---|---|---|
    | Description | `xenopsbase-nodes` | The only way to identify it later for revocation |
    | **Reusable** | **on** | Every node authenticates with this one key. Off means only the first node joins and the rest hang waiting — which looks like a network fault rather than a key problem |
-   | Expiration | 90 days (the maximum) | The key expires, not the nodes. Diarise a regeneration |
+   | Expiration | 90 days (the maximum) | The key expires, not the nodes. **Record the date** in `tailscale_auth_key_expires_at`; `make preflight` is what remembers it, because diarising is the control this project keeps finding does not work |
    | **Ephemeral** | **on** | See below |
    | Tags | off | Requires `tagOwners` / `autoApprovers` in the tailnet ACL first. The module treats tags as optional; skip until there is a reason |
 
@@ -102,9 +102,37 @@ hand.
 
 ### Rotating the Tailscale auth key
 
-Auth keys are used at join time only, so rotating one does not disconnect running nodes. Generate a
-new reusable key, update `TF_VAR_tailscale_auth_key`, and revoke the old one. The next node to join
-uses the new key.
+Auth keys are used at join time only, so rotating one does not disconnect running nodes. Tailscale
+is explicit about it — *"If an auth key expires, any device authorized by it remains authorized
+until its node key expires"* — and revoking is no different: revoking a key does not deauthorize
+the nodes that used it. So nothing degrades to warn you. A running cluster stays healthy right up
+until somebody rebuilds it, and then no node joins at all (T-1.30, #350).
+
+**The key lives in two places and both have to move.** Updating one and not the other produces a
+cluster that builds locally and not in CI, or the reverse:
+
+| copy | used by | how to set it |
+|---|---|---|
+| `TF_VAR_tailscale_auth_key` in `~/.xenopsbase.env` | local `make up` | edit the file, then `source ~/.xenopsbase.env` |
+| the `TAILSCALE_AUTH_KEY` Actions secret | `plan (cluster)` in CI, which cannot run at all without it (T-1.17) | `bash infra/scripts/set-ci-secrets.sh`, which reads the environment you just sourced |
+
+The procedure:
+
+1. Admin console → **Settings → Keys** → *Generate auth key*, with the same settings as the
+   first-time table above: **Reusable on, Ephemeral on**, 90 days.
+2. Update `~/.xenopsbase.env`, then `source ~/.xenopsbase.env`.
+3. `bash infra/scripts/set-ci-secrets.sh` — this is the copy that gets forgotten.
+4. **Record the new expiry** in `tailscale_auth_key_expires_at` in
+   `infra/terraform/cluster/env/<env>.tfvars`. Nothing recomputes this: the expiry is only visible
+   in the console, and reading it from code would need a Tailscale API key the project does not
+   hold (#290).
+5. Revoke the old key. The next node to join uses the new one.
+
+**What warns you.** `make preflight` (which `make up` runs first) compares the recorded date against
+the clock: it prints the days remaining on every run, warns without blocking inside 30 days, and
+refuses to apply once the date has passed. A date left stale by a rotation therefore reads as
+expired and stops a build — the safe direction for a copy that nothing can verify against its
+source. `TAILSCALE_KEY_WARN_DAYS` moves the warning window.
 
 ## Verifying what is actually exposed
 
@@ -231,8 +259,9 @@ kubectl -n kube-system get deploy hcloud-cloud-controller-manager \
 
 **Nodes boot but never become Ready, and Terraform hangs**
 Almost always the Tailscale auth key. Check it is **reusable** and not expired — a single-use key
-registers the first node and leaves the others waiting forever. The Tailscale admin console shows
-which machines joined.
+registers the first node and leaves the others waiting forever, and an expired one admits no node
+at all. `make preflight cluster` answers the expiry half before an apply starts; the Tailscale admin
+console shows which machines joined.
 
 **`terraform apply` cannot reach nodes at all**
 The machine running Terraform is not on the tailnet, or Tailscale is not running on it. There is no
