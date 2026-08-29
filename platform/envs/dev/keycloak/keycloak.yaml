@@ -10,14 +10,34 @@ spec:
   # restart losing sessions costs nothing. Prod runs 2+.
   instances: 1
 
-  # Pinned, and deliberately NOT 26.7.2, which was released the same day this
-  # was written. An identity provider is the wrong component to be first on.
+  # MOVED TO 26.7.2, REVERSING THE LINE THAT WAS HERE (T-6.10, #332)
+  #
+  # This said "deliberately NOT 26.7.2, which was released the same day this was
+  # written. An identity provider is the wrong component to be first on." Both
+  # halves turned out to argue the other way.
+  #
+  # The date was wrong. 26.7.2 was published 2026-08-19, ten days before that
+  # comment; the image on quay was rebuilt 2026-08-27. Nobody would have been
+  # first on it.
+  #
+  # And the caution inverts once you read what is in the release. 26.7.2 is a
+  # security release carrying seven CVE fixes, two of them account takeover:
+  #
+  #   CVE-2026-18963  unauthenticated account takeover via a reset-credentials
+  #                   flow bypass -- CRITICAL, and what the platform image scan
+  #                   flagged against 26.7.1
+  #   CVE-2026-15571  account takeover via a predictable account-linking hash
+  #
+  # "The wrong component to be first on" is an argument about unproven releases.
+  # It is not an argument for running an identity provider with a known
+  # unauthenticated takeover in it. Measured against the pinned digest, this
+  # bump takes the scan from 16 gating findings to 1.
   #
   # WHEN THIS DIGEST MOVES (T-6.9, #330)
   #
   # Together with the operator, never on its own. The operator is pinned by
   # release ref in platform/components/keycloak-operator/kustomization.yaml
-  # (`?ref=26.7.1`), and it reconciles this CR against the API and the CRDs of
+  # (`?ref=26.7.2`), and it reconciles this CR against the API and the CRDs of
   # the version it ships. Those two references name one Keycloak version in two
   # files, so a Keycloak upgrade is: change the operator ref, resolve the image
   # for the same tag, move both in one commit.
@@ -32,7 +52,7 @@ spec:
   #
   # `startOptimized: false` below is required by this line existing at all, so
   # dropping the pin is not a one-line change either. Read that comment first.
-  image: quay.io/keycloak/keycloak@sha256:f1f1f01e472c8a78df40d8f2a49a925274eda4d3d80d5f6edbb5c880ee3c01c6  # 26.7.1, resolved 2026-08-29
+  image: quay.io/keycloak/keycloak@sha256:9d1f1b2b7261ff53c66cb1092dfcdc34a5fb77e81f9e6a6e75b8b6a795de8067  # 26.7.2, resolved 2026-08-29
 
   # Required BECAUSE spec.image is set. Naming an image makes the operator
   # assume it is a custom, pre-built (augmented) image and start it with

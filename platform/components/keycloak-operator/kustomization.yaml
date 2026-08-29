@@ -32,4 +32,4 @@ kind: Kustomization
 # Under components/ because nothing here is environment-specific. The Keycloak
 # instance and its realm live per environment.
 resources:
-  - https://github.com/keycloak/keycloak-k8s-resources//kubernetes?ref=26.7.1
+  - https://github.com/keycloak/keycloak-k8s-resources//kubernetes?ref=26.7.2
