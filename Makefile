@@ -290,7 +290,7 @@ storage-apply: ## Apply changes to the durable buckets
 	@cd $(STORAGE_DIR) && terraform apply $(APPROVE) -var-file=$(TFVARS) $$(test -f $(SECRETS) && echo -var-file=$(SECRETS))
 
 .PHONY: storage-lifecycle
-storage-lifecycle: ## Apply and verify bucket lifecycle rules from infra/lifecycle/*.json
+storage-lifecycle: ## Apply and verify bucket lifecycle rules from infra/lifecycle/$(ENV)/ (T-1.14)
 	@bash $(SCRIPTS)/apply-lifecycle-rules.sh $(ENV)
 
 # Deliberately absent: storage-destroy.

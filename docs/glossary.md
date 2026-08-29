@@ -510,8 +510,8 @@ An automatic policy on a bucket: delete objects after N days, expire old version
 
 Bucket üzerinde otomatik kural: N gün sonra sil, eski sürümleri sonlandır, yarım kalan yüklemeleri temizle. Maliyet kontrolün budur.
 
-> **In XenOpsBase:** infra/lifecycle/*.json, applied by make storage-lifecycle.  
-> **XenOpsBase'de:** infra/lifecycle/*.json dosyaları, make storage-lifecycle ile uygulanıyor.
+> **In XenOpsBase:** infra/lifecycle/<environment>/*.json, applied by make storage-lifecycle.  
+> **XenOpsBase'de:** infra/lifecycle/<environment>/*.json dosyaları, make storage-lifecycle ile uygulanıyor.
 
 ### Node
 **TR:** Node (düğüm / makine)
