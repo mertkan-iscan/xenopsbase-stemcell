@@ -360,6 +360,42 @@ variable "tailscale_auth_key" {
   sensitive   = true
 }
 
+variable "tailscale_auth_key_expires_at" {
+  description = <<-EOT
+    The day the Tailscale auth key stops working, as YYYY-MM-DD.
+
+    NOT read by any resource here. It exists so that `make preflight` has a date
+    to compare today against, because nothing else in this project can obtain
+    one: the expiry lives in the Tailscale admin console, and reading it needs a
+    Tailscale API key this project deliberately does not hold (T-1.29, #290).
+
+    So this is a copy of a fact that lives elsewhere, which is the drift this
+    repository has already been bitten by twice -- T-6.9's image pins, T-4.4's
+    tool versions. Both were fixed by making the copy check itself against its
+    source. That is not available here, so the mitigation is different: the date
+    is checked against the CLOCK rather than against the console, and a copy
+    that is wrong by being stale fails closed. A date left behind after a
+    rotation reads as expired and stops an apply; it cannot read as valid for
+    longer than the real key.
+
+    Why it matters more than an unreachable node: under
+    node_transport_mode = "tailscale" the k3s join endpoint is itself a tailnet
+    address, so an expired key does not degrade access -- no node joins at all,
+    and cloud-init's failure does not fail server creation, so Terraform reports
+    success over a cluster that never formed.
+
+    Empty disables the check. Set it whenever the key is rotated; the procedure
+    is in docs/runbooks/network-access.md and names both copies of the key.
+  EOT
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.tailscale_auth_key_expires_at == "" || can(formatdate("YYYY-MM-DD", "${var.tailscale_auth_key_expires_at}T00:00:00Z"))
+    error_message = "tailscale_auth_key_expires_at must be YYYY-MM-DD, or empty to disable the expiry check."
+  }
+}
+
 variable "tailscale_magicdns_domain" {
   description = <<-EOT
     The tailnet's MagicDNS domain, e.g. "tail1a2b3c.ts.net".

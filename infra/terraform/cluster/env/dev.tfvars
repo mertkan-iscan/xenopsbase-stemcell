@@ -271,6 +271,19 @@ load_balancer_type  = "lb11"
 node_transport_mode       = "tailscale"
 tailscale_magicdns_domain = "tail894b71.ts.net"
 
+# The key's own expiry, copied from the admin console on 2026-08-29 (T-1.30).
+#
+# 90 days is the maximum Tailscale allows and this key takes it, so this date
+# moves roughly quarterly and its being wrong is the expected failure. It fails
+# closed: `make preflight` compares it against the clock, warns inside 30 days
+# and refuses an apply past it, so a date left stale by a rotation stops a build
+# rather than waving one through.
+#
+# Nothing recomputes this. The console is the source of truth and the project
+# holds no Tailscale API key to ask it (#290), which is the whole reason the
+# date is written down here at all.
+tailscale_auth_key_expires_at = "2026-11-17"
+
 # firewall_source_cidrs is deliberately NOT set here. It is a home IP address
 # and this repository is public, so it comes from TF_VAR_firewall_source_cidrs.
 #
