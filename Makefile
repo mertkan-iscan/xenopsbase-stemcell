@@ -662,6 +662,10 @@ connection-budget: ## Do the HPA ceiling, the pools and max_connections add up? 
 resource-audit: ## What each namespace BOOKS against what it USES, read from the cluster (T-2.26)
 	@KUBECONFIG="$(CURDIR)/infra/terraform/cluster/kubeconfig" python infra/scripts/resource-audit.py $(ARGS)
 
+.PHONY: verify-alert-runbooks
+verify-alert-runbooks: ## Does every alert link to a runbook section that exists? (T-7.6)
+	@bash $(SCRIPTS)/verify-alert-runbooks.sh
+
 .PHONY: verify-resources
 verify-resources: ## Every workload we own declares CPU and memory requests (T-2.15)
 	@bash $(SCRIPTS)/verify-resources.sh

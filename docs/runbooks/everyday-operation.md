@@ -226,5 +226,31 @@ See [terraform-state.md](terraform-state.md); do not force-unlock without readin
 **Everything looks fine but nothing serves.** `make up` already waited for the stack, so this means
 the wait timed out or something regressed after. Start with `kubectl get pods -A | grep -v Running`.
 
+**An alert fired and you want to know what to do.** Every alert carries a `runbook` annotation
+pointing at the section that answers it, and `make verify-alert-runbooks` fails if any of them
+points at a file or heading that does not exist — so the link in the mail is one you can follow
+rather than one somebody meant to update (T-7.6).
+
+**No JVM metrics from an application.** `ApplicationMetricsMissing` or `HttpServerMetricsMissing`.
+Check `/management/prometheus` on the pod first: a 404 there is the Micrometer registry being off,
+a connection refused is the pod. The alert exists because both services exported nothing for weeks
+while every component reported healthy (#155) — the failure has no symptom, so the alert is
+`absent()` rather than a threshold.
+
+**The error budget is burning.** `ErrorBudgetBurningFast` or `…Slowly`. These are the published
+objectives in [slos.md](../slos.md#the-objectives), alerted on as a burn rate over two windows at
+once: the long one says it is real, the short one says it is still happening. Fast means the
+month's budget is gone in about two days and warrants stopping what you are doing; slow means five
+days and warrants a card.
+
 Deeper reference for the cluster itself — first-time setup, the Packer snapshot, CCM and CSI
 verification, upgrades — is in [cluster.md](cluster.md). This page is the everyday subset.
+
+## After an incident
+
+Copy [postmortem-template.md](../postmortem-template.md); do not edit it in place.
+
+Its load-bearing section is *"why it was not caught sooner"*, which is a different question from
+what broke. The answers this project has actually needed are all in there as prompts — no check
+existed, a check reported success while governing nothing, an alert reached a receiver nobody
+reads, or the runbook link had been renamed out from under the alert.

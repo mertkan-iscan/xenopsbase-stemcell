@@ -1,0 +1,163 @@
+# Alerts against the published objectives, not against machine numbers (T-7.6, #58).
+#
+# WHY BURN RATE AND NOT A THRESHOLD
+#
+# docs/slos.md publishes an error rate of < 1%. The obvious alert is "error rate
+# above 1%", and it is the wrong one twice over: it fires on a thirty-second
+# blip that consumed a rounding error of the month's budget, and it stays silent
+# through a 0.9% error rate that burns the entire budget in three weeks.
+#
+# Burn rate asks the question the objective is actually about -- how fast is the
+# error budget going -- and answers it on two windows at once. The long window
+# says the problem is real; the short one says it is still happening. Either
+# alone produces the alert nobody trusts: long-only keeps firing after recovery,
+# short-only fires on every blip.
+#
+#   14.4x over 1h  (with 5m confirming)   the budget is gone in ~2 days   -> critical
+#    6x  over 6h   (with 30m confirming)  gone in ~5 days                 -> warning
+#
+# Both numbers come from the SRE workbook's multi-window scheme for a 99%
+# objective and are not tuned here; tuning them without a month of history would
+# be inventing a number and calling it measured.
+#
+# WHAT THE SLI IS MEASURED ON, AND WHY IT IS NOT PER PATH ON THE GATEWAY
+#
+# Measured on the running cluster, 2026-08-29: `http_server_requests_seconds`
+# carries a templated `uri` on core --
+#
+#   /api/documents  /api/documents/{id}  /api/documents/{id}/download
+#
+# -- and on the gateway carries only `/management/*`, `REDIRECTION` and
+# `UNKNOWN` for anything it PROXIES. Spring Cloud Gateway does not produce a
+# route-templated uri tag, so a per-path availability rule on the gateway would
+# match nothing and report a healthy service forever.
+#
+# So availability is measured per SERVICE, with the management endpoints
+# excluded -- they are scraped constantly and would dominate the ratio,
+# flattering it. Latency, which the objectives state per path, is measured where
+# the path is actually visible: the gateway's own endpoint on the gateway, and
+# the document endpoints on core.
+#
+# WHAT THIS DOES NOT MEASURE
+#
+# Nothing here sees Cloudflare, the tunnel or ingress-nginx. slos.md says the
+# same of the baseline that produced the numbers, and for the same reason. An
+# alert that cannot see the edge should not imply that it can.
+#
+# The through-core latency objective is stated end to end (gateway -> core ->
+# Postgres) and is alerted on at CORE, so the gateway hop is missing from it.
+# That hop has its own objective and its own alert below; together they cover the
+# path, which is the closest this gets without a uri tag the gateway does not
+# emit.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: slo
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: xenopsbase
+spec:
+  groups:
+    - name: slo-availability
+      rules:
+        # The SLI, recorded once and read four times. Written as a recording
+        # rule rather than repeated in each alert because four copies of one
+        # expression is four places for the exclusion list to drift.
+        - record: xenopsbase:request_error_ratio:rate5m
+          expr: |
+            sum by (service) (rate(http_server_requests_seconds_count{namespace="apps", status=~"5..", uri!~"/management.*"}[5m]))
+            /
+            sum by (service) (rate(http_server_requests_seconds_count{namespace="apps", uri!~"/management.*"}[5m]))
+        - record: xenopsbase:request_error_ratio:rate30m
+          expr: |
+            sum by (service) (rate(http_server_requests_seconds_count{namespace="apps", status=~"5..", uri!~"/management.*"}[30m]))
+            /
+            sum by (service) (rate(http_server_requests_seconds_count{namespace="apps", uri!~"/management.*"}[30m]))
+        - record: xenopsbase:request_error_ratio:rate1h
+          expr: |
+            sum by (service) (rate(http_server_requests_seconds_count{namespace="apps", status=~"5..", uri!~"/management.*"}[1h]))
+            /
+            sum by (service) (rate(http_server_requests_seconds_count{namespace="apps", uri!~"/management.*"}[1h]))
+        - record: xenopsbase:request_error_ratio:rate6h
+          expr: |
+            sum by (service) (rate(http_server_requests_seconds_count{namespace="apps", status=~"5..", uri!~"/management.*"}[6h]))
+            /
+            sum by (service) (rate(http_server_requests_seconds_count{namespace="apps", uri!~"/management.*"}[6h]))
+
+        - alert: ErrorBudgetBurningFast
+          # 14.4 x the 1% budget = 14.4%. Both windows must agree.
+          expr: |
+            xenopsbase:request_error_ratio:rate1h > (14.4 * 0.01)
+            and
+            xenopsbase:request_error_ratio:rate5m > (14.4 * 0.01)
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $labels.service }} is burning its error budget in about two days"
+            description: >-
+              Over 14% of requests to {{ $labels.service }} are failing, on both a 1h and a 5m
+              window, so this is neither a blip nor an artefact of a long average. The published
+              objective is under 1% (docs/slos.md).
+            runbook: docs/slos.md#the-objectives
+
+        - alert: ErrorBudgetBurningSlowly
+          expr: |
+            xenopsbase:request_error_ratio:rate6h > (6 * 0.01)
+            and
+            xenopsbase:request_error_ratio:rate30m > (6 * 0.01)
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.service }} is burning its error budget in about five days"
+            description: >-
+              Around 6% of requests to {{ $labels.service }} are failing and have been for hours.
+              Not an outage; at this rate the month's budget is gone in five days.
+            runbook: docs/slos.md#the-objectives
+
+    - name: slo-latency
+      rules:
+        # p95 over 30 minutes rather than the histogram's own quantile over a
+        # short window: the objective is about typical behaviour, and a 5m p95 on
+        # a quiet dev cluster is decided by a handful of requests.
+        #
+        # histogram_quantile over the bucket series rather than a threshold count
+        # on a specific `le`. Micrometer's default bucket set has values at
+        # 0.0503 and 0.2013 -- close enough to the objectives to be tempting --
+        # but they are generated, not configured, and a Micrometer upgrade that
+        # moved them would leave a rule matching a label that no longer exists.
+        # Silently, and in the healthy direction.
+        - alert: GatewayLatencyObjectiveBreached
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (le) (rate(http_server_requests_seconds_bucket{namespace="apps", service="gateway", uri="/api/auth-info"}[30m]))
+            ) > 0.05
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: The gateway's own p95 is over its 50ms objective
+            description: >-
+              /api/auth-info makes no downstream call and touches no database, so this is the
+              gateway itself -- the filter chain, TLS termination and the event loop. Measured
+              baseline was 19.8ms and the objective is 50ms (docs/slos.md).
+            runbook: docs/slos.md#the-objectives
+
+        - alert: CoreLatencyObjectiveBreached
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (le) (rate(http_server_requests_seconds_bucket{namespace="apps", service="core", uri=~"/api/documents.*"}[30m]))
+            ) > 0.2
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Core's document endpoints are over the 200ms p95 objective
+            description: >-
+              Measured at core, so the gateway hop is not included -- that hop has its own
+              objective and its own alert. The published end-to-end objective is 200ms p95
+              (docs/slos.md).
+            runbook: docs/slos.md#the-objectives

@@ -93,6 +93,7 @@ spec:
           labels:
             severity: warning
           annotations:
+            runbook: docs/runbooks/database.md#the-disk-is-filling
             summary: "{{ $labels.persistentvolumeclaim }} is {{ $value | printf \"%.0f\" }}% full"
             description: >-
               The volume has been over 80% for half an hour. If this is a
@@ -113,6 +114,7 @@ spec:
           labels:
             severity: critical
           annotations:
+            runbook: docs/runbooks/database.md#the-disk-is-filling
             summary: "{{ $labels.persistentvolumeclaim }} is {{ $value | printf \"%.0f\" }}% full"
             description: >-
               Over 90%. A Postgres volume that fills stops accepting writes;
@@ -137,6 +139,7 @@ spec:
           labels:
             severity: warning
           annotations:
+            runbook: docs/runbooks/database.md#the-disk-is-filling
             summary: "{{ $labels.persistentvolumeclaim }} is on course to fill within 4 hours"
             description: >-
               Extrapolated from the last six hours. This fires before the
@@ -155,6 +158,7 @@ spec:
           labels:
             severity: warning
           annotations:
+            runbook: docs/runbooks/database.md#the-disk-is-filling
             summary: "No volume metrics are reaching Prometheus"
             description: >-
               kubelet_volume_stats_capacity_bytes has no series at all. Every
