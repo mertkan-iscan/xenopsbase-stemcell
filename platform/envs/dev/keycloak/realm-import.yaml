@@ -43,12 +43,27 @@ spec:
   # 1280Mi limit is far more than importing 400 lines of realm needs -- the
   # SERVING instance runs on a 184Mi committed heap.
   #
-  # Changing this field makes the operator run the import again, which is safe
-  # and was not always: ADR-0010 pins an explicit `id` on every declared user, so
-  # a re-import restores the same subs and the documents keep their owner. That
-  # is the fix T-7.8 (#147) landed. It does NOT cover users created at runtime
-  # through the admin API, which ADR-0010 records as a knowing gap -- dev has
-  # none, a fork with real users would.
+  # WHEN THIS VALUE ACTUALLY TAKES EFFECT
+  #
+  # Not when it is changed. Observed on dev 2026-08-29, when #340 added this
+  # block: Argo synced the CR, the operator accepted it, and the existing Job
+  # was left exactly as it was -- still declaring the operator's 1700Mi. A Job's
+  # pod template is immutable, so applying a new value means deleting and
+  # recreating the Job, and the operator does that when the REALM changes rather
+  # than when the CR does.
+  #
+  # So this lands on the next import the operator runs, which in practice means
+  # the next cold rebuild. Two consequences worth being clear about: the 1700Mi
+  # booking survives on the current cluster until then, and the first proof this
+  # figure is big enough will be that rebuild rather than anything before it.
+  #
+  # It also means changing this does NOT re-import the realm as a side effect,
+  # which was the risk it looked like it carried. If a re-import does happen for
+  # another reason, it is safe now and was not always: ADR-0010 pins an explicit
+  # `id` on every declared user, so the subs come back the same and documents
+  # keep their owner -- the fix T-7.8 (#147) landed. That covers declared users
+  # only; one created at runtime through the admin API still gets a fresh id,
+  # which ADR-0010 records as a knowing gap.
   resources:
     requests: {memory: 896Mi}
     limits: {memory: 1280Mi}
