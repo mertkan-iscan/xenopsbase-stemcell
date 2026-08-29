@@ -262,6 +262,14 @@ bootstrap-state: ## Create the Terraform state bucket in R2 (idempotent, runs be
 verify-locking: ## Prove state locking actually refuses a concurrent operation
 	@bash $(SCRIPTS)/verify-state-locking.sh $(STORAGE_DIR)/backend.hcl
 
+.PHONY: state-backup
+state-backup: ## Copy every state object from R2 into the versioned Hetzner bucket (T-1.9)
+	@bash $(SCRIPTS)/backup-state.sh
+
+.PHONY: state-backup-verify
+state-backup-verify: ## Is the state backup real and recent? Reads it back; writes nothing (T-1.9)
+	@bash $(SCRIPTS)/backup-state.sh --verify
+
 # ------------------------------------------------------------------------------
 # Durable storage (per environment)
 # ------------------------------------------------------------------------------

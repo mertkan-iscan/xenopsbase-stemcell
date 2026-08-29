@@ -138,15 +138,65 @@ aws s3api put-object --if-none-match "*"   # twice, same key
 
 ### State is corrupted or truncated
 
-**There is currently no rollback.** R2 has no version history, and the scheduled copy into the
-versioned Hetzner bucket does not exist yet.
+There is a rollback (T-1.9, #71). R2 still has no version history; the **Hetzner `tfstate` bucket
+does**, and the `State backup` workflow copies every state object into it daily. Locking stops two
+writers corrupting each other, and this is the other half — the one bad write from a single writer.
 
-If it happens before that lands: reconstruct with `terraform import` for each resource, or destroy
-through the provider consoles and rebuild. Check for orphaned volumes and load balancers
+**1. Find the version you want.** Versions are listed newest first; the one you want is almost
+always the one *before* the write that broke it.
+
+```bash
+export AWS_ACCESS_KEY_ID="$HETZNER_S3_ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$HETZNER_S3_SECRET_KEY"
+aws --endpoint-url https://fsn1.your-objectstorage.com --region fsn1 \
+  s3api list-object-versions --bucket xenopsbase-tfstate --prefix dev/cluster.tfstate \
+  --query 'Versions[].{v:VersionId,when:LastModified,size:Size}' --output table
+```
+
+**2. Pull it down and read what it is.** `serial` goes up with every write and `lineage` identifies
+the state's whole history — a restore whose lineage does not match what the backend holds is a
+different state file, and pushing it is a much worse day than the one you are having.
+
+```bash
+aws --endpoint-url https://fsn1.your-objectstorage.com --region fsn1 \
+  s3api get-object --bucket xenopsbase-tfstate --key dev/cluster.tfstate \
+  --version-id <VERSION_ID> restored.tfstate
+
+python3 -c "import json;s=json.load(open('restored.tfstate'));print(s['serial'],s['lineage'],len(s['resources']))"
+```
+
+**3. Check it against reality before pushing it.** A restored state describes the infrastructure as
+it was at that moment, not as it is now.
+
+```bash
+terraform plan -state=restored.tfstate   # read only; expect a diff, read every line of it
+```
+
+**4. Push it.** `terraform state push` refuses a lower serial unless forced, which is the guard
+working — bump it deliberately rather than reaching for `-force` reflexively.
+
+```bash
+terraform state push restored.tfstate
+```
+
+If the backup itself is missing or stale, `infra/scripts/backup-state.sh` says so loudly rather than
+reporting success; run it by hand (or dispatch the workflow) and read what it prints. Failing that,
+the pre-#71 recovery still applies: reconstruct with `terraform import` per resource, or destroy
+through the provider consoles and rebuild — checking for orphaned volumes and load balancers
 afterwards, since those bill independently.
 
-Once the scheduled copy exists, restore from the Hetzner `tfstate` bucket's version history, verify
-with `terraform plan`, and push with `terraform state push`.
+### Checking the backup without a disaster
+
+```bash
+make state-backup-verify
+```
+
+Reads the newest version of every object out of the Hetzner bucket, compares it byte-for-byte with
+what R2 currently holds, and reports how old the newest copy is. It writes nothing, to either
+bucket, so it is safe to run at any time — including while an apply is in flight. It is every step
+of the procedure above except the final push, which is the point: a restore path nobody has walked
+is a hypothesis.
+
+Exercised on 2026-08-29 against the live buckets; see #71 for the run.
 
 ### A lock is stuck after a crashed run
 

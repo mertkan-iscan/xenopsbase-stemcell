@@ -1,0 +1,97 @@
+name: State backup
+
+# Copies Terraform state from R2 into the versioned Hetzner bucket (T-1.9, #71).
+#
+# WHY THIS EXISTS
+#
+# ADR-0005 moved state to R2 for locking, which Hetzner cannot do, and paid for
+# it with version history, which R2 does not have. Locking stops two writers
+# corrupting each other. It does nothing about one writer making a bad write --
+# a botched `terraform state rm`, a bad import, a truncated upload -- and until
+# this landed, docs/runbooks/terraform-state.md said in as many words that there
+# was no way back from any of those.
+#
+# WHY THE SCHEDULE IS THE WHOLE POINT, AND WHERE IT CAN STILL FAIL
+#
+# A backup taken when somebody remembers is not a backup. This runs daily.
+#
+# The residual risk is the schedule itself not firing: GitHub disables scheduled
+# workflows in a repository after 60 days without activity, and does it
+# silently. Nothing goes red, because nothing runs. That is exactly the shape of
+# control failure this repository keeps finding, so it is handled rather than
+# hoped about -- backup-state.sh checks the AGE of the newest object in the
+# destination and fails when it is older than the schedule should allow. The
+# next run that happens at all reports the gap, which is a weaker guarantee than
+# a heartbeat and a much stronger one than a green tick.
+#
+# WHAT IT DOES NOT DO
+#
+# It never writes to R2. A restore is a human operation with a `terraform plan`
+# in the middle of it, and an automated writer to the state backend is precisely
+# the concurrent-write hazard ADR-0005's locking exists to prevent. The
+# procedure is in the runbook; `verify_only` rehearses every step of it except
+# the final push.
+on:
+  schedule:
+    # 03:17 UTC. Off the hour on purpose: GitHub queues scheduled runs at the
+    # top of the hour heavily enough that a :00 cron is the one most likely to
+    # be delayed or dropped.
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      verify_only:
+        description: 'Verify the existing backup without copying anything.'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  # One at a time. Two copies racing would not corrupt anything -- each object
+  # is written whole -- but interleaved output is unreadable during the one
+  # occasion anybody reads it.
+  group: state-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: copy state to the versioned bucket
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Copy and verify
+        id: backup
+        env:
+          # The state backend's credentials. NOT the Hetzner ones: they are
+          # different accounts, and the script refuses to start without both.
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          HETZNER_S3_ACCESS_KEY: ${{ secrets.HETZNER_S3_ACCESS_KEY }}
+          HETZNER_S3_SECRET_KEY: ${{ secrets.HETZNER_S3_SECRET_KEY }}
+        run: |
+          if [ "${{ inputs.verify_only }}" = "true" ]; then
+            bash infra/scripts/backup-state.sh --verify | tee /tmp/backup.txt
+          else
+            bash infra/scripts/backup-state.sh | tee /tmp/backup.txt
+          fi
+
+      # Written whether it passed or failed. The run log is where this lives
+      # today, and a log is something somebody has to open; the summary is on
+      # the run page itself, which is what a person looking at a red scheduled
+      # job actually sees first.
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '### Terraform state backup'
+            echo ''
+            echo '```'
+            cat /tmp/backup.txt 2>/dev/null || echo 'the backup step produced no output'
+            echo '```'
+            echo ''
+            echo 'Restore procedure: `docs/runbooks/terraform-state.md`, *State is corrupted or truncated*.'
+          } >> "$GITHUB_STEP_SUMMARY"
