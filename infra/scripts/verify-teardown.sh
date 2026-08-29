@@ -118,24 +118,33 @@ check_no_autoscaled
 
 # REPORTED, NOT ASSERTED (T-1.29, #290).
 #
-# A destroyed node should leave the tailnet with it. It does not: the auth key
-# is reusable but not ephemeral, so every rebuild leaves a device behind
-# holding the name its successor wanted, and MagicDNS then answers that name
-# with a corpse.
+# A destroyed node leaves the tailnet with it, but NOT IMMEDIATELY (T-1.29,
+# #290). The auth key is reusable AND ephemeral -- verified in the admin console
+# on 2026-08-29, where it has been since 2026-08-19 -- and an ephemeral device is
+# reaped after the node stops heartbeating rather than when it dies.
 #
-# This does NOT fail the teardown. Ephemerality is a property of the key as
-# issued in the Tailscale admin console, so nothing in this repository can fix
-# it, and a gate that cannot be satisfied from here would only teach people to
-# ignore it. What it can do is make the number visible, because the failure it
-# leads to -- a node unreachable by name while it is running and healthy --
-# arrives with nothing pointing back at this.
+# So a non-zero count here, straight after a destroy, is the NORMAL reading. It
+# is what a teardown looks like from the outside for the next few minutes.
+#
+# This comment previously said the key was not ephemeral and told the reader to
+# reissue it. That was #290's diagnosis and it was wrong: the offline devices it
+# found were inside the reap window, and they went. The defect that survives is
+# the NAME -- Tailscale appends `-1` when a name is still taken, and a rebuild
+# faster than the reap window gives the new node a suffixed name it then keeps
+# for life. verify-node-provenance resolves through `tailscale status` for that
+# reason, permanently.
+#
+# It does not fail the teardown, and now for a better reason than "nothing here
+# can fix it": a count taken seconds after a destroy is measuring a clock, not a
+# leak. What is worth a human's attention is a count that is still there long
+# afterwards, which no single run of this can tell you.
 if command -v tailscale >/dev/null 2>&1; then
-  printf '  %-30s ' "tailnet leftovers"
+  printf '  %-30s ' "tailnet, reaping"
   stale="$(tailscale status 2>/dev/null | grep "${CLUSTER_NAME:-xenopsbase}-${ENVIRONMENT}" | grep -c offline || true)"
   if [ "${stale:-0}" -eq 0 ]; then
-    echo "none"
+    echo "none pending"
   else
-    echo "$stale offline device(s)  <-- #290: reissue the auth key as ephemeral"
+    echo "$stale device(s) awaiting reaping (expected; see #290 if still there in an hour)"
   fi
 fi
 
