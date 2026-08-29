@@ -99,25 +99,41 @@ runcmd:
   #    The key must be REUSABLE: a single-use key registers the first node and
   #    the rest hang waiting to join.
   #
-  #    IT SHOULD ALSO BE EPHEMERAL AND IS NOT (T-1.29, #290). This comment used
-  #    to assert it was, and the tailnet says otherwise -- eight offline devices
-  #    for a cluster that has been rebuilt eight times, each still holding the
-  #    name its successor wanted:
+  #    IT IS ALSO EPHEMERAL, AND THE NAMES STILL COLLIDE (T-1.29, #290).
+  #
+  #    This comment has now been wrong in both directions. It first asserted
+  #    ephemerality without checking; then #290 found offline devices and it was
+  #    rewritten to assert the opposite. The console settles it -- one key,
+  #    described `xenopsbase-nodes`, `Reusable, Ephemeral`, created 2026-08-19,
+  #    which is BEFORE the evidence that was read as proving it was not.
+  #
+  #    What #290 actually photographed was the reap window. An ephemeral device
+  #    is removed after the node stops heartbeating, not at the moment it dies:
   #
   #      xenopsbase-dev-worker-0      offline, last seen 31m ago
   #      xenopsbase-dev-worker-0-1    offline, last seen 6m ago
   #      xenopsbase-dev-worker-0-2    the node actually running
   #
-  #    Tailscale appends a suffix when a name is taken, so MagicDNS answers
-  #    `xenopsbase-dev-worker-0` with a corpse and anything addressing a node by
-  #    name reaches nothing. That is why verify-node-provenance resolves through
-  #    `tailscale status` instead of trusting the name.
+  #    Those are devices awaiting reaping, and they do go. THE SUFFIX DOES NOT.
+  #    Tailscale appends one when a name is taken, so a rebuild that recreates a
+  #    node faster than the previous device is reaped gets `-1` -- and that name
+  #    then belongs to the running node for its whole life, long after the
+  #    device that forced it has been reaped. The tailnet self-cleans; the names
+  #    do not. Rebuilding faster than the window is exactly what this project
+  #    does on purpose.
   #
-  #    Ephemerality is a property of the key as issued, not of the `tailscale up`
-  #    below, so this cannot be fixed here: the key has to be reissued as
-  #    ephemeral in the Tailscale admin console and the existing devices removed.
-  #    make verify-teardown reports the count after every destroy so the number
-  #    is visible rather than discovered.
+  #    So MagicDNS can answer `xenopsbase-dev-worker-0` with something that is
+  #    not worker-0, and verify-node-provenance resolves through
+  #    `tailscale status` rather than trusting the name. That resolver is the
+  #    permanent answer, not a workaround waiting on a key change.
+  #
+  #    A `tailscale logout` at shutdown would deregister immediately and close
+  #    the window -- but only on a graceful stop, and the everyday path here is
+  #    `terraform destroy`, which deletes the server rather than shutting it
+  #    down. It would help a drain (T-7.9) and not a teardown.
+  #
+  #    The key expires 2026-11-17. Nothing enforces a regeneration, and an
+  #    expired key means nodes silently fail to join the next rebuild.
   #
   #    Run through `sh -c` rather than as an exec list, because cloud-init's
   #    list form does NOT go through a shell -- $(hostname) would be passed to

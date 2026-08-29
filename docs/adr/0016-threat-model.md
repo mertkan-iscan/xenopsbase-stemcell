@@ -202,8 +202,9 @@ writes to `main` writes to production.
 | **E**levation of privilege | An image runs as something it should not | Images are digest-pinned and scanned, and an unpinned one now fails the list job (T-6.9, #330). Pod Security Standards are **not** enforced and there is **no default-deny NetworkPolicy** — T-8.2 (#60). Signing and admission verification are T-6.2 (#49) | open |
 
 The tailnet belongs here too: node access is Tailscale-only, with no public SSH and no bastion
-(ADR-0006). Its live defect is **#290 (T-1.29)** — stale devices keep a name pointed at a dead
-node, which has already made a verification report a false negative.
+(ADR-0006). Its live defect is **#290 (T-1.29)** — a rebuilt node can take a suffixed name and keep
+it, so a name can point at something that is not the node it names, which has already made a
+verification report a false negative.
 
 ## Accepted risks
 

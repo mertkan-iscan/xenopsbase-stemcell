@@ -107,9 +107,15 @@ while IFS=$'\t' read -r name image_id; do
   #   xenopsbase-dev-worker-0-1    offline, last seen 6m ago
   #   xenopsbase-dev-worker-0-2    the node that is actually running
   #
-  # So the name resolves to a corpse and the ssh times out. The node bootstrap
-  # calls its key ephemeral, which would have these removed on disconnect; the
-  # devices above say otherwise, and that is #290.
+  # So the name resolves to a corpse and the ssh times out.
+  #
+  # The key IS ephemeral (T-1.29, #290: verified in the admin console, and it
+  # has been since before that card was raised), so those devices do get reaped
+  # -- but not instantly, and the suffix outlives them. A rebuild faster than the
+  # reap window gives the new node `-1`, and it keeps that name for life. This
+  # resolver is therefore permanent rather than a workaround: the collision is
+  # inherent to rebuilding faster than devices are reaped, which is the normal
+  # operating mode here.
   #
   # Prefer the live device whose name is the server name or that name plus a
   # numeric suffix. Fall back to MagicDNS when tailscale is not on this machine.
