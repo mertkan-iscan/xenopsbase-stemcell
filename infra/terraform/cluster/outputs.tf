@@ -74,3 +74,24 @@ output "expected_node_count" {
     sum([for p in var.agent_nodepools : p.count]),
   ])
 }
+
+# ------------------------------------------------------------------------------
+# THE AUTH KEY'S EXPIRY, PUT WHERE SOMETHING CAN READ IT (T-1.30, #350)
+#
+# No resource here consumes tailscale_auth_key_expires_at: the date is a fact
+# about a credential, and Terraform has nothing to do with it. `make preflight`
+# is what enforces it, reading the tfvars directly before an apply starts.
+#
+# It is surfaced as an output rather than left as a variable nothing reads, for
+# two reasons. tflint's terraform_unused_declarations is on deliberately -- an
+# undeclared-purpose variable in a repository other projects fork is inherited
+# confusion -- and suppressing it here would be the first suppression in the
+# repository, spent on hiding a real observation. And the output is worth
+# having on its own: it puts the date in state, so anything that can read state
+# can report when the cluster's join credential stops working, without being
+# told the date separately.
+# ------------------------------------------------------------------------------
+output "tailscale_auth_key_expires_at" {
+  description = "The day the Tailscale auth key stops admitting new nodes, as recorded in this environment's tfvars. Empty when the expiry is not tracked. Checked against the clock by make preflight, not by Terraform."
+  value       = var.tailscale_auth_key_expires_at
+}
