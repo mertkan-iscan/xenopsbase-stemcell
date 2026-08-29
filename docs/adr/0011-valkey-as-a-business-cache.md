@@ -166,7 +166,7 @@ A list, with the reason for each, because "use judgement" is not a control:
 
 | Never cached | Why |
 |---|---|
-| **Idempotency records** | `IdempotencyRecord` is in Postgres, written inside the request transaction (T-3.10). A miss makes a replayed request execute **twice**. Staleness here is a correctness bug, not a slow path. ADR-0009 already refused to move these into Valkey; this is the same refusal from the caching side. |
+| **Idempotency records** | `IdempotencyRecord` is in Postgres, written inside the request transaction (T-3.8, the cross-cutting HTTP contract — ADR-0009 attributes this to T-3.10, but the entity and the commit that added it both say T-3.8). A miss makes a replayed request execute **twice**. Staleness here is a correctness bug, not a slow path. ADR-0009 already refused to move these into Valkey; this is the same refusal from the caching side. |
 | **Authorisation decisions and token introspection** | Stale means access after revocation. The window this ADR accepts for reads is unacceptable for a permission. |
 | **Anything whose only copy would be in Valkey** | ADR-0009's boundary, unchanged. A cache holds a second copy of something Postgres or object storage already holds. The moment it holds the only copy, it is a database nobody backs up. |
 | **Presigned URLs and credentials** | They carry their own expiry. Caching one extends it past what the issuer chose, and the extension is invisible. |
