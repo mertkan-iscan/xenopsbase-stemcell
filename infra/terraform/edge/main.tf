@@ -162,6 +162,85 @@ resource "cloudflare_zone_setting" "min_tls_version" {
 # and a wrong rule there blocks real traffic rather than merely failing a test.
 # ------------------------------------------------------------------------------
 
+// ------------------------------------------------------------------------------
+// RATE LIMITING AT THE EDGE (T-8.3, #61).
+//
+// The gateway limits per client too (RateLimiterConfiguration), and the two are
+// not redundant. They cover different surfaces, and neither covers the other's:
+//
+//   - Spring Cloud Gateway's RequestRateLimiter is a route filter, so it applies
+//     to what the gateway PROXIES. Identity is not proxied: Keycloak is its own
+//     hostname, delivered by the tunnel straight to ingress-nginx, and never
+//     passes through the gateway at all. The login surface -- the one worth
+//     protecting from credential stuffing -- is unreachable from there.
+//   - The gateway's per-IP key is only meaningful because Cloudflare writes the
+//     forwarded header. `trusted-proxies` is '.*' for reasons measured on the
+//     live cluster; the edge is what makes that safe.
+//
+// WHY EXACTLY ONE RULE
+//
+// Cloudflare's free plan allows one rate limiting rule per zone, and requires
+// `cf.colo.id` among the characteristics -- so the count is per data centre
+// rather than global, and the effective ceiling is higher than the number
+// written here. Both are constraints of the plan rather than choices, and both
+// are the sort of thing that is easier to read here than to rediscover.
+//
+// So the one rule goes where it buys the most: the hostnames NOT behind
+// Cloudflare Access. Everything behind Access already requires an identity
+// before a request reaches the origin at all (T-8.6, #149); the hostnames
+// without it are the entire unauthenticated public surface, which today means
+// identity.
+//
+// Derived rather than named. A hostname added with `access = false` is added to
+// this rule by the same edit, instead of by somebody remembering.
+locals {
+  rate_limited_hosts = [for e in var.extra_hostnames : e.hostname if !e.access]
+
+  rate_limit_expression = length(local.rate_limited_hosts) == 0 ? null : format(
+    "http.host in {%s}",
+    join(" ", [for h in local.rate_limited_hosts : "\"${h}\""])
+  )
+}
+
+resource "cloudflare_ruleset" "rate_limit" {
+  count = var.manage_waf && local.rate_limit_expression != null ? 1 : 0
+
+  zone_id = var.zone_id
+  name    = "xenopsbase-${var.environment} rate limiting"
+  kind    = "zone"
+  phase   = "http_ratelimit"
+
+  rules = [
+    {
+      action      = "block"
+      description = "rate limit unauthenticated xenopsbase ${var.environment} hostnames per client"
+      expression  = local.rate_limit_expression
+      enabled     = true
+
+      ratelimit = {
+        // ip.src is the client; cf.colo.id is required by the free plan and
+        // makes the count per data centre. Together they mean "one client, one
+        // colo", which is the closest this plan gets to per-client.
+        characteristics = ["ip.src", "cf.colo.id"]
+
+        // 300 requests a minute is far above a person logging in and far below
+        // a credential-stuffing loop. Like the gateway's numbers, this is a
+        // ceiling rather than a tuning: the login flow is a handful of requests
+        // and anything approaching this is not a browser.
+        period              = 60
+        requests_per_period = 300
+
+        // Block for a minute once tripped, rather than for the rest of the
+        // period. Long enough to be a real cost to a script, short enough that
+        // a false positive is an annoyance rather than a support ticket -- the
+        // same trade the WAF rule below makes by choosing a challenge over a
+        // block.
+        mitigation_timeout = 60
+      }
+    },
+  ]
+}
+
 resource "cloudflare_ruleset" "waf" {
   count = var.manage_waf ? 1 : 0
 

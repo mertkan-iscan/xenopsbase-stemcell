@@ -358,6 +358,48 @@ spring:
         webflux:
           default-filters:
             - TokenRelay
+            # PER-CLIENT RATE LIMITING (T-8.3, #61).
+            #
+            # ADR-0009 named this as one of the two things that wanted a shared
+            # store -- "Per-replica counters mean the real limit is
+            # limit x replicas" -- and deferred it until there was one. Valkey
+            # is that store, and it is already a hard dependency of this gateway
+            # for sessions, so this adds a use of a component rather than a
+            # component.
+            #
+            # WHO A CLIENT IS is the whole design and it lives in
+            # RateLimiterConfiguration, including the two ways to get it wrong
+            # that both produce a single global bucket.
+            #
+            # THE NUMBERS ARE A CEILING, NOT A TUNING.
+            #
+            # 20/s sustained with a burst of 60 is far above any human and far
+            # below a script. A browser page load on the frontend (T-3.13) bursts
+            # tens of requests for assets and then goes quiet, which is exactly
+            # the shape a token bucket is for; a credential-stuffing loop is not.
+            #
+            # They are deliberately NOT derived from the k6 baseline. That
+            # measures what the pods can serve (T-5.6), which is the autoscaling
+            # question; this is "what could one client possibly be doing that is
+            # legitimate", and the honest answer is a round number with a wide
+            # margin. `make load-ratelimit` proves the limit exists and is
+            # per-client; it does not claim the number is right.
+            #
+            # WHY IT DOES NOT FAIL CLOSED
+            #
+            # deny-empty-key is false: a client this cannot identify is served,
+            # not rejected with a 403. A limiter that fails closed turns a defect
+            # in identifying callers into an outage, and Cloudflare's limit
+            # (infra/terraform/edge) is still in front of it. Same reasoning as
+            # ADR-0011's for the cache: losing the mechanism must degrade, not
+            # deny.
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@clientKeyResolver}"
+                deny-empty-key: false
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_REPLENISH:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_BURST:60}
+                redis-rate-limiter.requestedTokens: 1
           httpclient:
             pool:
               max-connections: 1000

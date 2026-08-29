@@ -606,6 +606,13 @@ hpa-local: ## Rehearse the gateway HPA on a throwaway local k3s cluster (T-2.8)
 load: ## Load baseline: k6 in-cluster against the gateway, thresholds are the SLOs (T-5.6)
 	@bash $(SCRIPTS)/load-test.sh "$(ENV)"
 
+.PHONY: load-ratelimit
+load-ratelimit: ## Is the rate limit real, and is it per client? (T-8.3)
+	@# Two identities at once: one floods and must be limited, one behaves and
+	@# must not be. The second is the assertion -- a limiter with one shared
+	@# bucket passes the first check and fails this one.
+	@bash $(SCRIPTS)/load-test.sh "$(ENV)" ratelimit.js
+
 .PHONY: load-write
 load-write: ## What does a database WRITE cost, and what does it cost a read? (T-5.15)
 	@# `load` measures reads only, deliberately -- see docs/slos.md. This measures
