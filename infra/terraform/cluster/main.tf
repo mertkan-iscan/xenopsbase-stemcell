@@ -481,50 +481,37 @@ module "kube_hetzner" {
   # storage — the volume is a working disk, not the durable copy.
   enable_hetzner_csi = true
 
-  # THE STORAGE DRIVER DECLARED NOTHING, AND HAD NO PRIORITY (T-2.25, #339).
+  # THE STORAGE DRIVER HAD NO PRIORITY (T-2.25, #339).
   #
-  # Both halves matter and the second is the sharper one. `hcloud-csi-node` runs
-  # on every node and does the attach and mount work for every PersistentVolume
-  # there -- Postgres's data directory, Prometheus's TSDB, Loki's store. Running
-  # BestEffort, it was invisible to the scheduler and FIRST in the kubelet's
-  # eviction order under node memory pressure.
+  # `hcloud-csi-node` runs on every node and does the attach and mount work for
+  # every PersistentVolume there -- Postgres's data directory, Prometheus's TSDB,
+  # Loki's store. It ran BestEffort with no priority class, which put it FIRST in
+  # the kubelet's eviction order under node memory pressure.
   #
-  # So the failure ordering was backwards: pressure killed the component storage
-  # depends on, and the workloads that caused the pressure kept running.
-  # Recovering meant the driver rescheduling before anything needed a mount.
+  # That ordering is backwards: pressure kills what storage depends on, and the
+  # workloads that caused the pressure keep running. Recovering means the driver
+  # rescheduling before anything needs a mount.
   #
-  # `system-node-critical` is a more direct instrument than a request. Priority
-  # governs eviction order explicitly where QoS only implies it, and it is what a
-  # node-level storage driver is expected to carry -- the upstream chart simply
-  # does not set it. The request is still worth having: it is what the scheduler
-  # books, and without it placement for everything else is decided as though this
-  # consumes nothing.
+  # ONLY THE PRIORITY CLASS IS SET HERE, AND THE REQUESTS ARE NOT.
   #
-  # Measured 2026-08-30, idle, forty minutes after a cold rebuild:
+  # The first version set controller and node resources too. Applying it would
+  # have made things worse rather than better: the chart's `resources` reach the
+  # MAIN container, while the LimitRange floor in platform/envs/dev/limits.yaml
+  # applies per container to the four or two sidecars beside it. The controller
+  # would have booked 160Mi plus 4 x 32Mi rather than 5 x 32Mi, for a pod
+  # measured at 62Mi.
   #
-  #   hcloud-csi-controller   127Mi   11m
-  #   hcloud-csi-node       25-45Mi   2-5m
+  # So the floor sizes these and this sets the one thing a floor cannot express.
+  # Priority governs eviction order explicitly where QoS only implies it, and it
+  # is what a node-level storage driver is expected to carry -- the upstream
+  # chart simply does not set it.
   #
-  # 160Mi and 64Mi, T-2.23's 1.25x rounded up. The controller is deliberately not
-  # left to the 64Mi floor in platform/envs/dev/limits.yaml: an idle measurement
-  # understates it, because attach and detach work is exactly what it is not
-  # doing while idle.
-  #
-  # MERGE, not replace, for the reason recorded on the CCM below: the plain
-  # values variable drops everything the module sets, including the node affinity
-  # that keeps this off robot nodes.
+  # MERGE, not replace, for the reason recorded on the CCM below: the plain values
+  # variable drops everything the module sets, including the node affinity that
+  # keeps this off robot nodes.
   hetzner_csi_merge_values = <<-EOT
-    controller:
-      resources:
-        requests:
-          cpu: 20m
-          memory: 160Mi
     node:
       priorityClassName: system-node-critical
-      resources:
-        requests:
-          cpu: 10m
-          memory: 64Mi
   EOT
 
   # Both deliberately off. ADR-0004 makes Argo CD the single owner of everything
