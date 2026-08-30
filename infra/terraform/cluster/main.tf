@@ -373,6 +373,38 @@ module "kube_hetzner" {
 
   hcloud_token = var.hcloud_token
 
+  # THE AGENT UPGRADE DRAINS, AND THE DRAIN CAN NEVER COMPLETE (T-2.30, #369).
+  #
+  # Both module defaults apply here: system_upgrade_use_drain = true and
+  # system_upgrade_enable_eviction = true, which renders the agent plan as
+  #
+  #   drain: {force: true, disableEviction: false, skipWaitForDeleteTimeout: 60}
+  #
+  # disableEviction: false means the drain goes through the Eviction API, which
+  # respects PodDisruptionBudgets. The cluster holds exactly one:
+  # database/postgres-primary, created by CNPG, selecting the primary with
+  # minAvailable 1 -- so disruptionsAllowed is 0 and stays 0. The drain waits
+  # for a budget that cannot be granted, the Job dies DeadlineExceeded, and the
+  # node is left cordoned. Observed repeatedly; it is what put 31 pods on one
+  # worker during T-2.28's testing and skewed a run.
+  #
+  # The module documents disabling eviction for exactly this ("pods resisting
+  # eviction keep nodes unschedulable forever"). That would fix the hang by
+  # deleting pods outright -- including the Postgres primary, forcing a failover
+  # on every upgrade.
+  #
+  # Cordon is the better answer here, for a reason that outlives the PDB: a
+  # drain has nowhere to put the pods. At the honest allocatable (T-2.29, #368)
+  # worker-0 carries 5892Mi of requests against 5903Mi -- 11Mi schedulable. So
+  # emptying a worker cannot succeed on capacity grounds either, PDB or no PDB,
+  # and would force the autoscaler to add a node on every upgrade.
+  #
+  # Cordon is also what the k3s-server plan already does, and that plan is the
+  # one that completes. A k3s upgrade swaps the binary and restarts the agent;
+  # containerd keeps the containers running underneath. Reboots are kured's job
+  # and the plan already excludes nodes it is rebooting.
+  system_upgrade_use_drain = false
+
   # OURS, not the module's (ADR-0013).
   #
   # Left unset, the module derives a token and every node that needs it reads
