@@ -40,6 +40,7 @@ spec:
           labels:
             severity: warning
           annotations:
+            runbook: docs/runbooks/everyday-operation.md#when-something-goes-wrong
             summary: 'No JVM metrics from at least one application in {{ $labels.namespace }}'
             description: >-
               Either the Micrometer Prometheus registry is disabled again
@@ -58,6 +59,7 @@ spec:
           labels:
             severity: warning
           annotations:
+            runbook: docs/runbooks/everyday-operation.md#when-something-goes-wrong
             summary: 'Prometheus cannot scrape {{ $labels.service }} in {{ $labels.namespace }}'
             description: >-
               The target is configured and not answering. Unlike
@@ -76,6 +78,7 @@ spec:
           labels:
             severity: warning
           annotations:
+            runbook: docs/runbooks/everyday-operation.md#when-something-goes-wrong
             summary: 'No HTTP server metrics from the applications'
             description: >-
               jvm_* may still be arriving. Check management.metrics.enable.http

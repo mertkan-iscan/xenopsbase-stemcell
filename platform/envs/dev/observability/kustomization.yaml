@@ -13,6 +13,9 @@ resources:
   # Rate limiting. One rule says the limiter is reporting at all, the other that
   # it is not rejecting a share of traffic too large to be one client (T-8.3).
   - alerts-rate-limit.yaml
+  # The published objectives, alerted on as error-budget burn rate rather than
+  # as a threshold that fires on a blip and sleeps through a slow bleed (T-7.6).
+  - alerts-slo.yaml
   - dashboard-platform.yaml
   - tempo.yaml
   # Grafana, Prometheus and Alertmanager on their own hostnames, behind

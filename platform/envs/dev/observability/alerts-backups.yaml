@@ -32,6 +32,7 @@ spec:
           labels:
             severity: critical
           annotations:
+            runbook: docs/runbooks/database.md#is-it-actually-backing-up
             summary: "WAL archiving is failing on {{ $labels.pod }}"
             description: >-
               pg_stat_archiver reports failures over the last 15 minutes. The
@@ -49,6 +50,7 @@ spec:
           labels:
             severity: warning
           annotations:
+            runbook: docs/runbooks/database.md#is-it-actually-backing-up
             summary: "WAL files are queuing for archive on {{ $labels.pod }}"
             description: >-
               More than 20 WAL segments are waiting to be archived. Either
@@ -76,6 +78,7 @@ spec:
           labels:
             severity: critical
           annotations:
+            runbook: docs/runbooks/database.md#is-it-actually-backing-up
             summary: "No WAL segment archived for over 15 minutes on {{ $labels.pod }}"
             description: >-
               archive_timeout is 300s, so a healthy database ships a segment at
@@ -109,6 +112,7 @@ spec:
           labels:
             severity: critical
           annotations:
+            runbook: docs/runbooks/database.md#is-it-actually-backing-up
             summary: "No successful base backup for over 30 hours"
             description: >-
               ScheduledBackup runs daily at 03:00, so 30 hours means at least one
@@ -140,6 +144,7 @@ spec:
           labels:
             severity: warning
           annotations:
+            runbook: docs/runbooks/database.md#is-it-actually-backing-up
             summary: "Base-backup age cannot be read from metrics (#145)"
             description: >-
               cnpg_collector_last_available_backup_timestamp is 0 or absent, so
@@ -161,6 +166,7 @@ spec:
           labels:
             severity: critical
           annotations:
+            runbook: docs/runbooks/database.md#is-it-actually-backing-up
             summary: "The most recent base backup attempt failed"
             description: >-
               The last failure is more recent than the last success, so the
@@ -174,6 +180,7 @@ spec:
           labels:
             severity: critical
           annotations:
+            runbook: docs/runbooks/database.md#is-it-actually-backing-up
             summary: "{{ $labels.pod }} has never archived a WAL segment"
             description: >-
               Not a single segment has been archived since the stats were reset.
@@ -192,6 +199,7 @@ spec:
           labels:
             severity: critical
           annotations:
+            runbook: docs/runbooks/edge.md#troubleshooting
             summary: "No cloudflared connectors are available"
             description: >-
               Nothing is serving public traffic. cloudflared retries with backoff
@@ -205,6 +213,7 @@ spec:
           labels:
             severity: warning
           annotations:
+            runbook: docs/runbooks/edge.md#troubleshooting
             summary: "cloudflared is running below two connectors"
             description: >-
               Still serving, but a single connector is a single point of failure
