@@ -88,4 +88,16 @@ images:
     # at /, T-3.17), e7acc9b (correlation id on spans, T-3.8), 4ccd88f (sessions
     # in Valkey, T-2.11), 6d965b8 (CSP without 'unsafe-inline'/'unsafe-eval'),
     # 806e8be (logout origin from the request) and f430d36.
-    digest: sha256:5b4c23a98be0db990fba1b839d0aea11bd948a24fa83a6de178a63ff34744235
+    #
+    # Commit a6d8c33 -- per-client rate limiting on every proxied route
+    # (T-8.3, #61). 20/s sustained, 60 burst, keyed on the Keycloak `sub` and
+    # falling back to the client address, counted in Valkey so the limit is the
+    # limit rather than limit x replicas.
+    #
+    # Deployed to run `make load-ratelimit` against it, which is #61's third
+    # criterion and cannot be satisfied from a branch: the scenario needs the
+    # filter actually in the request path. It fails OPEN -- `deny-empty-key` is
+    # false, so a client the resolver cannot identify is served rather than
+    # rejected -- and the ceiling is far above real use, so the expected effect
+    # on normal traffic is none at all.
+    digest: sha256:00b9604d33837c6cce9dca5af1d54e49433a6845133c2564784f8dff110ae955
