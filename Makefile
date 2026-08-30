@@ -666,6 +666,10 @@ resource-audit: ## What each namespace BOOKS against what it USES, read from the
 verify-alert-runbooks: ## Does every alert link to a runbook section that exists? (T-7.6)
 	@bash $(SCRIPTS)/verify-alert-runbooks.sh
 
+.PHONY: verify-qos
+verify-qos: ## Does anything in the CLUSTER still run BestEffort? (T-2.8, T-2.25)
+	@KUBECONFIG="$(CURDIR)/infra/terraform/cluster/kubeconfig" bash $(SCRIPTS)/verify-qos.sh
+
 .PHONY: verify-resources
 verify-resources: ## Every workload we own declares CPU and memory requests (T-2.15)
 	@bash $(SCRIPTS)/verify-resources.sh
