@@ -22,3 +22,26 @@ kind: Kustomization
 # version in the URL is what makes that reproducible.
 resources:
   - https://github.com/cloudnative-pg/plugin-barman-cloud/releases/download/v0.14.0/manifest.yaml
+
+# REQUESTS, FROM A MEASUREMENT (T-2.25, #339).
+#
+# The upstream manifest declares none, so the plugin ran BestEffort: invisible to
+# the scheduler and first to be evicted under node memory pressure. It is the
+# component that moves base backups and WAL to object storage, so losing it under
+# pressure is losing the thing that makes the database recoverable -- quietly,
+# because nothing about a missing backup is loud at the time.
+#
+# 64Mi against 44Mi measured on 2026-08-30, and 10m against 2m. The factor is
+# T-2.23's 1.25x rounded up to the next round figure. No memory limit, for the
+# reason platform/envs/dev/limits.yaml gives at length.
+patches:
+  - target:
+      kind: Deployment
+      name: barman-cloud
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 10m
+            memory: 64Mi

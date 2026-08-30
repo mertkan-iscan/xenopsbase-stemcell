@@ -8,6 +8,10 @@ kind: Kustomization
 # the whole point of the app-of-apps arrangement (ADR-0004).
 resources:
   - namespaces.yaml
+  # A request floor for the namespaces whose manifests this repository does
+  # not write -- kured and system-upgrade-controller come from the kube-hetzner
+  # module and expose no values (T-2.25).
+  - limits.yaml
   - apps/ingress-nginx.yaml
   - apps/cert-manager.yaml
   - apps/cloudflared.yaml

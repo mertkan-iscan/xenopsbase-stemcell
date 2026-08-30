@@ -1,0 +1,115 @@
+# A floor under the namespaces this repository does not write the manifests for
+# (T-2.25, #339).
+#
+# THE STANDING RULE, AND WHY IT IS AN OBJECT RATHER THAN A CONVENTION
+#
+# `make verify-resources` asserts that every workload THIS REPOSITORY OWNS
+# declares CPU and memory requests, and it says in its own header why it does not
+# assert on anything else: the rest are third-party chart sidecars nobody here can
+# fix without a values override, and a check that fails for reasons nobody can act
+# on is a check people learn to skip.
+#
+# That left a real gap. Ten pods declared nothing at all, measured on 2026-08-30:
+#
+#   kube-system      hcloud-csi-controller       127Mi   11m
+#   kube-system      hcloud-csi-node    (x3)   25-45Mi   2-5m
+#   kube-system      kured              (x3)   14-24Mi   0-1m
+#   cnpg-system      barman-cloud                 44Mi    2m
+#   system-upgrade   system-upgrade-controller    30Mi    2m
+#   observability    kube-prometheus-stack-operator 30Mi   3m
+#
+# A BestEffort pod is invisible to the scheduler -- placement for everything else
+# is decided as though it consumes nothing -- and it is the FIRST thing the
+# kubelet evicts under node memory pressure. For `hcloud-csi-node`, which does
+# the attach and mount work for every PersistentVolume on its node, that ordering
+# is exactly backwards: memory pressure kills the component storage depends on,
+# and the workloads that caused the pressure keep running.
+#
+# WHY A LimitRange AND NOT A VALUES OVERRIDE FOR EACH
+#
+# Three of the six can be fixed at the source, and are: the CSI driver through
+# the module's `hetzner_csi_merge_values`, barman-cloud through a kustomize patch,
+# and the Prometheus operator through its chart values. Those get requests
+# derived from the measurements above.
+#
+# `kured` and `system-upgrade-controller` cannot. kube-hetzner renders both from
+# its own templates and applies them through a kustomization on the control plane;
+# the module exposes no values, no resources and no extra-kustomize hook for
+# either. Nothing in this repository can reach them.
+#
+# A LimitRange can, because it works at admission rather than at authorship: any
+# container created in these namespaces without a request gets this one. That
+# covers the two nobody can edit, covers the next chart somebody installs, and
+# survives a `make cluster-apply` re-rendering the module's manifests -- which a
+# patch applied after the fact would not.
+#
+# REQUESTS ONLY. NO LIMIT, DELIBERATELY.
+#
+# `defaultRequest` and not `default`. A default memory LIMIT would apply to every
+# container in kube-system that does not set one, including components that
+# legitimately burst, and would turn a scheduling correctness fix into a source of
+# OOMKills. The argument is T-2.15's and has not changed: a request is what the
+# scheduler books and what eviction order is judged against; a limit is a separate
+# decision that belongs with whoever knows the workload.
+#
+# WHY 64Mi
+#
+# It is one number for a whole namespace, so it cannot be right for everything in
+# it. 64Mi is about 1.4x the largest of the small daemons (45Mi) and about 2.7x
+# the smallest (14Mi) -- so the floor over-books kured and is honest about
+# csi-node. The alternative, a number that fits kured, would leave csi-node
+# under-declared, and under-declared is the direction that gets a pod evicted.
+#
+# The one component this floor is genuinely too small for is
+# `hcloud-csi-controller` at 127Mi. It is not left to the floor: it gets an
+# explicit 160Mi through the module, where an explicit request wins over this
+# default.
+#
+# IF YOU ARE ADDING A CHART TO A NAMESPACE THIS REPOSITORY OWNS, set its requests
+# in its own values from a measurement. This file is the backstop for the
+# manifests nobody here writes, not a substitute for sizing the ones we do.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: default-requests
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/part-of: xenopsbase
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 10m
+        memory: 64Mi
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: default-requests
+  namespace: cnpg-system
+  labels:
+    app.kubernetes.io/part-of: xenopsbase
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 10m
+        memory: 64Mi
+---
+# system-upgrade is created by the kube-hetzner module rather than by
+# namespaces.yaml, so this object arrives after the namespace does. Argo retries
+# until it exists, which on a cold rebuild is a few reconciles rather than a
+# failure.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: default-requests
+  namespace: system-upgrade
+  labels:
+    app.kubernetes.io/part-of: xenopsbase
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 10m
+        memory: 64Mi
