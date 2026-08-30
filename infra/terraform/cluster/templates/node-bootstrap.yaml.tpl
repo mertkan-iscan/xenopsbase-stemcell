@@ -102,6 +102,42 @@ disable_root: false
 #
 # The disk signals are restated because this flag replaces the map. Dropping them
 # here would silently return nodefs and imagefs to the upstream 10%/15%.
+
+# THE ENFORCED CAP MUST SIT BELOW WHAT THE MACHINE SURVIVES (T-2.28, #365).
+#
+# Measured on worker-0, sampling memory.stat every 2s through four ramps:
+#
+#   kubepods anon at the moment the node died     6749Mi
+#   kubepods.slice/memory.max                     7153Mi   <- never reached
+#   system.slice anon under pressure              397-468Mi, flat
+#   MemAvailable floor                            42Mi
+#
+# The cap is ~400Mi higher than the node can survive, so it is unreachable and
+# protects nothing: the kernel global-OOMs before the pods cgroup hits its own
+# limit. Every run showed the same thing -- zero Evicted events, a SystemOOM,
+# and a node that stopped answering.
+#
+# Kubernetes subtracts the hard eviction threshold from the allocatable it
+# REPORTS, but not from the cgroup limit it ENFORCES:
+#
+#   allocatable   7753 - 300 kube - 300 system - 500 eviction = 6653Mi
+#   memory.max    7753 - 300 kube - 300 system               = 7153Mi
+#
+# So the scheduler was already being told the right number. The gap between the
+# two is what a pod that requests little and uses a lot walks into -- the probe
+# requested 64Mi and reached 6700Mi.
+#
+# 1050Mi is NOT sized to system.slice's resting 1984Mi. That figure is 1692Mi of
+# page cache and the kernel gives it back; system.slice anon never exceeded
+# 468Mi even at the moment of death. It is sized so the enforced cap lands
+# below the measured death point:
+#
+#   memory.max    7753 - 300 - 1050 = 6403Mi   (~350Mi under 6749Mi)
+#   allocatable   6403 - 500        = 5903Mi
+#
+# Then a runaway pod hits the cgroup limit first and the kernel kills one
+# container inside kubepods -- ordered, survivable -- rather than wedging the
+# node. Costs ~750Mi of schedulable memory per worker; see T-2.27 (#341).
 write_files:
   - path: /etc/rancher/k3s/config.yaml
     permissions: '0600'
@@ -111,7 +147,7 @@ write_files:
       - "cloud-provider=external"
       - "volume-plugin-dir=/var/lib/kubelet/volumeplugins"
       - "kube-reserved=cpu=50m,memory=300Mi,ephemeral-storage=1Gi"
-      - "system-reserved=cpu=250m,memory=300Mi"
+      - "system-reserved=cpu=250m,memory=1050Mi"
       - "eviction-hard=memory.available<500Mi,nodefs.available<5%,imagefs.available<5%"
       "node-label":
       - "k3s_upgrade=true"
