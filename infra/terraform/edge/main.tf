@@ -179,11 +179,23 @@ resource "cloudflare_zone_setting" "min_tls_version" {
 //
 // WHY EXACTLY ONE RULE
 //
-// Cloudflare's free plan allows one rate limiting rule per zone, and requires
+// Cloudflare's free plan allows one rate limiting rule per zone, requires
 // `cf.colo.id` among the characteristics -- so the count is per data centre
 // rather than global, and the effective ceiling is higher than the number
-// written here. Both are constraints of the plan rather than choices, and both
-// are the sort of thing that is easier to read here than to rediscover.
+// written here -- and permits exactly one window:
+//
+//   400 Bad Request
+//   "not entitled to use the period 60, can only use a period among [10]"
+//     pointer: /rules/0/ratelimit/period
+//
+// That is the API refusing the first version of this resource, which asked for
+// 60. Worth reading twice: `terraform validate` accepted it, `terraform plan`
+// accepted it, and CI's plan job accepted it. Plan-tier entitlements are
+// enforced at the API and nowhere earlier, so the only thing that could have
+// found this was an apply.
+//
+// All three are constraints of the plan rather than choices, and all three are
+// easier to read here than to rediscover.
 //
 // So the one rule goes where it buys the most: the hostnames NOT behind
 // Cloudflare Access. Everything behind Access already requires an identity
@@ -223,19 +235,25 @@ resource "cloudflare_ruleset" "rate_limit" {
         // colo", which is the closest this plan gets to per-client.
         characteristics = ["ip.src", "cf.colo.id"]
 
-        // 300 requests a minute is far above a person logging in and far below
-        // a credential-stuffing loop. Like the gateway's numbers, this is a
-        // ceiling rather than a tuning: the login flow is a handful of requests
-        // and anything approaching this is not a browser.
-        period              = 60
-        requests_per_period = 300
+        // 50 requests per 10 seconds -- the same rate as the 300/minute this
+        // asked for before the API refused the window, expressed in the only
+        // window the plan allows. Far above a person logging in and far below a
+        // credential-stuffing loop; like the gateway's numbers this is a ceiling
+        // rather than a tuning.
+        //
+        // The shorter window is not purely a downgrade. It reacts faster, and it
+        // is burstier: a client may spend the whole allowance in one second and
+        // wait, where a 60s window would have averaged it out. For a login
+        // surface that trade is the right way round.
+        period              = 10
+        requests_per_period = 50
 
-        // Block for a minute once tripped, rather than for the rest of the
-        // period. Long enough to be a real cost to a script, short enough that
-        // a false positive is an annoyance rather than a support ticket -- the
-        // same trade the WAF rule below makes by choosing a challenge over a
-        // block.
-        mitigation_timeout = 60
+        // Equal to the window, which is the conservative reading of a plan that
+        // permits one period: block for as long as the thing being counted.
+        // Long enough to be a real cost to a script, short enough that a false
+        // positive is an annoyance rather than a support ticket -- the same
+        // trade the WAF rule below makes by choosing a challenge over a block.
+        mitigation_timeout = 10
       }
     },
   ]
