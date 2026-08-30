@@ -71,6 +71,37 @@ disable_root: false
 #
 # Both render to nothing when the pool declares none, which is every pool
 # today -- so this costs no user_data bytes until someone uses it.
+
+# THE MEMORY EVICTION THRESHOLD IS OURS TO SET, BECAUSE k3s REMOVED IT (T-2.28, #365).
+#
+# k3s writes its own kubelet config drop-in, and its whole eviction stanza is:
+#
+#   evictionHard:
+#     imagefs.available: 5%
+#     nodefs.available: 5%
+#
+# There is no memory.available key. evictionHard REPLACES the kubelet's built-in
+# default map rather than merging into it, so those two disk signals do not sit
+# alongside the upstream memory.available<100Mi -- they displace it. Memory
+# eviction is not tuned tight on a stock k3s node. It is off.
+#
+# Measured before this line existed: ramping anonymous memory on a worker until
+# something gave produced a kernel SystemOOM and zero Evicted events, cluster-wide,
+# across three runs. The node went NotReady and the lifecycle controller then
+# raised TaintManagerEviction against every pod on it -- Postgres, Argo's
+# controller, the CSI driver -- cancelled only because it recovered in ~40s.
+#
+# So the node did not shed its least important pod. It stopped answering, and then
+# everything on it was threatened equally. A PriorityClass orders kubelet eviction;
+# where kubelet eviction never runs, it orders nothing (which is what T-2.25, #339,
+# assumed it did).
+#
+# 500Mi rather than the upstream 100Mi: at 100Mi the eviction loop is racing an
+# allocation ramp for the last tenth of a gigabyte, and the kernel wins. 500Mi
+# leaves it room to observe, choose and terminate first.
+#
+# The disk signals are restated because this flag replaces the map. Dropping them
+# here would silently return nodefs and imagefs to the upstream 10%/15%.
 write_files:
   - path: /etc/rancher/k3s/config.yaml
     permissions: '0600'
@@ -81,6 +112,7 @@ write_files:
       - "volume-plugin-dir=/var/lib/kubelet/volumeplugins"
       - "kube-reserved=cpu=50m,memory=300Mi,ephemeral-storage=1Gi"
       - "system-reserved=cpu=250m,memory=300Mi"
+      - "eviction-hard=memory.available<500Mi,nodefs.available<5%,imagefs.available<5%"
       "node-label":
       - "k3s_upgrade=true"
       - "hcloud/node-group=${node_group}"
