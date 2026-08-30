@@ -52,18 +52,47 @@
 # scheduler books and what eviction order is judged against; a limit is a separate
 # decision that belongs with whoever knows the workload.
 #
-# WHY 64Mi
+# WHY THE NUMBER IS PER NAMESPACE, AND WHY IT IS SMALL
 #
-# It is one number for a whole namespace, so it cannot be right for everything in
-# it. 64Mi is about 1.4x the largest of the small daemons (45Mi) and about 2.7x
-# the smallest (14Mi) -- so the floor over-books kured and is honest about
-# csi-node. The alternative, a number that fits kured, would leave csi-node
-# under-declared, and under-declared is the direction that gets a pod evicted.
+# A LimitRange default applies PER CONTAINER, not per pod. The first version of
+# this file used one 64Mi figure everywhere and reasoned about it as though these
+# were single-container pods. They are not, and the cluster said so within
+# minutes of the first sync:
 #
-# The one component this floor is genuinely too small for is
-# `hcloud-csi-controller` at 127Mi. It is not left to the floor: it gets an
-# explicit 160Mi through the module, where an explicit request wins over this
-# default.
+#   hcloud-csi-controller   5 containers   booked 320Mi   used  62Mi
+#   hcloud-csi-node         3 containers   booked 192Mi   used  24-35Mi
+#   kured                   1 container    booked  64Mi   used  12-20Mi
+#
+# 1264Mi booked across the ten pods for about 330Mi of use. Over-declaring is a
+# defect too (T-2.26): it wastes capacity the scheduler then refuses to give
+# anyone else.
+#
+# So: 32Mi in the namespaces full of small multi-container daemons, and a
+# namespace-specific figure where the namespace holds one thing and that thing is
+# bigger.
+#
+#   kube-system      32Mi   kured 12-20Mi; the CSI sidecars are small
+#                           individually. csi-controller lands at 5 x 32 = 160Mi
+#                           against 62Mi used, which is the least accurate the
+#                           floor gets and is accepted -- see below.
+#   cnpg-system      32Mi   barman-cloud is 17Mi and carries an explicit 64Mi
+#                           request of its own anyway
+#   system-upgrade   96Mi   system-upgrade-controller measured 75Mi while running
+#                           k3s upgrade plans, which is ABOVE the old 64Mi floor.
+#                           A floor that under-declares is the direction that gets
+#                           a pod evicted, and this namespace holds one component,
+#                           so a precise number costs nothing.
+#
+# THE FLOOR CANNOT BE ACCURATE AND THAT IS THE POINT. One number cannot fit a
+# 12Mi daemon and a 75Mi controller. It is a floor whose job is to make BestEffort
+# impossible, not to size anything: everything this repository can reach gets an
+# explicit request from its own measurement, and the floor catches the rest.
+#
+# MEASURED TWICE, DELIBERATELY. The first readings were taken forty minutes into
+# a cold rebuild and several were still settling -- barman-cloud read 44Mi then
+# and 17Mi once settled, csi-controller 127Mi then and 62Mi after. The figures
+# above are the settled ones. A number taken while a cluster is still converging
+# is a number about converging.
 #
 # IF YOU ARE ADDING A CHART TO A NAMESPACE THIS REPOSITORY OWNS, set its requests
 # in its own values from a measurement. This file is the backstop for the
@@ -80,7 +109,7 @@ spec:
     - type: Container
       defaultRequest:
         cpu: 10m
-        memory: 64Mi
+        memory: 32Mi
 ---
 apiVersion: v1
 kind: LimitRange
@@ -94,7 +123,7 @@ spec:
     - type: Container
       defaultRequest:
         cpu: 10m
-        memory: 64Mi
+        memory: 32Mi
 ---
 # system-upgrade is created by the kube-hetzner module rather than by
 # namespaces.yaml, so this object arrives after the namespace does. Argo retries
@@ -112,4 +141,4 @@ spec:
     - type: Container
       defaultRequest:
         cpu: 10m
-        memory: 64Mi
+        memory: 96Mi
