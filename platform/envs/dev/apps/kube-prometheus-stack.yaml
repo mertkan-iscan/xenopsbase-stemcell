@@ -272,6 +272,23 @@ spec:
         kubeStateMetrics:
           enabled: true
 
+        # THE OPERATOR ITSELF DECLARED NOTHING (T-2.25, #339).
+        #
+        # Everything else in this chart is sized; the component that reconciles
+        # the Prometheus and Alertmanager CRs ran BestEffort -- invisible to the
+        # scheduler, and first evicted under node memory pressure. #327 is a card
+        # about this operator failing to reconcile on a cold rebuild, which is
+        # not the same failure but is the same component being the one nobody
+        # was watching.
+        #
+        # 48Mi against 30Mi measured on 2026-08-30, 10m against 3m. Its footprint
+        # follows the number of CRs it watches rather than traffic, so it is
+        # stable and small; the limit is left off for the reason in
+        # platform/envs/dev/limits.yaml.
+        prometheusOperator:
+          resources:
+            requests: {cpu: 10m, memory: 48Mi}
+
         prometheus-node-exporter:
           resources:
             requests: {cpu: 25m, memory: 48Mi}
