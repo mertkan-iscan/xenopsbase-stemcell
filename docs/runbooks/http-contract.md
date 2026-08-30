@@ -192,7 +192,7 @@ Two limits, on two surfaces, and neither covers the other's.
 | | where | keyed on | ceiling |
 |---|---|---|---|
 | Gateway | `RequestRateLimiter` on every proxied route | the Keycloak `sub`, else the client address | 20/s sustained, 60 burst |
-| Cloudflare | `http_ratelimit` ruleset, `infra/terraform/edge` | `ip.src` + `cf.colo.id` | 300 per minute, 60s block |
+| Cloudflare | `http_ratelimit` ruleset, `infra/terraform/edge` | `ip.src` + `cf.colo.id` | 50 per 10s, 10s block |
 
 **What the gateway limit does not cover, by construction.** `RequestRateLimiter` is a *gateway
 filter*, so it applies to what the gateway proxies (`/services/core/**`) and not to what it serves
