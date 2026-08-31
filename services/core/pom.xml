@@ -92,12 +92,19 @@
             them deliberately, with the reason in the commit, the same as every other threshold in
             this repository. Getting from here to the target is its own body of work and has its
             own card.
-                    RAISED 2026-09-01, T-5.9 (#172): 0.58/0.44 to 0.74/0.56.
+                    RAISED 2026-09-01, T-5.9 (#172): 0.58/0.44 to 0.72/0.55.
 
-            Measured 74.7% instruction / 57.0% branch on a merged run after two unit test classes
-            and one jacoco exclusion, so these are again the measurement rounded down rather than
-            an aspiration. The ratchet only means anything if it is always true, so it is never
-            moved ahead of the tests that earn it.
+            TAKE THE NUMBER FROM CI, NOT FROM A DEVELOPER MACHINE. A local merged run
+            measured 74.7% instruction; CI measured 0.73 on the same commit, and a floor of 0.74
+            set from the local figure failed the build immediately:
+
+              Rule violated for bundle core: instructions covered ratio is 0.73,
+              but expected minimum is 0.74
+
+            The gate runs in CI, so CI's measurement is the one that exists. These are that number
+            with a point of margin, which is the same convention the original floors used. The
+            ratchet only means anything if it is always true, so it is never moved ahead of the
+            tests that earn it, and never set from a run that does not gate anything.
 
             Where the movement came from, since the two halves are not equal:
 
@@ -109,8 +116,8 @@
             against +10.6 from the tests. The classes covered had large untested bodies as well as
             untaken branches, so instruction moved with them. The remaining work is branch-only.
         -->
-        <jacoco.minimum.instruction>0.74</jacoco.minimum.instruction>
-        <jacoco.minimum.branch>0.56</jacoco.minimum.branch>
+        <jacoco.minimum.instruction>0.72</jacoco.minimum.instruction>
+        <jacoco.minimum.branch>0.55</jacoco.minimum.branch>
         <jhipster-framework.version>9.1.0</jhipster-framework.version>
         <jib-maven-plugin.architecture>amd64</jib-maven-plugin.architecture>
         <!--
