@@ -57,7 +57,7 @@ spec:
           # application through this connector, so it fails if the tunnel does.
           #
           # The index digest, as valkey.yaml uses, not a per-architecture one.
-          image: cloudflare/cloudflared@sha256:0aa26e284f05e6c77ae375b8c9c11d9eb6a448fb7bcd8d40f31cb6176189eb38  # 2026.8.2, resolved 2026-08-29
+          image: cloudflare/cloudflared@sha256:51c9cefcb4569df44e1ad403ab1d3d8065aa8e84339bcfc6aee75502e1140339  # 2026.8.3, resolved 2026-08-31; trivy 0 HIGH/CRITICAL
           args:
             - tunnel
             - --no-autoupdate
