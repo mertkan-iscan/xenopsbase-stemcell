@@ -304,22 +304,29 @@ jobs:
 
       # THE PIPELINE PROVES ITS OWN CLAIM, RATHER THAN ASSUMING IT.
       #
-      # `cosign sign` exiting 0 is not evidence that a verifiable signature was
-      # published. On the first successful run it printed
+      # `cosign sign` exiting 0 says the command ran, not that anything a
+      # verifier can use was published. This runs the verification in the same
+      # job, against the identity that is supposed to have made the signature,
+      # so a signing step that silently stops producing usable output fails here
+      # rather than being discovered by whatever was relying on it.
       #
-      #   Generating ephemeral keys...
-      #   Signing artifact...
+      # A CORRECTION, KEPT BECAUSE THE TRAP IS REAL
       #
-      # and nothing else -- no "Pushing signature to:" -- and afterwards the
-      # registry held no signature: no `.sig` tag among the 50 tags on the
-      # repository, and an empty OCI referrers list for the digest. A green step
-      # that publishes nothing is precisely the shape this repository keeps
-      # finding (#2, #113, #155, #211), and it would have been recorded as
-      # "images are signed" if nobody had looked at the registry.
+      # The commit that added this step said the registry held no signature at
+      # all. That was wrong, and the mistake is worth recording because the next
+      # person will make it too.
       #
-      # So the signature is verified here, in the run that produced it, against
-      # the identity that is supposed to have made it. If cosign ever again
-      # succeeds without publishing something verifiable, this fails and says so.
+      # cosign 3.x publishes the signature under the OCI referrers FALLBACK TAG
+      #
+      #   sha256-<digest>            <- no suffix
+      #
+      # where cosign 2.x used `sha256-<digest>.sig`. A check that greps the tag
+      # list for names ending `.sig` finds nothing and reads as "unsigned",
+      # which is exactly what happened: the signature was there the whole time,
+      # under a name the search did not match.
+      #
+      # So this step earns its place for the ordinary reason -- an assertion
+      # next to the thing it asserts -- and not because signing was broken.
       - name: Verify the signature we just made
         run: |
           cosign verify             --certificate-identity-regexp '^https://github\.com/${{ github.repository }}/\.github/workflows/'             --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'             "${{ steps.digest.outputs.image }}@${{ steps.digest.outputs.digest }}"
