@@ -20,8 +20,7 @@ terraform {
   required_providers {
     cloudflare = {
       source = "cloudflare/cloudflare"
-      # Matches the version proven in hedportal-terraform, which is where this
-      # pattern comes from. The v5 provider renamed most resources from v4.
+      # Pinned to v5 deliberately: the v5 provider renamed most resources from v4.
       version = "~> 5.23"
     }
   }

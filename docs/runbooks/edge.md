@@ -27,9 +27,6 @@ The cost: Cloudflare is on the serving path, `cloudflared` becomes a platform co
 and the tunnel token becomes a third bootstrap secret alongside the age key (ADR-0003) and the
 Hetzner credentials.
 
-This is the pattern `hedportal-terraform` already runs in production; it is lifted rather than
-invented.
-
 ## Hostname convention
 
 | Environment | Hostname |

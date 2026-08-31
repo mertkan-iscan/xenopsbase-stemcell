@@ -2484,13 +2484,6 @@ The front deployable: handles the OIDC login, terminates the session, and relays
 > **In XenOpsBase:** services/gateway  
 > **XenOpsBase'de:** services/gateway
 
-### hedportal-terraform
-**TR:** hedportal-terraform
-
-The prior project this one generalises from. The stemcell exists partly to close the three gaps its DR doc admits: no offsite copy, no schema rollback, no PITR.
-
-Bu projenin genellendiği önceki proje. Stemcell kısmen onun felaket kurtarma belgesinin itiraf ettiği üç boşluğu kapatmak için var: farklı konumda kopya yok, şema geri alma yok, PITR yok.
-
 ### infra/terraform/cluster
 **TR:** infra/terraform/cluster
 
