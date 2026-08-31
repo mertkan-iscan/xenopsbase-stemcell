@@ -146,6 +146,39 @@ spec:
             # readOnlyRootFilesystem is on and Valkey still wants a working
             # directory, even with persistence off.
             - {name: data, mountPath: /data}
+        - name: metrics
+          # WHY AN EXPORTER AT ALL: Valkey serves no Prometheus endpoint of its
+          # own, so without this the cache is the one component that is supposed
+          # to be invisible when healthy AND has no way to be seen when it is
+          # not (T-2.20, #263).
+          #
+          # Pinned by digest like Valkey above, and for one reason beyond
+          # reproducibility: platform-images.py skips unpinned images, so an
+          # unpinned sidecar would never enter the scan matrix. That is exactly
+          # how the Valkey image itself ran unscanned until T-6.10 (#332).
+          image: oliver006/redis_exporter@sha256:dbd410eb9255016c9440b40b8fa18872fdf0e7972d06fc1df8d5b120d35efe05  # v1.69.0, resolved 2026-08-31
+          env:
+            - name: REDIS_ADDR
+              value: redis://localhost:6379
+            # The secret carries the password twice: `auth.conf` in the form
+            # Valkey's `include` needs, and `password` as the bare value. This
+            # takes the bare one. Parsing `requirepass` back out of the config
+            # file would make the file's format load-bearing in a second place.
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: valkey-auth, key: password}
+          ports:
+            - {name: metrics, containerPort: 9121}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            # Explicit rather than inherited: the platform LimitRange defaults
+            # are per container (T-2.25, #363) and nothing may run BestEffort
+            # (#364). Small because it scrapes INFO and serves it.
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 64Mi}
       volumes:
         - name: config
           configMap: {name: valkey-config}
@@ -171,6 +204,7 @@ spec:
   selector: {app.kubernetes.io/name: valkey}
   ports:
     - {name: valkey, port: 6379, targetPort: valkey}
+    - {name: metrics, port: 9121, targetPort: metrics}
 ---
 # Only the application namespace may reach it.
 #
@@ -197,3 +231,13 @@ spec:
             matchLabels: {kubernetes.io/metadata.name: apps}
       ports:
         - {protocol: TCP, port: 6379}
+    # Prometheus scrapes the exporter from `observability`, and the rule above
+    # admits `apps` only. Without this the ServiceMonitor would exist, the
+    # target would be listed, and every scrape would time out -- a metric that
+    # is ABSENT rather than wrong, which is the harder kind to notice and
+    # exactly the failure this card exists to prevent.
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: observability}
+      ports:
+        - {protocol: TCP, port: 9121}

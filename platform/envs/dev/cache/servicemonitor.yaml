@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: valkey
+  namespace: cache
+  labels:
+    app.kubernetes.io/part-of: xenopsbase
+spec:
+  namespaceSelector:
+    matchNames:
+      - cache
+  selector:
+    matchLabels: {app.kubernetes.io/name: valkey}
+  endpoints:
+    # 30s. The exporter re-reads Valkey's INFO on each scrape, so the interval
+    # is the resolution of every panel and alert built on it; faster costs a
+    # round trip to the data path for no extra signal.
+    - port: metrics
+      interval: 30s
