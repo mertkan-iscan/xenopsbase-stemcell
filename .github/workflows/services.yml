@@ -296,11 +296,40 @@ jobs:
       # rather than merely that somebody signed it. A signature that only proves
       # "signed by someone" is the supply-chain equivalent of a control that
       # reports success while governing nothing.
+      # --new-bundle-format=false IS LOad-BEARING (T-6.2, #49).
+      #
+      # cosign 3.x defaults to the Sigstore bundle format, which it publishes
+      # under the OCI referrers FALLBACK TAG -- `sha256-<digest>`, an image
+      # index. sigstore/policy-controller 0.13.1 looks for the classic cosign
+      # 2.x artifact, `sha256-<digest>.sig`, and finding none reports
+      #
+      #   signature keyless validation failed: no signatures found
+      #
+      # for EVERY image, including correctly signed ones. Measured against a
+      # scratch namespace: a signed digest and an unsigned digest were both
+      # denied, with the same message. A policy that rejects everything looks
+      # identical to a working one unless the accepting case is tested too.
+      #
+      # `cosign verify` does not catch this: it is the same cosign that wrote
+      # the signature, so it reads its own format happily. The mismatch is only
+      # visible to the admission controller.
       - name: Sign the image
         env:
           COSIGN_YES: "true"
         run: |
-          cosign sign "${{ steps.digest.outputs.image }}@${{ steps.digest.outputs.digest }}"
+          cosign sign --new-bundle-format=false "${{ steps.digest.outputs.image }}@${{ steps.digest.outputs.digest }}"
+
+      # ASSERT THE ARTIFACT THE ADMISSION CONTROLLER ACTUALLY READS.
+      #
+      # The verify step below proves the signature is valid. This proves it is
+      # in the place policy-controller looks, which is a different claim and the
+      # one that was silently false.
+      - name: Assert the legacy signature tag exists
+        run: |
+          tag="$(printf '%s' "${{ steps.digest.outputs.digest }}" | tr ':' '-').sig"
+          ref="${{ steps.digest.outputs.image }}:${tag}"
+          echo "expecting $ref"
+          cosign manifest download "$ref" > /dev/null
 
       # THE PIPELINE PROVES ITS OWN CLAIM, RATHER THAN ASSUMING IT.
       #
