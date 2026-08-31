@@ -12,6 +12,12 @@ resources:
   # not write -- kured and system-upgrade-controller come from the kube-hetzner
   # module and expose no values (T-2.25).
   - limits.yaml
+  # Wave 0/1. The admission controller and the policy it enforces (T-6.2, #49).
+  # Listed here for the reason the comment above gives: a file in apps/ that is
+  # not in this list is rendered by nothing and applied by nobody, and Argo
+  # reports Synced because from its side nothing changed.
+  - apps/policy-controller.yaml
+  - apps/image-policy.yaml
   - apps/ingress-nginx.yaml
   - apps/cert-manager.yaml
   - apps/cloudflared.yaml
