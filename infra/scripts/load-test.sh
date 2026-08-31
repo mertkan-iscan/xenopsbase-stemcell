@@ -74,11 +74,96 @@ kubectl -n "$NAMESPACE" create configmap "$CM" --from-file="${SCRIPT}=infra/load
   exit 1
 }
 
+# -----------------------------------------------------------------------------
+# THE RATE LIMITER HAS TO BE LIFTED FOR THE MEASUREMENT, OR THIS MEASURES IT
+# INSTEAD OF THE PODS (T-5.13, #371).
+#
+# The gateway rate-limits per client, keyed on `sub:` for an authenticated
+# caller. baseline.js fetches ONE token in setup() and every VU reuses it, so the
+# whole run is a single subject in a single bucket at replenishRate 20/s -- no
+# matter how many VUs drive it. Measured on 2026-08-31, before this block existed:
+#
+#   gateway   379556  status=200
+#             177546  status=429      <- exactly k6's failure count
+#   core        2129  status=200      ~= 20/s x 105s, the bucket and nothing else
+#
+# Latency thresholds passed and the run still failed, on a status code, because
+# the requests never reached core.
+#
+# WHY LIFTING IT IS CORRECT AND NOT A WORKAROUND
+#
+# T-5.6 asks what the PODS can serve -- the autoscaling question. The limiter is
+# T-8.3's subject and answers a different one ("what could one client legitimately
+# be doing"), which is why application.yml says its numbers are deliberately not
+# derived from this baseline. `make load-ratelimit` proves the limiter works and
+# is per-client; it is not this script's job to re-prove it, and leaving it in the
+# path means this script measures Valkey token buckets rather than the JVMs.
+#
+# WHY IT IS DONE HERE AND NOT IN THE MANIFEST
+#
+# Putting a high limit in gateway.yaml would weaken dev's posture permanently for
+# the sake of a measurement that runs occasionally. This belongs to the tool that
+# needs it, for exactly as long as it needs it, and is restored by the same trap
+# that removes the Job -- including on failure and on Ctrl-C.
+#
+# selfHeal has to go down with it: the services Application reconciles
+# automatically, so a `kubectl set env` alone would be reverted mid-run.
+LOAD_APP="${LOAD_ARGO_APP:-services}"
+RL_REPLENISH="${LOAD_RATE_LIMIT_REPLENISH:-100000}"
+RL_BURST="${LOAD_RATE_LIMIT_BURST:-200000}"
+RL_LIFTED=0
+
+lift_rate_limit() {
+  echo "  lifting the gateway rate limit for the measurement (replenish ${RL_REPLENISH}/s)"
+  kubectl -n argocd patch application "$LOAD_APP" --type merge     -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":false}}}}' >/dev/null 2>&1 || {
+      echo "error: could not disable selfHeal on the ${LOAD_APP} Application" >&2
+      return 1
+    }
+  RL_LIFTED=1
+  kubectl -n "$NAMESPACE" set env deploy/gateway     "RATE_LIMIT_REPLENISH=${RL_REPLENISH}" "RATE_LIMIT_BURST=${RL_BURST}" >/dev/null 2>&1 || {
+      echo "error: could not set the rate limit env on the gateway" >&2
+      return 1
+    }
+  kubectl -n "$NAMESPACE" rollout status deploy/gateway --timeout=180s >/dev/null 2>&1 || {
+      echo "error: the gateway did not roll out with the lifted limit" >&2
+      return 1
+    }
+  # The rollout gives fresh JVMs. k6's own 30s ramp is the warmup; this only
+  # covers the gap between "pods Ready" and "routes actually serving".
+  sleep 10
+}
+
+restore_rate_limit() {
+  [ "$RL_LIFTED" = "1" ] || return 0
+  kubectl -n "$NAMESPACE" set env deploy/gateway RATE_LIMIT_REPLENISH- RATE_LIMIT_BURST- >/dev/null 2>&1
+  kubectl -n argocd patch application "$LOAD_APP" --type merge     -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":true}}}}' >/dev/null 2>&1
+  # Say so rather than assume it: a limiter left lifted is a silent hole, and this
+  # runs on the failure path too.
+  local still
+  still="$(kubectl -n "$NAMESPACE" get deploy gateway     -o jsonpath='{range .spec.template.spec.containers[0].env[*]}{.name}{"
+"}{end}' 2>/dev/null | grep -c RATE_LIMIT)"
+  local heal
+  heal="$(kubectl -n argocd get application "$LOAD_APP" -o jsonpath='{.spec.syncPolicy.automated.selfHeal}' 2>/dev/null)"
+  if [ "${still:-0}" = "0" ] && [ "$heal" = "true" ]; then
+    echo "  rate limit restored, selfHeal back on"
+  else
+    echo "WARNING: the rate limit may still be lifted (env entries=${still}, selfHeal=${heal})." >&2
+    echo "         Check: kubectl -n ${NAMESPACE} set env deploy/gateway RATE_LIMIT_REPLENISH- RATE_LIMIT_BURST-" >&2
+  fi
+}
+
 cleanup() {
+  restore_rate_limit
   kubectl -n "$NAMESPACE" delete configmap "$CM" --ignore-not-found >/dev/null 2>&1
   kubectl -n "$NAMESPACE" delete job "$JOB" --ignore-not-found >/dev/null 2>&1
 }
 trap cleanup EXIT INT TERM
+
+lift_rate_limit || {
+  echo "error: could not lift the rate limit; refusing to run a measurement that would" >&2
+  echo "       report the limiter's ceiling as the platform's throughput (T-5.13)." >&2
+  exit 1
+}
 
 kubectl -n "$NAMESPACE" apply -f - >/dev/null <<EOF
 apiVersion: batch/v1
