@@ -317,7 +317,16 @@ jobs:
         env:
           COSIGN_YES: "true"
         run: |
-          cosign sign --new-bundle-format=false "${{ steps.digest.outputs.image }}@${{ steps.digest.outputs.digest }}"
+          # --use-signing-config=false is required alongside it. cosign defaults
+          # to a TUF-provided signing config, and that path asserts the new
+          # bundle format, so asking for the legacy artifact without also
+          # opting out of it fails validation before signing:
+          #
+          #   Error: must provide --new-bundle-format or --bundle where
+          #   applicable with --signing-config or --use-signing-config
+          #
+          # Which is what the previous attempt did, taking the publish job red.
+          cosign sign --new-bundle-format=false --use-signing-config=false "${{ steps.digest.outputs.image }}@${{ steps.digest.outputs.digest }}"
 
       # ASSERT THE ARTIFACT THE ADMISSION CONTROLLER ACTUALLY READS.
       #
