@@ -92,9 +92,25 @@
             them deliberately, with the reason in the commit, the same as every other threshold in
             this repository. Getting from here to the target is its own body of work and has its
             own card.
+                    RAISED 2026-09-01, T-5.9 (#172): 0.58/0.44 to 0.74/0.56.
+
+            Measured 74.7% instruction / 57.0% branch on a merged run after two unit test classes
+            and one jacoco exclusion, so these are again the measurement rounded down rather than
+            an aspiration. The ratchet only means anything if it is always true, so it is never
+            moved ahead of the tests that earn it.
+
+            Where the movement came from, since the two halves are not equal:
+
+              exclusion of generated DTOs   61.4/46.7 to 64.1/48.9
+              the tests themselves          64.1/48.9 to 74.7/57.0
+
+            Still short of the target by 5.3 instruction and 13.0 branch. Recorded against this
+            card's own fourth criterion: branch did NOT rise faster than instruction here, +8.1
+            against +10.6 from the tests. The classes covered had large untested bodies as well as
+            untaken branches, so instruction moved with them. The remaining work is branch-only.
         -->
-        <jacoco.minimum.instruction>0.58</jacoco.minimum.instruction>
-        <jacoco.minimum.branch>0.44</jacoco.minimum.branch>
+        <jacoco.minimum.instruction>0.74</jacoco.minimum.instruction>
+        <jacoco.minimum.branch>0.56</jacoco.minimum.branch>
         <jhipster-framework.version>9.1.0</jhipster-framework.version>
         <jib-maven-plugin.architecture>amd64</jib-maven-plugin.architecture>
         <!--
@@ -1007,6 +1023,30 @@
                     <groupId>org.jacoco</groupId>
                     <artifactId>jacoco-maven-plugin</artifactId>
                     <version>${jacoco-maven-plugin.version}</version>
+                    <configuration>
+                        <!--
+                            EXCLUSIONS ARE LISTED ONE BY ONE, WITH A REASON EACH (T-5.9, #172).
+
+                            The card that raises the floor also says the quiet part: excluding code
+                            is legitimate, and using it as an excuse for the number is not. So the
+                            rule here is that an entry must name code nobody would ever choose to
+                            write a test for, not code that is merely hard to reach.
+
+                            Measured before adding this, so the size of the concession is known
+                            rather than assumed. It moves the merged report from 61.4% to 64.1%
+                            instruction and 46.7% to 48.9% branch. The remaining ~16 and ~21 points
+                            to the target are tests, not exclusions.
+                        -->
+                        <excludes>
+                            <!--
+                                OpenAPI-generated DTOs. Written by the generator into
+                                target/generated-sources on every build, never edited, and asserting
+                                on a generated getter tests the generator rather than this service.
+                                227 instructions and 18 branches, none of them ours.
+                            -->
+                            <exclude>com/xenopsoftware/core/service/api/dto/**</exclude>
+                        </excludes>
+                    </configuration>
                     <executions>
                         <execution>
                             <id>pre-unit-tests</id>
