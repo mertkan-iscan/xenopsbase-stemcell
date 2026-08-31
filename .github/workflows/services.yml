@@ -272,6 +272,25 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
+      # cosign WRITES the signature to the registry as an artifact beside the
+      # image, so it needs registry credentials of its own. Jib was given them
+      # explicitly via -Djib.to.auth.*; cosign inherits nothing from that, and
+      # the first run without this failed with
+      #
+      #   UNAUTHORIZED: unauthenticated
+      #   POST https://ghcr.io/v2/.../blobs/uploads/
+      #
+      # after the image had already been pushed -- so the failure was in
+      # publishing the signature, not in producing it.
+      #
+      # --password-stdin rather than -p: an argument is visible in the process
+      # list, and this is the token that can push images.
+      - name: Log in to GHCR for cosign
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | cosign login ghcr.io -u "${{ github.actor }}" --password-stdin
+
       # Keyless. The certificate Fulcio issues carries this workflow's identity,
       # so verification can require that the image came from THIS pipeline
       # rather than merely that somebody signed it. A signature that only proves
