@@ -156,7 +156,21 @@ spec:
           # reproducibility: platform-images.py skips unpinned images, so an
           # unpinned sidecar would never enter the scan matrix. That is exactly
           # how the Valkey image itself ran unscanned until T-6.10 (#332).
-          image: oliver006/redis_exporter@sha256:dbd410eb9255016c9440b40b8fa18872fdf0e7972d06fc1df8d5b120d35efe05  # v1.69.0, resolved 2026-08-31
+          #
+          # BUMPED FROM v1.69.0, WHICH WAS THE SAME MISTAKE AGAIN. That version
+          # was chosen without checking what the current one was, and the first
+          # scan of it -- the scan that only happens BECAUSE it is pinned --
+          # failed the Security workflow with 15 findings:
+          #
+          #   Total: 15 (HIGH: 14, CRITICAL: 1)
+          #   stdlib CVE-2025-68121 CRITICAL  Go v1.24.1
+          #     crypto/tls: incorrect certificate validation
+          #     fixed in 1.24.13 / 1.25.7
+          #
+          # v1.90.0 scans clean (0 HIGH/CRITICAL, gobinary), verified with trivy
+          # before pinning rather than after. Choosing a version and scanning it
+          # afterwards is how the previous one got in.
+          image: oliver006/redis_exporter@sha256:a129504e65b87c54f79bc92f1afc403475e8ff646a3d7512de469904ceddf986  # v1.90.0, resolved 2026-08-31; trivy clean
           env:
             - name: REDIS_ADDR
               value: redis://localhost:6379
