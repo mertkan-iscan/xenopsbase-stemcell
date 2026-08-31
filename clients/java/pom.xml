@@ -22,8 +22,8 @@
     <properties>
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <openapi-generator.version>7.23.0</openapi-generator.version>
-        <jackson.version>2.20.1</jackson.version>
+        <openapi-generator.version>7.25.0</openapi-generator.version>
+        <jackson.version>2.22.2</jackson.version>
         <jakarta.annotation.version>3.0.0</jakarta.annotation.version>
     </properties>
 
@@ -41,7 +41,7 @@
         <dependency>
             <groupId>org.openapitools</groupId>
             <artifactId>jackson-databind-nullable</artifactId>
-            <version>0.2.10</version>
+            <version>0.2.11</version>
         </dependency>
         <dependency>
             <groupId>jakarta.annotation</groupId>
