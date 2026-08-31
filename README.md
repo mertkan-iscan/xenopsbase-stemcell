@@ -163,9 +163,3 @@ reproduces from nothing.
   - [Database](docs/runbooks/database.md) — backups, restore, failover, and what a rebuild does not restore
   - [Ingress and TLS](docs/runbooks/ingress-tls.md) — the serving path, QUIC firewall, DNS-01 certificates
   - [Object storage](docs/runbooks/object-storage.md) — per-environment durable buckets, retention, least privilege
-
-## Prior art
-
-Generalized from `mertkan-iscan/hedportal-terraform`, which runs the same shape in production.
-The stemcell exists partly to close the three gaps that project's `docs/DISASTER-RECOVERY.md`
-names as known and accepted: no offsite copy, no schema rollback, no point-in-time recovery.

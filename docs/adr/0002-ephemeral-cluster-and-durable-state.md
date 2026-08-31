@@ -20,11 +20,10 @@ refusing to cross it. Every system that has lost data to a teardown lost it to s
 remembered was in there — a hand-applied secret, a dashboard built in a UI, a realm configured in
 an admin console, a volume someone assumed was backed up.
 
-The precedent is direct. The predecessor project `hedportal-terraform` documents this exact class
-of assumption in its disaster-recovery runbook: Hetzner snapshots cover the root disk only, and
-attached volumes — holding the database and every uploaded document — are excluded. The failure
-mode is not that backups were missing. It is that the boundary between protected and unprotected
-was implicit, and therefore got assumed wrongly.
+The concrete hazard on this provider is snapshot scope. Hetzner snapshots cover the root disk
+only; attached volumes, which is where a database and uploaded documents live, are excluded. The
+failure mode that follows is not that backups were missing. It is that the boundary between
+protected and unprotected was implicit, and therefore got assumed wrongly.
 
 ## Decision criteria
 
