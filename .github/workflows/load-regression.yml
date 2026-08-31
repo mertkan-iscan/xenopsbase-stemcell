@@ -1,0 +1,140 @@
+name: Load regression
+
+# Runs the k6 baseline on a clock, so a slowdown is found by the schedule rather
+# than by somebody remembering to look (T-5.10, #207).
+#
+# WHY THIS COULD NOT EXIST BEFORE
+#
+# The baseline drives k6 INSIDE the cluster, against the gateway Service. The
+# Kubernetes API is a tailnet address with 6443 closed on every public IP
+# (T-1.5, ADR-0006), so a GitHub-hosted runner could not reach it. #195 changed
+# that: the runner joins the tailnet for the duration of the job, the same way
+# deploy-status.yml does.
+#
+# WHY NOT DRIVE LOAD THROUGH THE PUBLIC EDGE INSTEAD
+#
+# It would work and it would measure the wrong thing. The number this produces
+# is an autoscaling threshold and an HPA scales on pod CPU; driving through
+# Cloudflare, the tunnel and ingress-nginx measures those too, with more
+# variance than the thing under test. A p95 of 4ms on the gateway is not
+# observable through a path that adds tens of milliseconds of its own.
+#
+# WHEN IT RUNS, AND WHY THAT TIME
+#
+# 17:00 UTC — 20:00 Europe/Istanbul. The dev cluster is torn down by hand most
+# nights, so a run at any hour usually finds nothing; this is late enough that a
+# cluster still up is probably finished with rather than in use. That matters
+# because the run drives both HPAs to maxReplicas and the autoscaler adds nodes,
+# which is disruptive to somebody working in it.
+#
+# NO CLUSTER IS NOT A FAILURE
+#
+# Most nights there is nothing running. The server count is checked before the
+# runner joins anything, and the job succeeds with a notice — a scheduled check
+# that is red every morning for the ordinary state of the environment is one
+# people stop reading, which is the failure #2, #113, #155 and #211 are about.
+
+on:
+  schedule:
+    - cron: '0 17 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ENVIRONMENT: dev
+
+jobs:
+  load:
+    name: k6 baseline against dev
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # Before joining anything. If there is no cluster there is nothing to
+      # measure, and no reason to put a runner on the tailnet to find that out.
+      - name: Is there a cluster at all?
+        id: cluster
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: |
+          count="$(curl -sS -H "Authorization: Bearer ${HCLOUD_TOKEN}" \
+            'https://api.hetzner.cloud/v1/servers?per_page=1' \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["meta"]["pagination"]["total_entries"])')"
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+          if [ "${count}" -eq 0 ]; then
+            echo "::notice::No cluster is running, so there is nothing to load. This is the normal overnight state (ADR-0002)."
+          else
+            echo "${count} server(s) running — measuring."
+          fi
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        if: steps.cluster.outputs.count != '0'
+        with:
+          terraform_version: 1.14.8
+
+      - name: Read the kubeconfig out of Terraform state
+        if: steps.cluster.outputs.count != '0'
+        working-directory: infra/terraform/cluster
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          cat > backend.hcl <<EOF
+          bucket = "xenopsbase-tfstate"
+          region = "auto"
+          endpoints = { s3 = "${R2_ENDPOINT}" }
+          EOF
+
+          terraform init -input=false -reconfigure \
+            -backend-config=backend.hcl \
+            -backend-config="key=${ENVIRONMENT}/cluster.tfstate"
+          terraform output -raw kubeconfig > kubeconfig
+          chmod 600 kubeconfig
+          test -s kubeconfig
+
+      - name: Join the tailnet
+        if: steps.cluster.outputs.count != '0'
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          hostname: gh-loadrun-${{ github.run_id }}
+
+      # load-test.sh needs no change and gets none. It already submits the k6
+      # Job in-cluster, takes the cluster from the project's kubeconfig, and
+      # needs no credentials of its own because the gateway and Keycloak are
+      # both reachable by Service DNS. It also lifts the gateway rate limit for
+      # the measurement and restores it on every exit path (T-5.13, #371) --
+      # without that this would measure Valkey token buckets rather than JVMs.
+      #
+      # k6 exits non-zero on a breached threshold and the script propagates it,
+      # so a regression fails this job rather than being written to a log
+      # somebody would have to open.
+      - name: Run the baseline
+        if: steps.cluster.outputs.count != '0'
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: bash infra/scripts/load-test.sh "${ENVIRONMENT}"
+
+      # THE TREND, AND WHY IT IS NOT IN PROMETHEUS.
+      #
+      # The obvious home for latency history is Prometheus, next to everything
+      # else. It cannot be: Prometheus's storage lives on a PVC inside the
+      # cluster, and the cluster is destroyed most nights (ADR-0002), so a
+      # series there resets daily and a trend across weeks cannot exist.
+      #
+      # Artifacts outlive the cluster, which is the property that matters.
+      # `if: always()` so a FAILED run's numbers are kept too -- the run that
+      # breached the threshold is the one worth comparing against.
+      - name: Keep the numbers
+        if: always() && steps.cluster.outputs.count != '0'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: k6-baseline-${{ github.run_id }}
+          path: k6-baseline-*.log
+          retention-days: 90
+          if-no-files-found: warn
