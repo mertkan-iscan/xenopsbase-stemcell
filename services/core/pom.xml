@@ -92,7 +92,7 @@
             them deliberately, with the reason in the commit, the same as every other threshold in
             this repository. Getting from here to the target is its own body of work and has its
             own card.
-                    RAISED 2026-09-01, T-5.9 (#172): 0.58/0.44 to 0.72/0.55.
+                    RAISED 2026-09-01, T-5.9 (#172): 0.58/0.44 to 0.73/0.61, in two steps.
 
             TAKE THE NUMBER FROM CI, NOT FROM A DEVELOPER MACHINE. A local merged run
             measured 74.7% instruction; CI measured 0.73 on the same commit, and a floor of 0.74
@@ -111,13 +111,28 @@
               exclusion of generated DTOs   61.4/46.7 to 64.1/48.9
               the tests themselves          64.1/48.9 to 74.7/57.0
 
-            Still short of the target by 5.3 instruction and 13.0 branch. Recorded against this
-            card's own fourth criterion: branch did NOT rise faster than instruction here, +8.1
-            against +10.6 from the tests. The classes covered had large untested bodies as well as
-            untaken branches, so instruction moved with them. The remaining work is branch-only.
+            SECOND STEP: three filter and error classes, 75.8% / 64.4% locally.
+
+              InfraUsageService + ExceptionTranslator   61.4/46.7 to 74.7/57.0
+              CorrelationIdFilter + IdempotencyFilter   74.7/57.0 to 75.8/64.4
+
+            The second step is the shape this card asks for and the first was not. Against the
+            fourth criterion - branch must rise at least as fast as instruction - the first step
+            managed +8.1 branch against +10.6 instruction, because those classes had large untested
+            bodies as well as untaken branches. The second managed +7.4 branch against +1.1
+            instruction: small, branch-dense classes move the number the card actually cares about.
+
+            CorrelationIdFilter went from 1 of 26 branches to 26 of 26. It sanitises an
+            attacker-controlled header that lands in every log line, so those branches are a
+            log-forging defence, and a defence nothing exercises is indistinguishable from an
+            absent one.
+
+            Short of the target by 4.2 instruction and 5.6 branch. SecurityUtils is the largest
+            remaining single gap at 11 branches, spread one to three at a time across seven
+            methods, and is deliberately left rather than padded.
         -->
-        <jacoco.minimum.instruction>0.72</jacoco.minimum.instruction>
-        <jacoco.minimum.branch>0.55</jacoco.minimum.branch>
+        <jacoco.minimum.instruction>0.73</jacoco.minimum.instruction>
+        <jacoco.minimum.branch>0.61</jacoco.minimum.branch>
         <jhipster-framework.version>9.1.0</jhipster-framework.version>
         <jib-maven-plugin.architecture>amd64</jib-maven-plugin.architecture>
         <!--
