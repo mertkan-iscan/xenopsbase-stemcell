@@ -1,0 +1,80 @@
+# Rejects images that this pipeline did not sign (T-6.2, #49).
+#
+# WHY sigstore/policy-controller RATHER THAN KYVERNO
+#
+# It does one thing, so it costs one webhook Deployment rather than a policy
+# engine's four controllers -- which matters on a cluster T-2.29 (#368) is
+# already open about. And its enforcement model is opt-IN per namespace: it acts
+# only where `policy.sigstore.dev/include: "true"` is set. A general engine
+# defaults the other way, and an admission webhook that can refuse pods in
+# kube-system is a component whose bad day stops the cluster recovering from
+# its own bad day.
+#
+# WHICH NAMESPACES ARE ENROLLED: NONE, YET, AND THAT IS DELIBERATE
+#
+# `apps` is not labelled here. Its own images are signed now -- core and gateway
+# run the digests the pipeline signed -- but the namespace also runs images this
+# project does not sign and never will: curlimages/curl as an initContainer
+# (T-3.24), among others. policy-controller denies an image that matches no
+# policy, so enrolling `apps` against a policy scoped to our registry would
+# refuse curl and take the application down.
+#
+# Enrolling it therefore needs a second policy covering third-party images, and
+# that is a decision about what "trusted" means for something we did not build.
+# Raised rather than assumed; see the card. What this deploys is the mechanism
+# and the policy for our own images, provable today in a scratch namespace.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: policy-controller
+  namespace: argocd
+  annotations:
+    # Wave 0: an admission controller has to exist before anything it governs.
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://sigstore.github.io/helm-charts
+    chart: policy-controller
+    targetRevision: 0.10.7
+    helm:
+      values: |
+        installCRDs: true
+
+        webhook:
+          replicaCount: 1
+
+          # failurePolicy: Fail is the chart default and is kept. A signature
+          # check that fails open is not a check. It is survivable only because
+          # of the namespace opt-in above -- the blast radius of this webhook
+          # being down is "pods cannot start in enrolled namespaces", and no
+          # namespace is enrolled without that trade being made on purpose.
+          failurePolicy: Fail
+
+          # Explicit, and modest. The chart's defaults are these; they are
+          # restated so a chart bump cannot change what this books without the
+          # diff saying so, and because nothing may run BestEffort (#364).
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits:   {memory: 512Mi}
+
+        # The webhook image is already digest-pinned by the chart. The
+        # `leasescleanup` image is not -- it is `latest-dev` -- but it belongs to
+        # a Helm post-delete hook that runs only on uninstall, and
+        # platform-images.py reads `image:` keys from THIS tree rather than from
+        # rendered charts, so it does not enter the scan matrix either way. That
+        # is the same documented gap the script already records for
+        # keycloak-operator, not a new one introduced here.
+
+        serviceMonitor:
+          enabled: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cosign-system
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

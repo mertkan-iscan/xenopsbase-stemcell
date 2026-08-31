@@ -1,0 +1,34 @@
+# Only images this pipeline signed may run, in namespaces that opt in.
+#
+# THE IDENTITY IS THE POINT, NOT THE SIGNATURE
+#
+# Requiring "a valid signature" would be satisfied by anyone who can sign, which
+# is everyone. What is required here is a Fulcio certificate whose subject is a
+# workflow IN THIS REPOSITORY and whose issuer is GitHub's OIDC provider. That
+# is the claim T-6.2 actually makes -- "only images this pipeline built" -- and
+# it is the difference between a control and a formality.
+#
+# Both values are verified against a real signature before being written here:
+# the pipeline's own `cosign verify` step uses the same identity regexp and
+# issuer, and passed on core and gateway.
+apiVersion: policy.sigstore.dev/v1beta1
+kind: ClusterImagePolicy
+metadata:
+  name: xenopsbase-images-are-signed
+spec:
+  images:
+    # Scoped to this project's registry path. Anything else in an enrolled
+    # namespace matches no policy and is denied by policy-controller's default,
+    # which is why enrolling a namespace requires knowing every image in it.
+    - glob: "ghcr.io/mertkan-iscan/xenopsbase-stemcell/**"
+  authorities:
+    - keyless:
+        # Public Fulcio. The signatures are keyless and their transparency-log
+        # entries are public, which is what makes them verifiable by anyone
+        # rather than only by whoever holds a key.
+        url: https://fulcio.sigstore.dev
+        identities:
+          - issuer: https://token.actions.githubusercontent.com
+            # Anchored at both ends. An unanchored pattern would also match a
+            # repository whose name merely CONTAINS this one.
+            subjectRegExp: '^https://github\.com/mertkan-iscan/xenopsbase-stemcell/\.github/workflows/.+$'

@@ -1,0 +1,28 @@
+# The policy itself, separate from the controller that enforces it (T-6.2, #49).
+#
+# Wave 1, because a ClusterImagePolicy is an instance of a CRD the chart in wave
+# 0 installs. Applied in one wave they race, and the loser is reported as an
+# unknown kind rather than as an ordering problem.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: image-policy
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mertkan-iscan/xenopsbase-stemcell.git
+    targetRevision: main
+    path: platform/envs/dev/policy
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cosign-system
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
