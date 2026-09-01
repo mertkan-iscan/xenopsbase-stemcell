@@ -92,7 +92,7 @@
             them deliberately, with the reason in the commit, the same as every other threshold in
             this repository. Getting from here to the target is its own body of work and has its
             own card.
-                    RAISED 2026-09-01, T-5.9 (#172): 0.58/0.44 to 0.73/0.61, in two steps.
+                    RAISED 2026-09-01, T-5.9 (#172): 0.58/0.44 to 0.77/0.68, in three steps.
 
             TAKE THE NUMBER FROM CI, NOT FROM A DEVELOPER MACHINE. A local merged run
             measured 74.7% instruction; CI measured 0.73 on the same commit, and a floor of 0.74
@@ -127,12 +127,27 @@
             log-forging defence, and a defence nothing exercises is indistinguishable from an
             absent one.
 
-            Short of the target by 4.2 instruction and 5.6 branch. SecurityUtils is the largest
-            remaining single gap at 11 branches, spread one to three at a time across seven
-            methods, and is deliberately left rather than padded.
+            THIRD STEP: InfraUsageService's assembly and LoggingAspect, 80.6% / 70.1% locally.
+
+              75.8/64.4 to 78.7/67.9   the assembly half of InfraUsageService
+              78.7/67.9 to 80.6/70.1   LoggingAspect
+
+            WHICH MEETS THE TARGET LOCALLY AND IS NOT WHY THE FLOOR IS 0.77/0.68.
+
+            The margin is 0.6 and 0.1. CI measured 1.7 points below this machine the last time both
+            numbers were visible, so a floor at the target would fail the first build after it. The
+            floor is what CI can be relied on to clear, not the best number anyone has seen, and
+            saying "the target is met" while the gate sits lower would be recording an
+            achievement the build cannot demonstrate.
+
+            Raising it to 0.80/0.70 needs CI's own reading of this commit. That is a follow-up with
+            a number in it, not a guess.
+
+            SecurityUtils remains the largest untouched gap at 11 branches, spread one to three at
+            a time across seven methods, and is deliberately left rather than padded.
         -->
-        <jacoco.minimum.instruction>0.73</jacoco.minimum.instruction>
-        <jacoco.minimum.branch>0.61</jacoco.minimum.branch>
+        <jacoco.minimum.instruction>0.77</jacoco.minimum.instruction>
+        <jacoco.minimum.branch>0.68</jacoco.minimum.branch>
         <jhipster-framework.version>9.1.0</jhipster-framework.version>
         <jib-maven-plugin.architecture>amd64</jib-maven-plugin.architecture>
         <!--
