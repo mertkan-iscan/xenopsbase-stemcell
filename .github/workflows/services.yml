@@ -118,6 +118,49 @@ jobs:
         working-directory: services/${{ matrix.service }}
         run: ./mvnw --batch-mode clean verify -DskipITs=false
 
+      # WHAT THE COVERAGE GATE DOES NOT TELL ANYONE (T-5.9, #172).
+      #
+      # jacoco:check reports pass or fail and no number, so every ratchet of the
+      # floors in services/*/pom.xml has been set from a local run and a guess at
+      # what CI would read. The guess has been wrong: the gateway floor was raised
+      # to 0.74 from a local 74-point-something and CI measured 0.73, failing a
+      # build for no defect. The gap between this project's local runs and CI has
+      # been as much as 1.7 points.
+      #
+      # Printing the merged figure turns the next ratchet into a measurement.
+      # Deliberately `always()`: a violated gate is precisely when the margin is
+      # the thing you need to know, and that is the run where the step would
+      # otherwise be skipped.
+      - name: Report merged coverage
+        if: always()
+        working-directory: services/${{ matrix.service }}
+        run: |
+          report=target/site/jacoco-merged/jacoco.csv
+          if [ ! -f "$report" ]; then
+            echo "No merged coverage report at $report -- the build failed before it was written." \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          python3 - "$report" "${{ matrix.service }}" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import csv, io, sys
+
+          rows = list(csv.DictReader(io.open(sys.argv[1], encoding="utf-8")))
+          totals = {
+              counter: (
+                  sum(int(r[counter + "_COVERED"]) for r in rows),
+                  sum(int(r[counter + "_MISSED"]) for r in rows),
+              )
+              for counter in ("INSTRUCTION", "BRANCH")
+          }
+
+          print(f"### {sys.argv[2]} coverage, merged unit + integration\n")
+          print("| counter | covered | missed | % |")
+          print("|---|---:|---:|---:|")
+          for counter, (covered, missed) in totals.items():
+              print(f"| {counter.lower()} | {covered} | {missed} | {100 * covered / (covered + missed):.2f} |")
+          print("\nThe floors this has to clear are in `services/*/pom.xml`.")
+          PY
+
       # The contract, as an artifact anyone can download without building the project.
       - name: Upload OpenAPI document
         if: always()

@@ -96,9 +96,24 @@
             TestSecurityConfiguration, so the real one is constructed and never asked to validate
             anything. That is a smaller and more tractable problem than a missing container, and it
             is worth stating correctly before somebody plans work around the wrong blocker.
+
+            THIRD STEP: 81.93% instruction / 76.95% branch, from 76.6/61.7.
+
+              76.6/61.7 to 79.0/70.5   CorrelationId.isAcceptable, SecurityUtils claims+principal
+              79.0/70.5 to 79.7/73.2   the ExceptionTranslator status mapping table
+              79.7/73.2 to 81.9/77.0   the error response envelope, the token refresh filter
+
+            Both counters are past T-5.1's 80/70 target on this machine. The floors are NOT
+            0.80/0.70 yet, and that is deliberate. The instruction margin is 1.9 points and
+            CI has read as much as 1.7 points below this machine, so a 0.80 floor would rest
+            on a number nobody has ever watched CI produce, which is exactly how the 0.74
+            floor above failed a build for no defect.
+
+            The build now prints the merged figure to the job summary, so the last step to
+            0.80/0.70 is a measurement rather than a fourth guess.
         -->
-        <jacoco.minimum.instruction>0.74</jacoco.minimum.instruction>
-        <jacoco.minimum.branch>0.59</jacoco.minimum.branch>
+        <jacoco.minimum.instruction>0.79</jacoco.minimum.instruction>
+        <jacoco.minimum.branch>0.74</jacoco.minimum.branch>
         <jhipster-framework.version>8.12.0</jhipster-framework.version>
         <jib-maven-plugin.architecture>amd64</jib-maven-plugin.architecture>
         <!--
