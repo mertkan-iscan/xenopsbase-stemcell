@@ -352,10 +352,22 @@ public class InfraUsageService {
             JsonNode value = result.path("value");
             if (value.isArray() && value.size() == 2) {
                 try {
-                    out.put(key, Double.parseDouble(value.get(1).asText()));
+                    double sample = Double.parseDouble(value.get(1).asText());
+                    // NaN and the infinities are not values, and they are not errors either, so
+                    // neither storing them nor throwing is right. Skipping them is.
+                    //
+                    // isFinite RATHER THAN LEAVING IT TO THE CATCH BELOW. Prometheus spells these
+                    // "NaN", "+Inf" and "-Inf", and only the Inf spellings raise --
+                    // Double.parseDouble("NaN") returns Double.NaN quite happily. So before this
+                    // guard a NaN sample was stored, reached the response record, and left the
+                    // endpoint emitting a token JSON cannot represent. The comment that used to
+                    // sit here said both were skipped; one of them was. Found by a test that took
+                    // the branch nobody took (T-5.9, #172).
+                    if (Double.isFinite(sample)) {
+                        out.put(key, sample);
+                    }
                 } catch (NumberFormatException ignored) {
-                    // Prometheus renders NaN and +Inf as strings. Skipping them is correct; they
-                    // are not values, and they are not errors either.
+                    // "+Inf" and "-Inf" land here rather than in the guard above.
                 }
             }
         }
