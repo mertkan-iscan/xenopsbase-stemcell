@@ -69,7 +69,7 @@
             them deliberately, with the reason in the commit, the same as every other threshold in
             this repository. Getting from here to the target is its own body of work and has its
             own card.
-                    RAISED 2026-09-01, T-5.9 (#172): 0.53/0.40 to 0.69/0.53.
+                    RAISED 2026-09-01, T-5.9 (#172): 0.53/0.40 to 0.74/0.59, in two steps.
 
             Measured 71.9% instruction / 55.3% branch on a merged run, from 62.8% / 46.0%.
 
@@ -80,13 +80,25 @@
             points below this machine on the core module the one time both numbers were visible,
             and a floor set from a local run is a guess that happens to be checkable.
 
-            Still short of the 80/70 target by 276 instruction and 44 branch. The largest remaining
+            SECOND STEP: CRLFLogConverter and the rate limiter's key resolver, 76.6% / 61.7%.
+
+              62.8/46.0 to 71.9/55.3   exclusion, LoggingAspect, ExceptionTranslator
+              71.9/55.3 to 76.6/61.7   CRLFLogConverter, RateLimiterConfiguration
+
+            Still short of the 80/70 target by 117 instruction and 24 branch. The largest remaining
             single gap is SecurityConfiguration's inline ReactiveJwtDecoder at 22 branches and 202
-            instructions, which is reachable only with a real token and therefore waits on T-4.2's
-            Keycloak container rather than on more unit tests.
+            instructions.
+
+            CORRECTION TO WHAT THE FIRST STEP SAID ABOUT THAT DECODER. It claimed the decoder waits
+            on T-4.2's Keycloak container. The container is already here and already used, by
+            OidcLoginFlowIT through RealClientRegistrationConfiguration. What keeps the decoder
+            uncovered is that every other integration test stubs ReactiveJwtDecoder through
+            TestSecurityConfiguration, so the real one is constructed and never asked to validate
+            anything. That is a smaller and more tractable problem than a missing container, and it
+            is worth stating correctly before somebody plans work around the wrong blocker.
         -->
-        <jacoco.minimum.instruction>0.69</jacoco.minimum.instruction>
-        <jacoco.minimum.branch>0.53</jacoco.minimum.branch>
+        <jacoco.minimum.instruction>0.74</jacoco.minimum.instruction>
+        <jacoco.minimum.branch>0.59</jacoco.minimum.branch>
         <jhipster-framework.version>8.12.0</jhipster-framework.version>
         <jib-maven-plugin.architecture>amd64</jib-maven-plugin.architecture>
         <!--
