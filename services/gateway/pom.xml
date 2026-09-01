@@ -69,9 +69,24 @@
             them deliberately, with the reason in the commit, the same as every other threshold in
             this repository. Getting from here to the target is its own body of work and has its
             own card.
+                    RAISED 2026-09-01, T-5.9 (#172): 0.53/0.40 to 0.69/0.53.
+
+            Measured 71.9% instruction / 55.3% branch on a merged run, from 62.8% / 46.0%.
+
+              generated DTO exclusion   62.8/46.0 to 66.9/48.8
+              the tests                 66.9/48.8 to 71.9/55.3
+
+            The floor is CI's expected reading with margin, not the local figure. CI measured 1.7
+            points below this machine on the core module the one time both numbers were visible,
+            and a floor set from a local run is a guess that happens to be checkable.
+
+            Still short of the 80/70 target by 276 instruction and 44 branch. The largest remaining
+            single gap is SecurityConfiguration's inline ReactiveJwtDecoder at 22 branches and 202
+            instructions, which is reachable only with a real token and therefore waits on T-4.2's
+            Keycloak container rather than on more unit tests.
         -->
-        <jacoco.minimum.instruction>0.53</jacoco.minimum.instruction>
-        <jacoco.minimum.branch>0.40</jacoco.minimum.branch>
+        <jacoco.minimum.instruction>0.69</jacoco.minimum.instruction>
+        <jacoco.minimum.branch>0.53</jacoco.minimum.branch>
         <jhipster-framework.version>8.12.0</jhipster-framework.version>
         <jib-maven-plugin.architecture>amd64</jib-maven-plugin.architecture>
         <!--
@@ -962,6 +977,31 @@
                     <groupId>org.jacoco</groupId>
                     <artifactId>jacoco-maven-plugin</artifactId>
                     <version>${jacoco-maven-plugin.version}</version>
+                    <configuration>
+                        <!--
+                            EXCLUSIONS ARE LISTED ONE BY ONE, WITH A REASON EACH (T-5.9, #172).
+
+                            The card that raises the floor also says the quiet part: excluding code
+                            is legitimate, and using it as an excuse for the number is not. An entry
+                            must name code nobody would ever choose to write a test for, not code
+                            that is merely hard to reach.
+
+                            Measured before adding this, so the size of the concession is known
+                            rather than assumed. It moves the merged report from 62.8% to 66.9%
+                            instruction and 46.0% to 48.8% branch. It is worth more here than in
+                            core because this module is smaller, which is a reason to state the
+                            figure rather than to be pleased with it.
+                        -->
+                        <excludes>
+                            <!--
+                                OpenAPI-generated DTOs. Written by the generator into
+                                target/generated-sources on every build, never edited, and asserting
+                                on a generated getter tests the generator rather than this service.
+                                227 instructions and 18 branches, none of them ours.
+                            -->
+                            <exclude>com/xenopsoftware/gateway/service/api/dto/**</exclude>
+                        </excludes>
+                    </configuration>
                     <executions>
                         <execution>
                             <id>pre-unit-tests</id>
