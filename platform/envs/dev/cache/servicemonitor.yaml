@@ -10,7 +10,14 @@ spec:
     matchNames:
       - cache
   selector:
-    matchLabels: {app.kubernetes.io/name: valkey}
+    # BOTH in-memory servers, named explicitly (T-2.19, #262). Sessions and the
+    # business cache run as separate Deployments so neither can evict the other,
+    # and that split is wasted if only one of them is scraped:
+    # `redis_evicted_keys_total{job="valkey-cache"}` rising is a cache doing its
+    # job, and the same series for job="valkey" means someone is being logged
+    # out. One ServiceMonitor keeps one interval; the `job` label tells them apart.
+    matchExpressions:
+      - {key: app.kubernetes.io/name, operator: In, values: [valkey, valkey-cache]}
   endpoints:
     # 30s. The exporter re-reads Valkey's INFO on each scrape, so the interval
     # is the resolution of every panel and alert built on it; faster costs a

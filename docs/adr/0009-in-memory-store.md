@@ -141,6 +141,76 @@ lifecycle to cluster membership: rolling deployments become a partition-and-rejo
 failure modes are subtle and specific to that library. A separate store keeps the application
 replicas genuinely stateless, which is the goal.
 
+## Amendment, 2026-09-02 — T-2.19 (#262): sessions and the business cache are separate servers
+
+This ADR chose one Valkey and made it disposable. That was right, and it is unchanged. What it did
+not settle is what happens when a second kind of data arrives, and the answer turned out to matter
+before the second kind existed.
+
+### The problem
+
+The single server runs `maxmemory 192mb` under `maxmemory-policy allkeys-lru`. `allkeys-lru` evicts
+**any** key to make room. While sessions were the only tenant that was harmless — pressure meant the
+least recently used session was dropped, which is what its TTL would have done shortly anyway.
+
+Put a business cache in the same server and cached rows compete with sessions for the same bytes.
+The loser is whichever key was least recently touched, so a busy cache logs users out. It does so
+silently, and it correlates with cache load rather than with anything about authentication, which is
+the property that makes it expensive: it presents as an auth bug. This repository has already spent
+three attempts on one of those (#148).
+
+**This was reproduced, not reasoned about.** While verifying T-2.20 (#263) the server was filled to
+218M, which evicted 7787 keys. Deleting only the probe keys afterwards left `dbsize 0` — the sessions
+that had been there were gone.
+
+### Decision
+
+**One server per tenant.** `valkey` keeps sessions and rate-limit counters. A second Deployment,
+`valkey-cache`, takes business caching. Both keep `allkeys-lru`, both keep `save ""` /
+`appendonly no`, and both stay on the disposable side of ADR-0002.
+
+Sizing is measured rather than inherited. An empty server holds 1.17M of its own, and one login's
+tokens are 2929 bytes of JWT (access 1123, refresh 737, id 1069) before Spring Session's
+serialisation overhead. The session server therefore drops from 192mb to **64mb**, on the order of
+four thousand concurrent sessions at a generous 16KB each, and the cache server takes **128mb** as a
+stated assumption that T-3.22 (#264) must revisit against the working set it actually creates.
+
+The dataset budget across both servers is 64mb + 128mb against 192mb before, so the split is not a
+straight addition of memory to a node whose sizing is an open question (T-2.27/#341, T-2.29/#368).
+What genuinely grows is one process's overhead and a second exporter.
+
+### Alternatives considered
+
+**A separate logical DB (`SELECT 1`) — rejected, and it is the one worth writing down.** It is the
+intuitive answer and it does not work: `maxmemory` and the eviction policy are properties of the
+server, not of a database. The two key spaces would be separated for lookup and share every byte,
+so the eviction behaviour would be exactly what it is today. It would read as isolation in review
+and provide none at runtime. `evicted_keys` is server-wide too, so afterwards you could not even
+determine which side lost.
+
+**`volatile-lru` with no TTL on the cache — rejected.** It only evicts keys carrying a TTL, so it
+isolates only if the cache has none. Sessions do carry one, so both sides stay evictable and nothing
+is isolated. Removing the cache's TTLs to fix that inverts the problem — cached entries become the
+immortal ones — and contradicts T-0.11 (#261), which mandates them.
+
+**Raising `maxmemory` — rejected.** Moves the threshold without isolating anything; a large enough
+cache still evicts a session, just later. It is bounded by the container limit, which is bounded by
+the node.
+
+**Cache in the application heap instead — rejected.** Removes the component but reintroduces what
+this ADR's "Hazelcast or Infinispan" entry rejects: per-replica caches that disagree with each other,
+and a cache whose size is coupled to JVM sizing and GC behaviour.
+
+### Consequences
+
+Two servers to run, two configs, two exporters. A caller must now choose which one it means, and
+choosing wrong is a silent correctness question rather than a connection error — the guard is that
+`valkey-cache` is the only address the cache abstraction in T-3.22 may use.
+
+The failure that motivated this is now *visible* rather than merely prevented:
+`redis_evicted_keys_total{job="valkey-cache"}` rising is a cache doing its job, and the same series
+for `job="valkey"` means someone is being logged out. Those were indistinguishable before.
+
 ## Revisit if
 
 - **Anything authoritative is proposed for it.** That is the boundary crossing this ADR exists to
@@ -153,3 +223,5 @@ replicas genuinely stateless, which is the goal.
 - **A measured bottleneck appears in Postgres** (T-5.6). Caching becomes a real driver rather than
   a speculative one, and the sizing and eviction decisions here should be revisited against actual
   load.
+- **The cache working set is measured** (T-3.22, #264). The 128mb on `valkey-cache` is an
+  assumption made before anything cached; the first real workload replaces it with a figure.

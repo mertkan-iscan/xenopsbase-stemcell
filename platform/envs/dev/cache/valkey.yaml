@@ -1,4 +1,9 @@
-# Valkey: the shared in-memory store (T-2.11, ADR-0009).
+# Valkey: the SESSION store (T-2.11, ADR-0009; split out by T-2.19, #262).
+#
+# This server holds sessions and rate-limit counters. Business caching lives in
+# a separate server, valkey-cache.yaml, because `allkeys-lru` below evicts any
+# key to make room, and a cached row displacing a session logs a user out. That
+# file carries the decision and the three rejected alternatives.
 #
 # The namespace is called `cache` on purpose. Nothing authoritative may live
 # here — ADR-0009 puts this on the DISPOSABLE side of ADR-0002, and the rule is
@@ -33,7 +38,22 @@ data:
     # DATASET; the process also needs room for client buffers, replication
     # buffers and fragmentation, so a maxmemory equal to the limit gets the
     # container OOM-killed rather than evicting.
-    maxmemory 192mb
+    # SHRUNK FROM 192mb WHEN THE CACHE MOVED OUT (T-2.19, #262), and the new
+    # figure is measured rather than chosen.
+    #
+    # 192mb was set when this server's only tenant was sessions and nobody had
+    # asked what a session costs. Measured on the running cluster: an empty
+    # server holds 1.17M of its own, and one login's tokens are 2929 bytes of
+    # JWT (access 1123, refresh 737, id 1069) before Spring Session's own
+    # serialisation overhead. At a generous 16KB serialised, 64mb is on the
+    # order of four thousand concurrent sessions -- far past anything dev will
+    # see, and a knob to raise deliberately for an environment expecting more.
+    #
+    # This is what keeps the split from being a straight addition of memory to a
+    # node whose sizing is already an open question (T-2.27/#341, T-2.29/#368):
+    # the dataset budget across both servers is 64mb + 128mb against 192mb
+    # before. What genuinely grows is process overhead and a second exporter.
+    maxmemory 64mb
 
     # allkeys-lru, not volatile-lru or noeviction.
     #
@@ -125,9 +145,9 @@ spec:
             readOnlyRootFilesystem: true
             capabilities: {drop: [ALL]}
           resources:
-            requests: {cpu: 50m, memory: 128Mi}
-            # Above maxmemory (192mb) with room for buffers and fragmentation.
-            limits: {memory: 320Mi}
+            requests: {cpu: 50m, memory: 64Mi}
+            # Above maxmemory (64mb) with room for buffers and fragmentation.
+            limits: {memory: 160Mi}
           livenessProbe:
             # A TCP check would pass while the server refuses every command.
             # Running an actual PING means the probe fails when Valkey is

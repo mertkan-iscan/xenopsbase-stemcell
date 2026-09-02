@@ -1,0 +1,233 @@
+# Valkey, the business-cache instance (T-2.19, ADR-0009).
+#
+# SEPARATE FROM `valkey` BECAUSE MEMORY IS THE THING BEING ISOLATED, AND NOTHING
+# INSIDE ONE SERVER ISOLATES IT.
+#
+# `valkey` holds sessions under `allkeys-lru`. That policy will evict ANY key to
+# make room, so a business cache sharing that server competes with sessions for
+# the same `maxmemory`, and the loser is whichever key was least recently
+# touched. A cached row displacing a session logs a user out, and it does so
+# silently, at a moment that correlates with cache load rather than with
+# anything about authentication. This repository has already spent three
+# attempts on one authentication mystery (#148).
+#
+# That is not a prediction. It was reproduced on the running cluster while
+# verifying T-2.20 (#263): filling this server to 218M evicted 7787 keys, and
+# afterwards deleting only the probe keys left `dbsize 0` -- the sessions that
+# had been there were gone.
+#
+# THE THREE OPTIONS THAT WERE REJECTED, and why each fails on its own terms:
+#
+#   A separate logical DB (`SELECT 1`)
+#     The intuitive answer, and it does not work. `maxmemory` and the eviction
+#     policy are properties of the SERVER, not of a database, so the two key
+#     spaces are separated for lookup and share every byte. It would look like
+#     isolation in review and provide none at runtime. `evicted_keys` is also
+#     server-wide, so you could not even tell afterwards which side lost.
+#
+#   `volatile-lru` with no TTL on the cache
+#     Only evicts keys that carry a TTL, so it isolates only if the cache has
+#     none. Sessions DO carry one (Spring Session sets expiry), so both sides
+#     stay evictable and nothing is isolated. Making the cache TTL-less to fix
+#     that inverts the problem -- cached entries become the immortal ones -- and
+#     contradicts T-0.11 (#261), which mandates TTLs.
+#
+#   Raising `maxmemory`
+#     Moves the threshold without isolating anything: a large enough cache still
+#     evicts a session, just later. It is also bounded by the container limit,
+#     which is bounded by the node, and node memory is an open question of its
+#     own (T-2.27/#341, T-2.29/#368).
+#
+# WHAT THIS COSTS. One more pod and one more exporter. The dataset budget is
+# unchanged: `valkey` drops from 192mb to 64mb and this takes 128mb, because
+# sessions were measured rather than assumed -- see the sizing note there.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: valkey-cache-config
+  namespace: cache
+data:
+  valkey.conf: |
+    # The SAME Secret as the session instance. Deliberate and worth stating: the
+    # isolation this file exists for is of memory, not of credentials. Both
+    # servers sit in one namespace behind one NetworkPolicy and are reachable by
+    # the same callers, so a second password would add key rotation work without
+    # changing who can reach what.
+    include /etc/valkey/secret/auth.conf
+
+    bind 0.0.0.0
+    port 6379
+    protected-mode no
+
+    # SIZED FOR A CACHE, NOT INHERITED FROM THE SESSION FIGURE.
+    #
+    # 192mb was chosen for `valkey` when sessions were its only tenant, and
+    # copying it here would be picking a number because it was already on the
+    # page. Nothing caches yet -- T-3.22 (#264) is the card that introduces the
+    # first cache -- so this is an explicit assumption rather than a measurement,
+    # and it is written down as one:
+    #
+    #   128mb, on the assumption of a working set in the low tens of thousands of
+    #   entities at a few KB each.
+    #
+    # T-3.22 MUST REVISIT THIS with the working set it actually creates. The
+    # signal to read is `redis_memory_used_bytes` against `redis_memory_max_bytes`
+    # for job="valkey-cache", plus whether `redis_evicted_keys_total` moves at
+    # all in steady state: a cache that evicts continuously is too small, and one
+    # that never approaches the limit is holding memory the node could use.
+    maxmemory 128mb
+
+    # allkeys-lru, and here it is unambiguously right. Everything in this server
+    # is reconstructable from Postgres by definition -- that is what makes it a
+    # cache -- so evicting the least recently used entry is the correct response
+    # to pressure. The reasoning in valkey.yaml about noeviction and volatile-lru
+    # applies unchanged.
+    maxmemory-policy allkeys-lru
+
+    # No persistence, same as the session instance and for a stronger reason: a
+    # restored cache is a cache full of entries that may no longer match the
+    # database, with no way to tell which.
+    #
+    # THE COST IS REAL AND BELONGS TO ANOTHER CARD. Every restart, rollout or
+    # node move starts this empty, and a cold cache under load is a stampede
+    # against Postgres. That is T-3.23 (#265), and it is a stampede problem to be
+    # solved on the application side, not a reason to persist a cache here.
+    save ""
+    appendonly no
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkey-cache
+  namespace: cache
+  labels: {app.kubernetes.io/name: valkey-cache, app.kubernetes.io/part-of: xenopsbase}
+spec:
+  replicas: 1
+  # Recreate, for the same reason as the session instance: two pods behind one
+  # Service would split the key space at random, which for a cache means a hit
+  # ratio that halves for reasons no panel would explain.
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app.kubernetes.io/name: valkey-cache}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: valkey-cache, app.kubernetes.io/part-of: xenopsbase}
+    spec:
+      enableServiceLinks: false
+      # Same absent-checksum caveat as valkey.yaml: editing this ConfigMap or the
+      # Secret does NOT restart the pod. `kubectl -n cache rollout restart
+      # deploy/valkey-cache` after changing either.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: valkey
+          # The same digest the session instance runs. Two in-memory stores on
+          # two different builds would mean two different sets of CVEs to track
+          # and a behaviour difference nobody chose.
+          image: valkey/valkey@sha256:e0eb7c480958d32bdc4357a74bdd70653ae15f2f9b4c93c4a5a9fad1dc471c84  # 8.1-alpine, resolved 2026-08-28; libcrypto3 3.5.7-r0
+          args: ["/etc/valkey/valkey.conf"]
+          ports:
+            - {name: valkey, containerPort: 6379}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 50m, memory: 96Mi}
+            # Above maxmemory (128mb) with room for client buffers and
+            # fragmentation, on the same reasoning as the session instance: a
+            # limit equal to maxmemory gets the container OOM-killed instead of
+            # evicting, which converts a working policy into a crash.
+            limits: {memory: 224Mi}
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "valkey-cli -a \"$(sed -n 's/^requirepass //p' /etc/valkey/secret/auth.conf)\" ping | grep -q PONG"]
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "valkey-cli -a \"$(sed -n 's/^requirepass //p' /etc/valkey/secret/auth.conf)\" ping | grep -q PONG"]
+            periodSeconds: 10
+          volumeMounts:
+            - {name: config, mountPath: /etc/valkey/valkey.conf, subPath: valkey.conf}
+            - {name: auth, mountPath: /etc/valkey/secret, readOnly: true}
+            - {name: data, mountPath: /data}
+        - name: metrics
+          # A second exporter rather than one scraping both. redis_exporter can
+          # take a target per scrape, but that needs relabelling in the
+          # ServiceMonitor and produces series whose `job` no longer names the
+          # server they came from. Distinguishing the two servers is the entire
+          # point here: `redis_evicted_keys_total{job="valkey-cache"}` rising is
+          # normal cache behaviour, and the same series for job="valkey" means
+          # somebody is being logged out.
+          image: oliver006/redis_exporter@sha256:a129504e65b87c54f79bc92f1afc403475e8ff646a3d7512de469904ceddf986  # v1.90.0, resolved 2026-08-31; trivy clean
+          env:
+            - name: REDIS_ADDR
+              value: redis://localhost:6379
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: valkey-auth, key: password}
+          ports:
+            - {name: metrics, containerPort: 9121}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            # Explicit, because the LimitRange defaults are per container
+            # (T-2.25, #363) and nothing may run BestEffort (#364).
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 64Mi}
+      volumes:
+        - name: config
+          configMap: {name: valkey-cache-config}
+        - name: auth
+          secret: {secretName: valkey-auth, items: [{key: auth.conf, path: auth.conf}]}
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey-cache
+  namespace: cache
+  labels: {app.kubernetes.io/name: valkey-cache}
+spec:
+  # ClusterIP, not exposed, for the same reasons as the session instance.
+  selector: {app.kubernetes.io/name: valkey-cache}
+  ports:
+    - {name: valkey, port: 6379, targetPort: valkey}
+    - {name: metrics, port: 9121, targetPort: metrics}
+---
+# Same two rules as the session instance: `apps` may use it, `observability` may
+# scrape it, nothing else may reach it at all.
+#
+# Written out rather than shared with valkey.yaml's policy through a broader
+# podSelector. A policy matching both servers would mean that widening access for
+# one silently widens it for the other, which is the kind of coupling that turns
+# a deliberate change to the cache into an accidental change to the session store.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: valkey-cache-allow-apps
+  namespace: cache
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: valkey-cache}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: apps}
+      ports:
+        - {protocol: TCP, port: 6379}
+    # Without this the ServiceMonitor would exist, the target would be listed,
+    # and every scrape would time out -- an ABSENT metric rather than a wrong
+    # one, which is the harder kind to notice.
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: observability}
+      ports:
+        - {protocol: TCP, port: 9121}
