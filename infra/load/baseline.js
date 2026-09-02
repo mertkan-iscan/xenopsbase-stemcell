@@ -37,10 +37,25 @@ import { Trend } from 'k6/metrics';
 const GATEWAY = __ENV.GATEWAY_URL || 'http://gateway.apps.svc.cluster.local:8080';
 const KEYCLOAK = __ENV.KEYCLOAK_URL || 'http://keycloak-service.keycloak.svc.cluster.local:8080';
 const REALM = __ENV.REALM || 'xenopsbase';
-const USERNAME = __ENV.SMOKE_USER || 'smoke';
+// `loadtest`, not `smoke`, and this is load-bearing (T-5.13, #371).
+//
+// T-8.3 put a per-client rate limit on every proxied route, keyed on the
+// authenticated subject. This file fetches ONE token in setup() and every VU
+// reuses it, so the entire run is a single client: 20/s x 105s admitted ~2100
+// requests of the ~180,000 sent, and this gate measured the limiter rather than
+// the pods.
+//
+// `loadtest` holds the app-loadtest realm role, which the gateway exempts. The
+// role exists only in the dev realm and the gateway only honours it where
+// RATE_LIMIT_UNLIMITED_ROLE is set -- see the RequestRateLimiter block in
+// services/gateway/.../application.yml.
+//
+// If this run ever comes back capped at ~20 req/s through core again, that is
+// the first thing to check.
+const USERNAME = __ENV.SMOKE_USER || 'loadtest';
 // Not a secret: it is committed in the public realm file for a user that exists
 // only to be logged in as.
-const PASSWORD = __ENV.SMOKE_PASSWORD || 'smoke-dev-only';
+const PASSWORD = __ENV.SMOKE_PASSWORD || 'loadtest-dev-only';
 
 const gatewayOnly = new Trend('latency_gateway_only', true);
 const throughCore = new Trend('latency_through_core', true);

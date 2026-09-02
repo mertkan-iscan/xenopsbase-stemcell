@@ -24,7 +24,7 @@ import reactor.core.publisher.Mono;
  */
 class RateLimiterKeyResolverTest {
 
-    private final KeyResolver resolver = new RateLimiterConfiguration().clientKeyResolver();
+    private final KeyResolver resolver = new RateLimiterConfiguration("").clientKeyResolver();
 
     private static MockServerWebExchange exchangeFrom(String address, String forwardedFor) {
         MockServerHttpRequest.BaseBuilder<?> builder = MockServerHttpRequest.get("/services/core/api/documents").remoteAddress(
@@ -37,7 +37,11 @@ class RateLimiterKeyResolverTest {
     }
 
     private String keyFor(MockServerWebExchange exchange, Object authentication) {
-        Mono<String> key = resolver.resolve(exchange);
+        return keyFor(resolver, exchange, authentication);
+    }
+
+    private String keyFor(KeyResolver which, MockServerWebExchange exchange, Object authentication) {
+        Mono<String> key = which.resolve(exchange);
         if (authentication != null) {
             key = key.contextWrite(
                 ReactiveSecurityContextHolder.withSecurityContext(
@@ -92,5 +96,39 @@ class RateLimiterKeyResolverTest {
 
         assertThat(key).isEqualTo("ip:203.0.113.7");
         assertThat(key).doesNotContain("198.51.100.23");
+    }
+
+    @Test
+    @DisplayName("the exempt role produces NO key, which is how the limiter is skipped")
+    void exemptRoleIsNotKeyed() {
+        // An empty key is not "unidentified" here, it is "do not count this one".
+        // RequestRateLimiter skips the limiter entirely rather than consuming a token, which is what
+        // lets the k6 baseline measure the pods instead of this filter (T-5.13, #371).
+        KeyResolver exempting = new RateLimiterConfiguration("app-loadtest").clientKeyResolver();
+        TestingAuthenticationToken loadTester = new TestingAuthenticationToken("load-1", "n/a", "app-loadtest");
+
+        assertThat(keyFor(exempting, exchangeFrom("203.0.113.7", null), loadTester)).isNull();
+    }
+
+    @Test
+    @DisplayName("the exempt role is matched in either spelling Spring may have produced")
+    void exemptRoleMatchesPrefixedSpelling() {
+        // SecurityUtils emits app-loadtest AND ROLE_APP_LOADTEST, because hasRole() prepends and
+        // upper-cases. Matching one spelling only is a check that compiles and matches nothing.
+        KeyResolver exempting = new RateLimiterConfiguration("app-loadtest").clientKeyResolver();
+        TestingAuthenticationToken loadTester = new TestingAuthenticationToken("load-1", "n/a", "ROLE_APP_LOADTEST");
+
+        assertThat(keyFor(exempting, exchangeFrom("203.0.113.7", null), loadTester)).isNull();
+    }
+
+    @Test
+    @DisplayName("with no role configured, holding one exempts nobody")
+    void unsetRoleExemptsNobody() {
+        // The default everywhere but dev. A realm that does not declare the role cannot produce a
+        // token carrying it, and an environment that does not set the variable would not honour one
+        // if it did.
+        TestingAuthenticationToken looksExempt = new TestingAuthenticationToken("af70f9df", "n/a", "app-loadtest");
+
+        assertThat(keyFor(exchangeFrom("203.0.113.7", null), looksExempt)).isEqualTo("sub:af70f9df");
     }
 }

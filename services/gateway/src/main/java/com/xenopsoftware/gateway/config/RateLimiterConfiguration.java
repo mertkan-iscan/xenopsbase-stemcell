@@ -1,6 +1,7 @@
 package com.xenopsoftware.gateway.config;
 
 import java.net.InetSocketAddress;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.gateway.filter.ratelimit.KeyResolver;
 import org.springframework.cloud.gateway.support.ipresolver.XForwardedRemoteAddressResolver;
 import org.springframework.context.annotation.Bean;
@@ -67,9 +68,65 @@ import reactor.core.publisher.Mono;
  * The request is served. {@code deny-empty-key} is false in configuration, so a client this cannot
  * identify gets through rather than getting a 403. A limiter that fails closed turns a bug in
  * identifying callers into an outage, and the edge limit is still in front of it.
+ *
+ * <h2>The exemption, and why it exists (T-5.13, #371)</h2>
+ *
+ * An empty key is also how a caller is exempted, because {@code RequestRateLimiter} skips the
+ * limiter entirely rather than consuming a token when the resolver returns nothing. One caller needs
+ * that: the k6 load baseline.
+ *
+ * <p>T-5.6's baseline measures what the pods can serve. It fetches ONE token in {@code setup()} and
+ * every VU reuses it, so the whole run is a single {@code sub} in a single bucket — and after T-8.3
+ * the run was capped at the replenish rate. Measured: 20/s x 105s = ~2100 requests admitted, core saw
+ * 2129, and 177,546 requests were rejected. The gate that exists to measure the application was
+ * measuring this filter instead.
+ *
+ * <p>Three ways out were available and the other two are worse:
+ *
+ * <ul>
+ *   <li><b>Distinct subjects per VU</b> — closest to real traffic, since real load is many clients
+ *       and modelling it as one was always a simplification. It needs the target rate divided by the
+ *       per-client ceiling: ~1700 req/s over 20/s is about <b>85 realm users</b>. Not viable.
+ *   <li><b>Raising {@code RATE_LIMIT_REPLENISH} for the measurement window</b> — Argo CD runs with
+ *       {@code selfHeal: true}, so a patched Deployment is reverted mid-run; and committing a high
+ *       value would disable the limiter in the one environment that exercises it.
+ *   <li><b>This.</b> A role, unset by default, that no realm but dev's declares.
+ * </ul>
+ *
+ * <p>It is credential-gated rather than positional: holding the role means holding a token that
+ * carries it, and only the dev realm issues one. Staging and prod inherit the exemption mechanism
+ * and no way to use it, which is the property that makes it acceptable — the bypass cannot exist in
+ * an environment whose realm does not declare the role.
  */
 @Configuration
 public class RateLimiterConfiguration {
+
+    /**
+     * Realm role whose holders are not rate limited. Empty everywhere except dev.
+     *
+     * <p>Read from the environment rather than from a bound properties class so that an environment
+     * which does not set it has no exemption at all, rather than an exemption pointing at a role
+     * name that happens to be blank.
+     */
+    /**
+     * Marks an exempt caller through the chain below.
+     *
+     * <p>Needed because "exempt" and "unidentified" both want an empty Mono and must not be treated
+     * the same: an unidentified caller falls back to its address, an exempt one must produce no key
+     * at all. Returning empty for the exemption would hit {@code switchIfEmpty} and hand the caller
+     * an {@code ip:} bucket -- which is how the first version of this failed, silently rate limiting
+     * the thing it was written to exempt.
+     */
+    // Cannot collide with a real key: every one this resolver produces is prefixed "sub:" or "ip:".
+    // A  escape was tried first and does not work -- javac translates unicode escapes before
+    // tokenizing, so it becomes a raw NUL inside the string literal and the file will not parse.
+    private static final String EXEMPT = "exempt";
+
+    private final String unlimitedRole;
+
+    public RateLimiterConfiguration(@Value("${RATE_LIMIT_UNLIMITED_ROLE:}") String unlimitedRole) {
+        this.unlimitedRole = unlimitedRole == null ? "" : unlimitedRole.trim();
+    }
 
     /**
      * Resolves the bucket key for one request.
@@ -86,12 +143,37 @@ public class RateLimiterConfiguration {
             ReactiveSecurityContextHolder.getContext()
                 .map(context -> context.getAuthentication())
                 .filter(RateLimiterConfiguration::isRealUser)
-                .map(RateLimiterConfiguration::subjectOf)
+                .map(authentication -> isUnlimited(authentication) ? EXEMPT : subjectOf(authentication))
                 .filter(subject -> !subject.isBlank())
-                .map(subject -> "sub:" + subject)
+                .map(subject -> EXEMPT.equals(subject) ? EXEMPT : "sub:" + subject)
                 // switchIfEmpty rather than defaultIfEmpty: the address lookup should happen only
                 // when it is needed, not on every authenticated request as well.
-                .switchIfEmpty(Mono.fromSupplier(() -> "ip:" + clientAddress(addressResolver, exchange)));
+                .switchIfEmpty(Mono.fromSupplier(() -> "ip:" + clientAddress(addressResolver, exchange)))
+                // Dropped AFTER the fallback, on purpose. The sentinel has to survive switchIfEmpty
+                // so that an exempt caller ends with nothing while an unidentified one still gets an
+                // address. Ending with nothing is what makes RequestRateLimiter skip the limiter
+                // instead of counting the request.
+                .filter(key -> !EXEMPT.equals(key));
+    }
+
+    /**
+     * True when this caller holds the exempt role, in either spelling Spring may have produced.
+     *
+     * <p>SecurityUtils emits two authorities per realm role -- {@code app-admin} and
+     * {@code ROLE_APP_ADMIN} -- because {@code hasRole()} silently prepends and upper-cases, and a
+     * check that matched only one spelling would be a check that compiles, runs and quietly matches
+     * nothing. See docs/runbooks/authorization.md.
+     */
+    private boolean isUnlimited(Authentication authentication) {
+        if (unlimitedRole.isEmpty()) {
+            return false;
+        }
+        String prefixed = "ROLE_" + unlimitedRole.toUpperCase(java.util.Locale.ROOT).replace('-', '_');
+        return authentication
+            .getAuthorities()
+            .stream()
+            .map(granted -> granted.getAuthority())
+            .anyMatch(authority -> unlimitedRole.equals(authority) || prefixed.equals(authority));
     }
 
     /**
