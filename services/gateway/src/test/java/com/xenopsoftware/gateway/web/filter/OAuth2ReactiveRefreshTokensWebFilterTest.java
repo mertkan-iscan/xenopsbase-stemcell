@@ -1,6 +1,7 @@
 package com.xenopsoftware.gateway.web.filter;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.xenopsoftware.gateway.config.SecurityConfiguration;
 import java.util.List;
@@ -111,6 +112,97 @@ class OAuth2ReactiveRefreshTokensWebFilterTest {
     }
 
     /** MockServerWebExchange has no principal of its own; the filter reads exchange.getPrincipal(). */
+    @Test
+    @DisplayName("ending the session is what removes the spent credentials, so it has to happen")
+    void theSessionIsInvalidatedAndNotJustAnsweredOver() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+            MockServerHttpRequest.get("/services/core/api/documents").accept(MediaType.APPLICATION_JSON).build()
+        );
+        // The authorized client lives in the WebSession, so a 401 that leaves the session
+        // standing hands the next request the same refused refresh token. That is the loop
+        // #179 was: every reload failed identically until the cookie finally expired.
+        exchange.getSession().block().getAttributes().put("theAuthorizedClient", "spent");
+
+        ReactiveOAuth2AuthorizedClientManager refusing = request -> Mono.error(sessionNotActive());
+        new OAuth2ReactiveRefreshTokensWebFilter(refusing, entryPoint)
+            .filter(new PrincipalExchange(exchange, PRINCIPAL), UNREACHED)
+            .block();
+
+        assertThat(exchange.getSession().block().getAttributes()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Keycloak's words reach the log with their newlines removed")
+    void aRefusalCarryingNewlinesIsStillHandledCleanly() {
+        // The error code and description are remote input that goes straight into a warning,
+        // so a newline in either would write fabricated entries into the log. Exercised through
+        // the filter rather than against the escaping helper, because the guard is only worth
+        // anything on the path that actually logs.
+        ClientAuthorizationException forged = new ClientAuthorizationException(
+            new OAuth2Error("invalid_grant\nWARN fabricated", "Session not active\r\nWARN fabricated", null),
+            "oidc"
+        );
+
+        MockServerWebExchange exchange = run(forged, MediaType.APPLICATION_JSON);
+
+        assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    @DisplayName("a response already being written keeps the failure that caused it")
+    void aCommittedResponseLetsTheOriginalFailureThrough() {
+        // Rare, since the refresh runs before the chain, but the alternative is an
+        // UnsupportedOperationException from setting a status on a committed response --
+        // a second failure that replaces and hides the first.
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+            MockServerHttpRequest.get("/services/core/api/documents").accept(MediaType.APPLICATION_JSON).build()
+        );
+        exchange.getResponse().setComplete().block();
+
+        ClientAuthorizationException refusal = sessionNotActive();
+        ReactiveOAuth2AuthorizedClientManager refusing = request -> Mono.error(refusal);
+
+        assertThatThrownBy(() ->
+            new OAuth2ReactiveRefreshTokensWebFilter(refusing, entryPoint)
+                .filter(new PrincipalExchange(exchange, PRINCIPAL), UNREACHED)
+                .block()
+        ).isSameAs(refusal);
+    }
+
+    @Test
+    @DisplayName("a request with no principal is passed through rather than failed")
+    void anUnauthenticatedRequestIsPassedThrough() {
+        // Nothing to refresh before there is a session. Turning that into a failure would make
+        // the login page itself unreachable, since it is requested by someone with no principal.
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/app.js").build());
+        java.util.concurrent.atomic.AtomicBoolean reached = new java.util.concurrent.atomic.AtomicBoolean();
+        WebFilterChain records = passed -> {
+            reached.set(true);
+            return Mono.empty();
+        };
+        ReactiveOAuth2AuthorizedClientManager unreachable = request ->
+            Mono.error(new AssertionError("no principal means nothing to refresh"));
+
+        new OAuth2ReactiveRefreshTokensWebFilter(unreachable, entryPoint).filter(new PrincipalExchange(exchange, null), records).block();
+
+        assertThat(reached).isTrue();
+    }
+
+    @Test
+    @DisplayName("a missing client manager says which dependency is absent")
+    void aMissingClientManagerFailsWithAnActionableMessage() {
+        // The generated guard, kept honest. Without the starter on the classpath there is no
+        // manager bean, and the failure people would otherwise see is a null pointer inside a
+        // reactive chain -- which names nothing and points nowhere.
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/app.js").build());
+
+        assertThatThrownBy(() ->
+            new OAuth2ReactiveRefreshTokensWebFilter(null, entryPoint).filter(new PrincipalExchange(exchange, PRINCIPAL), UNREACHED).block()
+        )
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("spring-boot-starter-oauth2-client");
+    }
+
     private static final class PrincipalExchange extends org.springframework.web.server.ServerWebExchangeDecorator {
 
         private final java.security.Principal principal;
@@ -123,7 +215,7 @@ class OAuth2ReactiveRefreshTokensWebFilterTest {
         @Override
         @SuppressWarnings("unchecked")
         public <T extends java.security.Principal> Mono<T> getPrincipal() {
-            return Mono.just((T) principal);
+            return Mono.justOrEmpty((T) principal);
         }
     }
 }
