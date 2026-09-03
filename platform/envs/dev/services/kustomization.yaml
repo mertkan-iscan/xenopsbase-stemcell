@@ -68,7 +68,22 @@ images:
     # the three are bypasses in the servlet container every request goes through,
     # so this is the reason the digest moves rather than a side effect (T-6.13,
     # #403).
-    digest: sha256:b3059c68e86bff15d85c21b6fbe65b7ea3e0aca41c1dd89db48a558aaecf24d0
+    #
+    # Commit 924c150 -- core caches document pages through Valkey (T-3.22, #264,
+    # ADR-0011). Cache-aside on GET /api/documents only, keyed
+    # xob:c:v1:document-list:<owner>:<page> so one user's page can never be
+    # served to another, evicted after commit rather than inside the
+    # transaction, every entry carrying a jittered TTL.
+    #
+    # Losing Valkey does not fail a request: reads fall through to Postgres and
+    # an eviction that cannot run leaves a stale entry bounded by its TTL. That
+    # is proven by DocumentCacheDegradationIT, which runs with the cache
+    # switched ON and the server unreachable -- covering startup as well as
+    # reads and writes.
+    #
+    # CACHE_ENABLED and CACHE_VALKEY_HOST in core.yaml are what turn it on, and
+    # the host must be valkey-cache rather than valkey (T-2.19, #262).
+    digest: sha256:ab87297e2b29d9acb75db64a55cf9f47f6ba787563a30c921919e09953ba4678
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway
     # Commit c805107 -- the gateway can shed load without the circuit breaker
     # counting it as core failing, and the fallback stops telling the caller
