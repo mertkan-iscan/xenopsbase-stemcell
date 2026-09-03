@@ -102,6 +102,20 @@ spec:
           description: Ordinary authenticated user of the application.
         - name: app-admin
           description: Administrative access within the application, NOT within Keycloak.
+        # DEV ONLY, AND THAT IS THE SECURITY PROPERTY (T-5.13, #371).
+        #
+        # The gateway exempts holders of this role from its per-client rate limit,
+        # so that `make load` measures what the pods can serve rather than measuring
+        # the limiter. It exists because the baseline is ONE client by construction:
+        # k6 fetches a single token in setup() and every VU reuses it, so a 20/s
+        # per-subject ceiling capped a run meant to push ~1700/s.
+        #
+        # Credential-gated rather than positional: it takes a token carrying this
+        # role, and only this realm issues one. Staging and prod inherit the
+        # mechanism and no way to reach it, because their realms do not declare the
+        # role. Do not add it to them.
+        - name: app-loadtest
+          description: Exempt from the gateway rate limit. Load testing only, dev only.
 
     # `clientScopes`, not `scope`. The realm representation rejects the latter:
     #   .spec.realm.scope: field not declared in schema
@@ -442,6 +456,30 @@ spec:
     # ids. See ADR-0010 for why that is accepted here and what it would cost to
     # fix properly.
     users:
+      # The load harness, deliberately separate from `smoke` (T-5.13, #371).
+      #
+      # Exempting `smoke` would have been one line fewer and would have handed the
+      # exemption to the smoke suite and to anyone reading this repository, since
+      # the passwords here are committed. A dedicated account keeps the bypass to
+      # the one caller that needs it.
+      #
+      # `id` pinned like every other declared user: ADR-0010 makes a re-import
+      # restore the same subs rather than orphaning what they own (T-7.8, #147).
+      - username: loadtest
+        id: 6b0c1f2e-9d34-4a71-b8c5-2f7e1a4d3c88
+        enabled: true
+        emailVerified: true
+        email: loadtest@example.invalid
+        firstName: Load
+        lastName: Test
+        credentials:
+          - type: password
+            value: loadtest-dev-only
+            temporary: false
+        realmRoles:
+          - app-user
+          - app-loadtest
+
       - username: smoke
         id: af70f9df-8441-4259-9d56-ebb6d1868ac4
         enabled: true

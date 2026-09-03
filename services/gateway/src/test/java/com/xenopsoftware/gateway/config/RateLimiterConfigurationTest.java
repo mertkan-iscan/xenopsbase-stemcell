@@ -30,7 +30,9 @@ import org.springframework.security.oauth2.core.oidc.user.OidcUser;
  */
 class RateLimiterConfigurationTest {
 
-    private final KeyResolver resolver = new RateLimiterConfiguration().clientKeyResolver();
+    // No exempt role, which is the default in every environment but dev. The exemption itself is
+    // covered in RateLimiterKeyResolverTest (T-5.13, #371).
+    private final KeyResolver resolver = new RateLimiterConfiguration("").clientKeyResolver();
 
     private MockServerWebExchange exchangeFrom(String forwardedFor, String remoteHost) {
         MockServerHttpRequest.BaseBuilder<?> builder = MockServerHttpRequest.get("/services/core/api/documents");

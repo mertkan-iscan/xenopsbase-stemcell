@@ -385,6 +385,21 @@ spring:
             # margin. `make load-ratelimit` proves the limit exists and is
             # per-client; it does not claim the number is right.
             #
+            # AND WHY THE LOAD BASELINE IS EXEMPT (T-5.13, #371)
+            #
+            # infra/load/baseline.js measures what the pods can serve. It fetches
+            # ONE token in setup() and every VU reuses it, so the whole run is a
+            # single `sub` in a single bucket: 20/s x 105s admitted ~2100 requests
+            # of the ~180,000 it sent, and the gate that exists to measure the
+            # application measured this filter instead.
+            #
+            # RATE_LIMIT_UNLIMITED_ROLE names a realm role whose holders are not
+            # limited. Unset by default; set only in dev, where the realm is the
+            # only one that declares the role. See RateLimiterConfiguration for
+            # why the two alternatives -- ~85 distinct realm users, or raising the
+            # ceiling for the measurement window against Argo's selfHeal -- are
+            # worse.
+            #
             # WHY IT DOES NOT FAIL CLOSED
             #
             # deny-empty-key is false: a client this cannot identify is served,

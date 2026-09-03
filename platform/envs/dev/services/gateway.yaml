@@ -261,6 +261,18 @@ spec:
           env:
             - {name: SPRING_PROFILES_ACTIVE, value: prod}
 
+            # THE RATE LIMIT EXEMPTION, ON IN DEV AND NOWHERE ELSE (T-5.13, #371).
+            #
+            # Holders of this realm role are not rate limited. It exists so
+            # `make load` measures what the pods can serve rather than measuring
+            # the limiter: the baseline is one client by construction, and a 20/s
+            # per-subject ceiling capped a run meant to push ~1700/s.
+            #
+            # Two independent things have to line up for anyone to use it -- this
+            # variable, and a realm that issues the role. Staging and prod set
+            # neither. Unset, the gateway exempts nobody.
+            - {name: RATE_LIMIT_UNLIMITED_ROLE, value: app-loadtest}
+
             # The PUBLIC issuer, not a cluster-internal address: the login flow
             # redirects the user's BROWSER to Keycloak, which cannot resolve a
             # .svc.cluster.local name, and it must match the issuer Keycloak
