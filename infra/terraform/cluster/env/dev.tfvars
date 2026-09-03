@@ -86,6 +86,24 @@ agent_nodepools = [
 # Pending. That is a real limitation of a two-worker dev cluster rather than a
 # thing to fix by raising a number, and it is written here so the next person
 # reads it before repeating the experiment.
+#
+# THE DECISION, STATED PLAINLY, AND WHAT ASSERTS IT (T-2.29, #368).
+#
+# Dev runs TWO fixed cx33 workers. They carry the platform and the services at
+# their floor with room to spare; the autoscaler carries the HPA ceiling and
+# nothing else. That is a deliberate choice to pay for the floor continuously
+# and the ceiling only while it is asked for.
+#
+# What the fixed workers must always have is room for one ORDINARY PLATFORM POD
+# -- a rescheduled coredns, a CSI sidecar after a node event, a DaemonSet member
+# rolling. #368 was filed when worker-0 had 11Mi of schedulable memory and none
+# of those could land, which the autoscaler does not fix because such pods are
+# not Pending long enough to trigger it. `make verify-headroom` asserts that
+# floor (256Mi / 250m) against the running cluster.
+#
+# It deliberately does NOT assert that the applications fit at their HPA ceiling
+# on the fixed workers. They do not -- measured 2026-09-03, short by 1108Mi and
+# 2010m -- and the paragraphs above are why that is correct rather than a defect.
 
 # This used to say the HPA ceilings were "3.5 cores of NEW demand beyond the
 # current floor, and one extra cx33 (4 vCPU) absorbs it". The arithmetic counted
