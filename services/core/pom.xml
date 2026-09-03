@@ -49,6 +49,35 @@
         -->
         <httpcore5.version>5.4.3</httpcore5.version>
         <!--
+            Ahead of Spring Boot, deliberately, and for the same reason as the
+            httpcore5 override above (T-6.13, #403).
+
+            Boot 4.0.8 manages tomcat-embed-core 11.0.24, which carries three
+            CRITICAL advisories, all fixed in 11.0.25:
+
+              CVE-2026-65182   security constraint bypass
+              CVE-2026-65905   authentication bypass
+              CVE-2026-68525   unauthorized access
+
+            Two of the three are authentication or authorization bypasses in the
+            component that terminates every request reaching this service, so
+            these are not linked-but-unreached code paths.
+
+            There is no Boot release to wait for: 4.0.8 IS the newest
+            spring-boot-starter-parent, checked against repo1.maven.org on
+            2026-09-03. Waiting for a parent bump waits for a release that does
+            not exist.
+
+            11.0.24 -> 11.0.25 is a patch release inside 11.0.x, so binary
+            compatibility is the expected case rather than a hope, and the
+            servlet path is what every test in this module goes through.
+
+            REMOVE THIS when Boot manages 11.0.25 or later. To check, read
+            tomcat.version out of the spring-boot-dependencies pom for the
+            version in the parent above, on repo1.maven.org.
+        -->
+        <tomcat.version>11.0.25</tomcat.version>
+        <!--
             The Maven-standard reproducible-build timestamp. Without it,
             spring-boot:build-info writes a wall-clock build.time into
             META-INF/build-info.properties, that file lands in an image layer,
