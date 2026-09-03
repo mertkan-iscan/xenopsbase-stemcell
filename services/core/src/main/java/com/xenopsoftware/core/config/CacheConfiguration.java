@@ -49,6 +49,27 @@ import org.springframework.data.redis.serializer.RedisSerializer;
  *       cache cannot take the pod out of the Service either.
  * </ol>
  *
+ * <p><b>CONNECTIONS PER REPLICA: ONE, and it is stated rather than inherited (T-2.18, #259).</b>
+ *
+ * <p>{@code commons-pool2} is deliberately not on the classpath, so Spring Data Redis runs Lettuce
+ * in its shared mode: a single connection per {@code LettuceConnectionFactory}, multiplexed across
+ * every request thread, rather than a pool sized per call. Adding a pool would be the change that
+ * makes this arithmetic interesting, and it would need this comment rewritten.
+ *
+ * <pre>
+ *   core at HPA ceiling      3 replicas x 1 connection  =  3
+ *   redis_exporter sidecar   1 per Valkey pod           =  1
+ *   Valkey maxclients                                   = 10000 (default)
+ * </pre>
+ *
+ * <p>So the cache is nowhere near a ceiling, which is the opposite of the Postgres situation #259
+ * was filed about -- there the declared demand was 171 against a {@code max_connections} of 100 and
+ * held only by luck. It is stated anyway, because "nowhere near" is a measurement that stops being
+ * true silently, and #259's whole point is that an unstated number is one nobody notices moving.
+ *
+ * <p>This adds nothing to the Postgres budget: no Hikari setting changes here, and
+ * {@code make connection-budget} still reports 65 of 100.
+ *
  * <p><b>Opt-in, and off is the default.</b> Without {@code application.cache.enabled=true} none of
  * this is created, for the same reason the S3 client is not created without a bucket: a fork that
  * does not want a cache should carry no cache configuration rather than a disabled one. It is also
