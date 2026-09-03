@@ -94,6 +94,12 @@ R2_REGION   ?= auto
 # layout, and it is silent.
 ENV         ?= dev
 
+# Where the pre-rebuild state for the restore drill lives (T-7.3). Gitignored,
+# not committed: it describes one cluster at one moment, and a stale one checked
+# in would be asserted against a rebuild it never saw. It lives on the machine
+# running the drill, which is what makes it outlive the cluster.
+STATE       ?= restore-state.json
+
 # Apply and destroy prompt for confirmation by default, which is correct for a
 # human at a terminal and essential for prod. Automation passes AUTO=1.
 #
@@ -645,6 +651,19 @@ scale-test: ## Where does it stop scaling, and does the HPA govern it? (T-5.10)
 .PHONY: cold-rebuild
 cold-rebuild: ## THE DRILL: destroy, rebuild, and prove a document survived it (T-7.2)
 	@bash $(SCRIPTS)/cold-rebuild.sh "$(ENV)"
+
+.PHONY: restore-record
+restore-record: ## Before a rebuild: capture what must still be true after it (T-7.3)
+	@# The recorded file is the point. A verify that recomputes its own
+	@# expectations proves nothing, because it agrees with whatever it finds.
+	@bash $(SCRIPTS)/restore-verify.sh record $(ENV) $(STATE)
+
+.PHONY: restore-verify
+restore-verify: ## After a rebuild: a document uploaded BEFORE it, downloadable by its OWNER (T-7.3)
+	@# Not "the database came back". Ownership is the Keycloak sub, so a restore
+	@# can return every row and every object and still be a total loss if the
+	@# users came back with new subs (#147, ADR-0010).
+	@bash $(SCRIPTS)/restore-verify.sh verify $(ENV) $(STATE)
 
 .PHONY: smoke
 smoke: ## Does the DEPLOYED environment actually work? Login, an API call, upload and download

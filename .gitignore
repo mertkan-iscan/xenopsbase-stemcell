@@ -114,3 +114,7 @@ infra/scripts/__pycache__/
 # per-run artefact; the id that matters ends up as a label on the snapshot.
 infra/packer/manifest.json
 infra/packer/manifest.json.lock
+
+# Pre-rebuild state for the restore drill (T-7.3). Describes one cluster at one
+# moment; committing it would assert it against a rebuild it never saw.
+restore-state.json
