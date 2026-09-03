@@ -119,6 +119,29 @@ resource "terraform_data" "platform_bootstrap" {
 
   triggers_replace = {
     content = sha256(jsonencode({ for k, v in local.bootstrap_files : k => v.content }))
+
+    # AND THE HOST, because the files live on a disk that can be replaced.
+    #
+    # T-1.22 (#281) made these three agree on one question -- "did any bootstrap
+    # file change" -- which fixed a directory being wiped while some of its files
+    # were not re-sent. It did not cover the other way the files can be absent: a
+    # NEW control plane.
+    #
+    # Replacing the control plane leaves the content hash identical, so the wipe
+    # and the uploads are both considered done, and the apply then runs against a
+    # node whose /var/platform-bootstrap is empty:
+    #
+    #   namespace/argocd unchanged
+    #   error: the path "/var/platform-bootstrap/1/sops-age-secret.yaml" does not exist
+    #
+    # Observed on `make up` after the control plane came back as -lcq. The same
+    # failure that card describes, reached from the other direction: the state
+    # believed a file was on a node that had never seen it.
+    #
+    # `control_plane_taint` below already keys on the host for exactly this reason.
+    # These three now do too, so "is the file there" depends on both of the things
+    # that decide it.
+    host = local.bootstrap_host
   }
 
   connection {
@@ -193,6 +216,29 @@ resource "terraform_data" "platform_bootstrap_files" {
   # files where one would have done, on the rare apply that changes any of them.
   triggers_replace = {
     content = sha256(jsonencode({ for k, v in local.bootstrap_files : k => v.content }))
+
+    # AND THE HOST, because the files live on a disk that can be replaced.
+    #
+    # T-1.22 (#281) made these three agree on one question -- "did any bootstrap
+    # file change" -- which fixed a directory being wiped while some of its files
+    # were not re-sent. It did not cover the other way the files can be absent: a
+    # NEW control plane.
+    #
+    # Replacing the control plane leaves the content hash identical, so the wipe
+    # and the uploads are both considered done, and the apply then runs against a
+    # node whose /var/platform-bootstrap is empty:
+    #
+    #   namespace/argocd unchanged
+    #   error: the path "/var/platform-bootstrap/1/sops-age-secret.yaml" does not exist
+    #
+    # Observed on `make up` after the control plane came back as -lcq. The same
+    # failure that card describes, reached from the other direction: the state
+    # believed a file was on a node that had never seen it.
+    #
+    # `control_plane_taint` below already keys on the host for exactly this reason.
+    # These three now do too, so "is the file there" depends on both of the things
+    # that decide it.
+    host = local.bootstrap_host
   }
 
   connection {
@@ -268,6 +314,29 @@ resource "terraform_data" "control_plane_taint" {
 resource "terraform_data" "platform_apply" {
   triggers_replace = {
     content = sha256(jsonencode({ for k, v in local.bootstrap_files : k => v.content }))
+
+    # AND THE HOST, because the files live on a disk that can be replaced.
+    #
+    # T-1.22 (#281) made these three agree on one question -- "did any bootstrap
+    # file change" -- which fixed a directory being wiped while some of its files
+    # were not re-sent. It did not cover the other way the files can be absent: a
+    # NEW control plane.
+    #
+    # Replacing the control plane leaves the content hash identical, so the wipe
+    # and the uploads are both considered done, and the apply then runs against a
+    # node whose /var/platform-bootstrap is empty:
+    #
+    #   namespace/argocd unchanged
+    #   error: the path "/var/platform-bootstrap/1/sops-age-secret.yaml" does not exist
+    #
+    # Observed on `make up` after the control plane came back as -lcq. The same
+    # failure that card describes, reached from the other direction: the state
+    # believed a file was on a node that had never seen it.
+    #
+    # `control_plane_taint` below already keys on the host for exactly this reason.
+    # These three now do too, so "is the file there" depends on both of the things
+    # that decide it.
+    host = local.bootstrap_host
   }
 
   connection {
