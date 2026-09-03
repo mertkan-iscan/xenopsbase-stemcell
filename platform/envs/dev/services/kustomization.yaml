@@ -83,7 +83,19 @@ images:
     #
     # CACHE_ENABLED and CACHE_VALKEY_HOST in core.yaml are what turn it on, and
     # the host must be valkey-cache rather than valkey (T-2.19, #262).
-    digest: sha256:ab87297e2b29d9acb75db64a55cf9f47f6ba787563a30c921919e09953ba4678
+    #
+    # Commit be9e7d6 -- concurrent misses on one cache key rebuild it ONCE per
+    # replica (T-3.23, #265). Valkey has no persistence, so a restart leaves a
+    # completely cold cache and every request that would have hit it goes to one
+    # Postgres primary; this bounds that to one load per replica per key rather
+    # than one per in-flight request.
+    #
+    # Coalescing is in the JVM, not a distributed lock: a lock in Valkey is
+    # missing exactly when Valkey is, which is the scenario it would exist for.
+    #
+    # listAvailableCached is no longer @Transactional -- waiters must not hold a
+    # connection while they wait, which is the pressure being removed.
+    digest: sha256:5dc6f3f4503a9cc16abe2b52daa5a0841a09259937209aee04b82a691e50cbb4
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway
     # Commit c805107 -- the gateway can shed load without the circuit breaker
     # counting it as core failing, and the fallback stops telling the caller
