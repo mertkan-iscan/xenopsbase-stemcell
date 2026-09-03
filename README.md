@@ -163,3 +163,4 @@ reproduces from nothing.
   - [Database](docs/runbooks/database.md) — backups, restore, failover, and what a rebuild does not restore
   - [Ingress and TLS](docs/runbooks/ingress-tls.md) — the serving path, QUIC firewall, DNS-01 certificates
   - [Object storage](docs/runbooks/object-storage.md) — per-environment durable buckets, retention, least privilege
+  - [Business cache](docs/runbooks/cache.md) — the two Valkey instances, what a restart costs, and why the cold-cache lock is not distributed
