@@ -677,6 +677,14 @@ verify-alert-runbooks: ## Does every alert link to a runbook section that exists
 verify-qos: ## Does anything in the CLUSTER still run BestEffort? (T-2.8, T-2.25)
 	@KUBECONFIG="$(CURDIR)/infra/terraform/cluster/kubeconfig" bash $(SCRIPTS)/verify-qos.sh
 
+.PHONY: verify-volume-attachments
+verify-volume-attachments: ## Does Kubernetes agree with Hetzner about where volumes are attached? (T-7.9)
+	@# The failure that turned both node replacements on 2026-08-30 into ~30
+	@# minute outages: an attachment object outlived the server it was made
+	@# against and kept reporting success, so no fresh attach was ever issued.
+	@# Invisible from inside Kubernetes -- every object involved says it is fine.
+	@KUBECONFIG="$(CURDIR)/infra/terraform/cluster/kubeconfig" bash $(SCRIPTS)/check-volume-attachments.sh
+
 .PHONY: verify-headroom
 verify-headroom: ## Can a fixed worker still place an ordinary platform pod? (T-2.29)
 	@KUBECONFIG="$(CURDIR)/infra/terraform/cluster/kubeconfig" bash $(SCRIPTS)/check-worker-headroom.sh

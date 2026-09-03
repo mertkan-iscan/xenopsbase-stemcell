@@ -369,3 +369,93 @@ cluster — worse than a leaked volume. Check afterwards:
 make verify-teardown ENV=dev
 hcloud volume delete <id>     # for anything it lists
 ```
+
+## Replacing a node, and the failure that is invisible from inside Kubernetes
+
+Node updates happen by **replacement**, not by patching: the image carries k3s and the OS packages,
+so updating a node means booting a new one (T-7.9, #254). What follows is what two real replacements
+on 2026-08-30 actually did, rather than what the procedure was expected to be.
+
+### Cordon and drain does not work here, and terraform replacement does
+
+`kubectl drain` cannot satisfy this cluster's PodDisruptionBudget. CNPG creates
+`database/postgres-primary` selecting the primary alone, so `disruptionsAllowed` is permanently 0 —
+correct for a single primary, and it means a drain waits forever rather than proceeding.
+
+What worked, twice, is terraform replacement: `make cluster-apply` destroys and recreates the
+workers, and pods reschedule onto the survivors as the new nodes join. No drain, no eviction, no PDB
+involvement.
+
+Note the safety catch this deliberately releases. `hcloud_server.static_agent` carries
+`ignore_changes = [image]`, so a new golden image does **not** silently replace every worker on the
+next unrelated apply. Reaching past that pin — `-replace` per server, or lifting it behind a
+variable — is a deliberate act, and it should stay one.
+
+Expect Hetzner to refuse occasionally: one apply failed on `resource_unavailable` with no cx33
+capacity in fsn1 and succeeded on the third attempt. That is a retry, not a failure.
+
+### The stale VolumeAttachment, which is what actually hurt
+
+Both replacements produced this, and it is the reason a replacement took thirty minutes longer than
+it should have:
+
+```
+kubectl get volumeattachment   ->  attached: true   node=xenopsbase-dev-worker-1
+hcloud volume list             ->  SERVER: (empty)
+```
+
+Kubernetes believed the volume was attached. Hetzner had it attached to nothing. The
+`VolumeAttachment` was created against the **old** server, survived its destruction, and still
+reported success — so the external attacher never issued a fresh attach and the device never
+appeared:
+
+```
+MountVolume.SetUp failed ... device "/dev/disk/by-id/scsi-0HC_Volume_106744457" not ready
+```
+
+Both Postgres pods sat in `PodInitializing` for about thirty minutes, and Keycloak crash-looped
+behind them for the same window.
+
+**Nothing inside Kubernetes reports this.** Every object involved claims success; the disagreement
+only exists between two systems, so it can only be found by asking both.
+
+```bash
+make verify-volume-attachments
+```
+
+That compares each attached `VolumeAttachment` against the Hetzner API, correlating nodes to servers
+by `providerID` rather than by name — a replaced node can reappear with the same name and a
+different server, and matching on names would call that agreement.
+
+### Clearing it
+
+Only when the check reports `STALE`, which means it has confirmed Hetzner holds the volume
+**detached**:
+
+```bash
+kubectl delete volumeattachment <name>
+```
+
+The attacher then issues a real attach and the volume binds within seconds.
+
+**Do not do this on a `MISMATCH`.** There Hetzner still has the volume attached somewhere, and
+forcing a re-attach risks a dual attach — which corrupts a filesystem rather than delaying one. The
+check refuses to print a delete command in that case for the same reason.
+
+This is *not* what `make reap-orphaned-volumes` covers. That sweeps volumes with no owner after a
+teardown — garbage. This is a live volume, with a live claim, and an attachment object that is
+lying. Neither finds the other's failure.
+
+### What is still not established
+
+A replacement has never been performed **one worker at a time** — both real ones took both workers
+together, because `user_data` changed. So there is no rolling figure, and "the application served
+throughout" has not been demonstrated: it did not, for the thirty minutes above.
+
+Rough numbers from those two, useful only as an order of magnitude:
+
+| | |
+|---|---|
+| `terraform apply`, both workers | ~5–10 min |
+| platform reconverged after nodes joined | ~10–15 min |
+| stale-attachment stall | ~30 min, avoidable |
