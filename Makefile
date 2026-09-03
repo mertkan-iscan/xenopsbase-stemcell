@@ -696,6 +696,12 @@ verify-alert-runbooks: ## Does every alert link to a runbook section that exists
 verify-qos: ## Does anything in the CLUSTER still run BestEffort? (T-2.8, T-2.25)
 	@KUBECONFIG="$(CURDIR)/infra/terraform/cluster/kubeconfig" bash $(SCRIPTS)/verify-qos.sh
 
+.PHONY: verify-image-allowlist
+verify-image-allowlist: ## Are third-party images in enrolled namespaces allowlisted by digest? (T-6.2)
+	@# The price of a digest allowlist: repinning an image without editing the
+	@# policy denies the workload, on the next pod creation rather than at deploy.
+	@bash $(SCRIPTS)/check-image-allowlist.sh
+
 .PHONY: verify-volume-attachments
 verify-volume-attachments: ## Does Kubernetes agree with Hetzner about where volumes are attached? (T-7.9)
 	@# The failure that turned both node replacements on 2026-08-30 into ~30

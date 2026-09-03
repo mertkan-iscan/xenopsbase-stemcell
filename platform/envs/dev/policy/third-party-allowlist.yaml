@@ -1,0 +1,64 @@
+# Third-party images this project runs but does not build, allowed BY DIGEST
+# (T-6.2, #49).
+#
+# WHY A SECOND POLICY EXISTS AT ALL
+#
+# `xenopsbase-images-are-signed` requires a Fulcio certificate naming a workflow
+# in this repository. Nothing third-party can satisfy that and nothing should
+# try: we did not build those images and cannot sign them without asserting
+# something untrue about their provenance.
+#
+# policy-controller denies anything matching NO policy, so an enrolled namespace
+# needs every image in it covered. Without this, enrolling `apps` would deny the
+# `wait-for-oidc` initContainer and no application pod would start.
+#
+# WHY A DIGEST ALLOWLIST RATHER THAN A KEYLESS IDENTITY PER PUBLISHER
+#
+# The alternative is trusting each upstream publisher's signing identity. That
+# is a stronger claim in principle and a weaker one here: it would admit ANY
+# image that publisher ever signs, including a future tag nobody in this project
+# has looked at. A digest names one artefact, byte for byte.
+#
+# It is also the option this repository is already built for. Every platform
+# image is digest-pinned and `infra/scripts/platform-images.py` fails the build
+# on an unpinned one, so "which exact bytes do we run" is already a question with
+# an answer. This policy consumes that answer rather than introducing a second
+# source of truth.
+#
+# WHAT IT COSTS, STATED PLAINLY
+#
+# The digest IS the identity, so repinning an image means editing this file. Get
+# that wrong and admission denies the workload -- a failure that appears on the
+# next pod restart rather than at deploy time, which is the worst moment to
+# discover it. `make verify-image-allowlist` exists so the mistake is caught in
+# CI instead, and it is the reason this approach is safe to adopt rather than
+# merely appealing.
+#
+# WHY `static: action: pass` AND NOT A SIGNATURE CHECK
+#
+# There is nothing to verify: these images carry no signature this project can
+# validate. Pretending otherwise -- an authority that always succeeds, dressed as
+# verification -- would be a control that reports success while governing
+# nothing, which is the failure #2, #113, #155 and #211 are all about. This says
+# what it does: these exact bytes are allowed, on the strength of having been
+# reviewed and pinned, and nothing else is.
+apiVersion: policy.sigstore.dev/v1beta1
+kind: ClusterImagePolicy
+metadata:
+  name: third-party-images-by-digest
+spec:
+  images:
+    # Both forms, deliberately. A Docker Hub reference is written
+    # `curlimages/curl@sha256:...` in the pod spec and normalises to
+    # `index.docker.io/curlimages/curl@sha256:...`; which one the admission
+    # webhook matches against is an implementation detail of the controller, and
+    # a policy that matches neither denies the workload. Listing both costs
+    # nothing and removes the guess.
+    #
+    # curlimages/curl -- the wait-for-oidc initContainer (T-3.24, #279). It makes
+    # one HTTPS GET to the cluster's own OIDC issuer, in a loop, and exits.
+    - glob: "curlimages/curl@sha256:7c12af72ceb38b7432ab85e1a265cff6ae58e06f95539d539b654f2cfa64bb13"
+    - glob: "index.docker.io/curlimages/curl@sha256:7c12af72ceb38b7432ab85e1a265cff6ae58e06f95539d539b654f2cfa64bb13"
+  authorities:
+    - static:
+        action: pass
