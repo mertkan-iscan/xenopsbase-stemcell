@@ -100,4 +100,13 @@ images:
     # false, so a client the resolver cannot identify is served rather than
     # rejected -- and the ceiling is far above real use, so the expected effect
     # on normal traffic is none at all.
-    digest: sha256:00b9604d33837c6cce9dca5af1d54e49433a6845133c2564784f8dff110ae955
+    #
+    # Commit 7877620 -- the load baseline stopped measuring the rate limiter
+    # (T-5.13, #371). The limiter is unchanged for every real caller; what is new
+    # is that holders of the app-loadtest realm role are exempt, and only the dev
+    # realm issues that role.
+    #
+    # Deployed to satisfy #371's third criterion, which asks for a run that
+    # reaches core verified against core's own metrics rather than k6's view.
+    # That cannot be checked from a branch.
+    digest: sha256:e057cd5e88b913b6c5b892b554d8b6b914eabb788b7ca2fb759e2872869f4f8b
