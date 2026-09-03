@@ -16,6 +16,11 @@ resources:
   # The published objectives, alerted on as error-budget burn rate rather than
   # as a threshold that fires on a blip and sleeps through a slow bleed (T-7.6).
   - alerts-slo.yaml
+  # The two Valkey instances. Split by `service` throughout, because an eviction
+  # on the session store loses something and an eviction on the cache is the
+  # policy working (T-2.20, #263).
+  - alerts-cache.yaml
+  - dashboard-cache.yaml
   - dashboard-platform.yaml
   - tempo.yaml
   # Grafana, Prometheus and Alertmanager on their own hostnames, behind

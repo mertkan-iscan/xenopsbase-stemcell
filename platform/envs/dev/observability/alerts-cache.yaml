@@ -1,0 +1,169 @@
+# Is the cache working, and is it hurting anything? (T-2.20, #263)
+#
+# A cache is supposed to be invisible when healthy, which makes it the component
+# most likely to be quietly wrong. A 4% hit ratio is not a cache -- it is latency
+# plus a second failure mode -- and nothing about the application would look
+# different. This repository keeps finding controls that report success while
+# governing nothing (#2, #113, #155, #211); a cache is that shape by
+# construction.
+#
+# TWO INSTANCES, AND THE SAME NUMBER MEANS OPPOSITE THINGS ON EACH
+#
+#   valkey         sessions.   Authoritative. An eviction here LOSES something.
+#   valkey-cache   the cache.  An eviction here is the policy working.
+#
+# So `redis_evicted_keys_total` rising is an incident on one and routine on the
+# other, and every rule below is scoped by `service` rather than aggregated.
+# Aggregating them would produce exactly the alert nobody can act on.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: cache
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: xenopsbase
+spec:
+  groups:
+    - name: cache
+      rules:
+        # THE PIPELINE ITSELF, FIRST.
+        #
+        # Same reasoning as alerts-rate-limit.yaml: every other rule here needs
+        # these series to exist, so a rule that requires them stays silent
+        # forever when the exporter stops -- which is indistinguishable from a
+        # healthy cache. `absent()` is what makes the silence detectable.
+        - alert: ValkeyMetricsMissing
+          expr: absent(redis_up{namespace="cache"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: No Valkey metrics are reaching Prometheus
+            description: >-
+              redis_up is absent for the cache namespace, so nothing below can fire. Sessions and
+              the business cache may both be fine; nothing here can tell, which is the state
+              T-2.20 exists to make visible.
+            runbook: docs/runbooks/cache.md#no-valkey-metrics
+
+        # SESSIONS BEING EVICTED. The one that means users are logged out.
+        #
+        # T-2.19 (#262) split the cache out precisely so this cannot happen; a
+        # non-zero value here means either that separation has been undone --
+        # most likely CACHE_VALKEY_HOST pointing at the wrong instance -- or that
+        # sessions alone have outgrown 64mb.
+        #
+        # `> 0` rather than a rate threshold, because there is no acceptable
+        # number. One evicted session is one person signed out for a reason that
+        # will look like an authentication bug, and this project has already
+        # spent three attempts on one of those (#148).
+        - alert: SessionStoreEvictingKeys
+          expr: increase(redis_evicted_keys_total{namespace="cache", service="valkey"}[15m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: The session store is evicting keys, which signs users out
+            description: >-
+              redis_evicted_keys_total is rising on `valkey`, the SESSION store. Sessions are
+              authoritative there, so every evicted key is a user signed out at a moment
+              correlating with cache load rather than with anything about authentication.
+            runbook: docs/runbooks/cache.md#sessionstoreevictingkeys
+
+        # SESSIONS ABOUT TO BE EVICTED -- the leading indicator for the above.
+        #
+        # Deliberately NOT applied to valkey-cache. Sitting at `maxmemory` is the
+        # designed steady state for a cache under allkeys-lru: it fills, it
+        # evicts, used memory pins just under the limit. Alerting on that would
+        # fire continuously while nothing is wrong, which is how a gate stops
+        # being read.
+        - alert: SessionStoreNearMaxmemory
+          expr: |
+            redis_memory_used_bytes{namespace="cache", service="valkey"}
+              / redis_memory_max_bytes{namespace="cache", service="valkey"} > 0.85
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: The session store is within 15% of maxmemory
+            description: >-
+              `valkey` is holding more than 85% of its 64mb. At 100% it evicts, and what it
+              evicts is sessions. This is the point to act, not after SessionStoreEvictingKeys
+              has already signed somebody out.
+            runbook: docs/runbooks/cache.md#sessionstorenearmaxmemory
+
+        # THE FRAGMENTATION HEADROOM, WHICH IS THE NUMBER THAT PREDICTS AN OOM.
+        #
+        # `maxmemory` bounds the DATASET. The container limit bounds the PROCESS,
+        # and the gap between them absorbs client buffers, replication buffers
+        # and allocator fragmentation. Closing that gap is what gets the pod
+        # OOM-killed, and it is invisible in every redis_* series -- which is why
+        # this one rule reads container metrics instead.
+        #
+        # Applies to both instances: an OOMKill costs sessions on one and a cold
+        # cache on the other, and neither is intended.
+        - alert: ValkeyNearContainerLimit
+          expr: |
+            max by (pod) (container_memory_working_set_bytes{namespace="cache", container="valkey"})
+              / max by (pod) (kube_pod_container_resource_limits{namespace="cache", container="valkey", resource="memory"}) > 0.85
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: A Valkey pod is within 15% of its container memory limit
+            description: >-
+              Working set is above 85% of the container limit. maxmemory bounds the dataset;
+              this is the headroom above it that absorbs buffers and fragmentation, and losing
+              it means an OOMKill rather than an eviction.
+            runbook: docs/runbooks/cache.md#valkeynearcontainerlimit
+
+        # HIT RATIO COLLAPSE, AGAINST ITS OWN BASELINE.
+        #
+        # Deliberately NOT a fixed threshold. The right hit ratio depends on the
+        # workload, so a number chosen in advance is one people learn to ignore
+        # -- T-2.20 says this outright. What is diagnosable is a COLLAPSE: the
+        # last hour running at less than half of the last six hours means
+        # something changed. Invalidation firing too broadly, a mis-set TTL, or
+        # keys that stopped matching after a deploy.
+        #
+        # A schema-version bump in the key prefix (ADR-0011) looks exactly like
+        # this and is EXPECTED once. That is documented rather than suppressed,
+        # because a rule that hides the one benign cause also hides the others.
+        #
+        # The `and` clause is a traffic floor. Without it, an idle hour produces
+        # a ratio built from single-digit counts and this fires on noise --
+        # 1 hit and 1 miss is a 50% collapse and means nothing.
+        - alert: CacheHitRatioCollapsed
+          expr: |
+            (
+              sum(rate(redis_keyspace_hits_total{namespace="cache", service="valkey-cache"}[1h]))
+                /
+              clamp_min(
+                sum(rate(redis_keyspace_hits_total{namespace="cache", service="valkey-cache"}[1h]))
+                  + sum(rate(redis_keyspace_misses_total{namespace="cache", service="valkey-cache"}[1h])),
+                0.001
+              )
+            )
+            < 0.5 *
+            (
+              sum(rate(redis_keyspace_hits_total{namespace="cache", service="valkey-cache"}[6h]))
+                /
+              clamp_min(
+                sum(rate(redis_keyspace_hits_total{namespace="cache", service="valkey-cache"}[6h]))
+                  + sum(rate(redis_keyspace_misses_total{namespace="cache", service="valkey-cache"}[6h])),
+                0.001
+              )
+            )
+            and
+            sum(rate(redis_keyspace_hits_total{namespace="cache", service="valkey-cache"}[1h]))
+              + sum(rate(redis_keyspace_misses_total{namespace="cache", service="valkey-cache"}[1h])) > 1
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: The business cache hit ratio has halved against its own baseline
+            description: >-
+              The last hour is serving less than half the hit ratio of the last six, with enough
+              traffic for the comparison to mean something. Expected exactly once after a
+              deliberate schema-version bump in the key prefix; otherwise something changed in
+              invalidation, TTLs, or the keys themselves.
+            runbook: docs/runbooks/cache.md#cachehitratiocollapsed

@@ -1,0 +1,253 @@
+# Grafana dashboard for the two Valkey instances (T-2.20, #263).
+#
+# Loaded by the kube-prometheus-stack sidecar from the grafana_dashboard label,
+# like dashboard-platform.yaml. Nothing here is created by clicking, and nothing
+# survives only in Grafana's own database -- Grafana runs with persistence off.
+#
+# WHY EVERY PANEL IS SPLIT BY `service` RATHER THAN AGGREGATED
+#
+# The two instances are not two of the same thing:
+#
+#   valkey         sessions.   Authoritative. An eviction LOSES something.
+#   valkey-cache   the cache.  An eviction is the policy working.
+#
+# A combined "evictions" graph would average an incident together with normal
+# operation and produce a line nobody can read. T-2.20 asks for a panel per
+# cache name for exactly this reason, and the legend uses {{service}} so a third
+# instance appears on its own rather than silently joining a sum.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-cache
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Platform"
+data:
+  cache.json: |
+    {
+      "title": "Cache and sessions",
+      "uid": "cache-valkey",
+      "tags": [
+        "xenopsbase",
+        "cache"
+      ],
+      "timezone": "utc",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "time": {
+        "from": "now-6h",
+        "to": "now"
+      },
+      "panels": [
+        {
+          "type": "timeseries",
+          "title": "Hit ratio per instance (no fixed threshold on purpose — watch for collapse)",
+          "description": "The right value depends on the workload, so there is no target line. What is diagnosable is a drop against this panel's own recent shape. Expected to collapse once after a deliberate schema-version bump in the key prefix. An idle period shows a GAP rather than 0%: with no traffic the ratio is 0/0, and clamping that to zero would render an untouched cache as a completely broken one.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 0
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (service) (rate(redis_keyspace_hits_total{namespace=\"cache\"}[5m])) / (sum by (service) (rate(redis_keyspace_hits_total{namespace=\"cache\"}[5m])) + sum by (service) (rate(redis_keyspace_misses_total{namespace=\"cache\"}[5m])))",
+              "legendFormat": "{{service}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Evicted keys per second — on `valkey` this is users being signed out",
+          "description": "Routine on valkey-cache: that is allkeys-lru doing its job. On valkey it means a session was lost, and the first thing to check is whether CACHE_VALKEY_HOST points at the wrong instance.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 0
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "min": 0,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (service) (rate(redis_evicted_keys_total{namespace=\"cache\"}[5m]))",
+              "legendFormat": "{{service}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Dataset against maxmemory",
+          "description": "valkey-cache pinning at 100% is its designed steady state. valkey approaching 100% means sessions are about to be evicted, which is what SessionStoreNearMaxmemory fires on.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (service) (redis_memory_used_bytes{namespace=\"cache\"}) / clamp_min(sum by (service) (redis_memory_max_bytes{namespace=\"cache\"}), 1)",
+              "legendFormat": "{{service}} used / maxmemory",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Process against the container limit — the fragmentation headroom",
+          "description": "maxmemory bounds the dataset; this bounds the process. The gap absorbs buffers and allocator fragmentation, and closing it is an OOMKill rather than an eviction. This is the number that predicts trouble, and it is invisible in every redis_* series.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max by (pod) (container_memory_working_set_bytes{namespace=\"cache\", container=\"valkey\"}) / clamp_min(max by (pod) (kube_pod_container_resource_limits{namespace=\"cache\", container=\"valkey\", resource=\"memory\"}), 1)",
+              "legendFormat": "{{pod}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Command latency — a cache slower than the query it replaces is worse than none",
+          "description": "Mean seconds per command, from redis_commands_duration_seconds_total over redis_commands_total. Nothing else in the stack would show a cache that has become the slow part.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 16
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (service) (rate(redis_commands_duration_seconds_total{namespace=\"cache\"}[5m])) / (sum by (service) (rate(redis_commands_total{namespace=\"cache\"}[5m])))",
+              "legendFormat": "{{service}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Keys held",
+          "description": "Context for the panels above rather than a signal of its own: a hit-ratio collapse with a flat key count means something different from one where the keys disappeared.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 16
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (service) (redis_db_keys{namespace=\"cache\"})",
+              "legendFormat": "{{service}}",
+              "refId": "A"
+            }
+          ]
+        }
+      ]
+    }

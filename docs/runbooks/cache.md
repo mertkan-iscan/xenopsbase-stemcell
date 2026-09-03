@@ -144,3 +144,98 @@ KUBECONFIG=$K kubectl -n cache rollout restart deploy/valkey-cache
 
 Do **not** use `FLUSHALL` from a shell against `valkey` by habit — same command, different instance,
 and on that one it signs out every user.
+
+## Alerts
+
+Five rules, in `platform/envs/dev/observability/alerts-cache.yaml`. Every one is scoped by
+`service`, because the same number means opposite things on the two instances: an eviction on
+`valkey` loses a session, and an eviction on `valkey-cache` is the policy working.
+
+There is deliberately **no alert on a low hit ratio in absolute terms**. The right value depends on
+the workload, so a threshold picked in advance is one people learn to ignore.
+
+### No Valkey metrics
+
+`redis_up` is absent for the `cache` namespace, so every other rule here is silent — which is
+indistinguishable from a healthy cache. This fires so that the silence itself is detectable.
+
+```bash
+KUBECONFIG=$K kubectl -n cache get servicemonitor,pods -o wide
+KUBECONFIG=$K kubectl -n cache logs deploy/valkey-cache -c metrics --tail=50
+```
+
+Check the exporter sidecar is running, then that the ServiceMonitor still selects it, then that the
+NetworkPolicy still admits the scrape — that last one is what this rule was originally written for.
+
+### SessionStoreEvictingKeys
+
+**Users are being signed out.** `valkey` holds sessions and they are authoritative there; an evicted
+key is a lost session, at a moment that correlates with load rather than with anything about
+authentication.
+
+First thing to check, because it is the likely cause and the quickest to confirm:
+
+```bash
+KUBECONFIG=$K kubectl -n apps get deploy core -o jsonpath='{.spec.template.spec.containers[0].env}' | tr ',' '\n' | grep CACHE_VALKEY_HOST
+```
+
+It must read `valkey-cache.cache.svc.cluster.local`. If it says `valkey`, the business cache is
+writing into the session store and T-2.19's separation has been undone — repoint it and the
+evictions stop.
+
+If the host is right, sessions alone have outgrown 64mb. That is a sizing decision, not an incident
+to clear: raise `maxmemory` in `platform/envs/dev/cache/valkey.yaml` **and** the container limit
+above it, keeping the gap that absorbs fragmentation.
+
+### SessionStoreNearMaxmemory
+
+The leading indicator for the one above, and the point at which to act. `valkey` is above 85% of its
+64mb; at 100% it evicts sessions. Same two causes, same two checks, before anybody is signed out.
+
+Not applied to `valkey-cache`: sitting at `maxmemory` is that instance's designed steady state.
+
+### ValkeyNearContainerLimit
+
+`maxmemory` bounds the **dataset**; the container limit bounds the **process**. The gap between them
+absorbs client buffers, replication buffers and allocator fragmentation, and closing it means an
+**OOMKill** rather than an eviction — the pod restarts, and on `valkey` that signs everyone out at
+once.
+
+```bash
+KUBECONFIG=$K kubectl -n cache top pods
+KUBECONFIG=$K kubectl -n cache exec deploy/valkey-cache -c valkey -- sh -c \
+  'export REDISCLI_AUTH=$(sed -n "s/^requirepass //p" /etc/valkey/secret/auth.conf); \
+   valkey-cli --no-auth-warning info memory | grep -E "used_memory_rss_human|mem_fragmentation_ratio|maxmemory_human"'
+```
+
+A `mem_fragmentation_ratio` well above 1.5 with a stable dataset is fragmentation rather than
+growth, and a restart reclaims it. Raising the container limit is the durable fix; lowering
+`maxmemory` is the fast one.
+
+### CacheHitRatioCollapsed
+
+The last hour is serving under half the hit ratio of the last six, with enough traffic for the
+comparison to mean something.
+
+**Expected exactly once after a deliberate schema-version bump** in the key prefix (`v1` → `v2`).
+Old entries become unreachable by design and the ratio recovers within one TTL. If a bump just
+shipped, this is that, and it is not an incident.
+
+Otherwise, in order of likelihood:
+
+1. **Invalidation firing too broadly.** Check whether writes are evicting more than one owner's
+   keys — the eviction pattern is `xob:c:v1:document-list:<owner>:*` and the owner segment is what
+   keeps it narrow.
+2. **A TTL that is too short**, so entries expire before they are re-read.
+3. **Keys that stopped matching** after a deploy: the writer and the reader disagreeing about the
+   key format, which produces a permanent miss rather than a stale hit.
+
+```bash
+KUBECONFIG=$K kubectl -n cache exec deploy/valkey-cache -c valkey -- sh -c \
+  'export REDISCLI_AUTH=$(sed -n "s/^requirepass //p" /etc/valkey/secret/auth.conf); \
+   valkey-cli --no-auth-warning info stats | grep -E "keyspace_hits|keyspace_misses"; \
+   valkey-cli --no-auth-warning --scan --pattern "xob:c:*" | head'
+```
+
+A cold cache after a restart also produces this and needs nothing done — see
+[What happens when Valkey restarts](#what-happens-when-valkey-restarts).
