@@ -17,6 +17,62 @@ spec:
     metadata:
       labels: {app.kubernetes.io/name: core, app.kubernetes.io/part-of: xenopsbase}
     spec:
+      # -----------------------------------------------------------------------
+      # KEEP CORE OFF THE NODE CARRYING THE OBSERVABILITY SINGLETONS (T-2.29)
+      # -----------------------------------------------------------------------
+      #
+      # Prometheus, Tempo, Loki and Argo CD's application controller are
+      # StatefulSet or singleton workloads that book 1024Mi, 768Mi, 768Mi and
+      # 256Mi. They are effectively immovable: three of the four are bound to a
+      # PVC, so once placed they stay. Whichever node draws them carries ~2.8GB
+      # of platform before a single application pod lands.
+      #
+      # core is the largest MOBILE pod in the cluster at 832Mi, and nothing
+      # stopped it landing on that node. On 2026-09-03 a routine image rollout
+      # did exactly that, and worker-0 went from 919Mi schedulable to 87Mi --
+      # the T-2.29 (#368) condition, back within a day of that card closing,
+      # caused by nothing more exotic than a deploy. `make verify-headroom` is
+      # what caught it.
+      #
+      # WHY PREFERRED, WHEN gateway.yaml ARGUES FOR required
+      #
+      # The opposite call, deliberately. gateway's rule is between replicas of
+      # one Deployment: a fourth replica with nowhere to go SHOULD go Pending,
+      # because Pending is what the autoscaler listens to and a doubled-up
+      # replica measured 1.7x the CPU per request.
+      #
+      # This rule is against pods core does not own and cannot displace. At
+      # floor core is a SINGLE replica, so `required` would mean that if the
+      # singletons ever spread across both fixed workers -- one rescheduled PVC
+      # is enough -- core would have no legal node and the application would be
+      # down. A preference degrades to the scheduler's own packing, which is
+      # what we have today. Availability of the application outranks the
+      # placement it would prefer.
+      #
+      # THE `namespaces` KEY IS LOAD BEARING
+      #
+      # podAntiAffinity matches within the POD'S OWN namespace unless told
+      # otherwise, and core is in `apps`. Without this list the selector would
+      # match nothing, cost nothing, and report nothing -- a rule that looks
+      # right in review and does not exist at runtime.
+      #
+      # The label values are third-party chart output and could drift on an
+      # upgrade. That is why this is not the only guard: `make verify-headroom`
+      # asserts the OUTCOME against the running cluster, so a selector that
+      # silently stops matching is caught by the check that caught the original
+      # imbalance.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                namespaces: [observability, argocd]
+                labelSelector:
+                  matchExpressions:
+                    - key: app.kubernetes.io/name
+                      operator: In
+                      values: [prometheus, tempo, loki, argocd-application-controller]
+                topologyKey: kubernetes.io/hostname
       # No legacy Docker-link variables; see services/gateway.yaml for why
       # (T-2.17, #212). Not currently exposed, switched off as the default.
       enableServiceLinks: false
