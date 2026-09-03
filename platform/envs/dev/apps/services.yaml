@@ -32,6 +32,37 @@ spec:
       - CreateNamespace=true
       - ServerSideApply=true
 
+    # ENROL `apps` IN IMAGE POLICY ENFORCEMENT (T-6.2, #49).
+    #
+    # This is the label that makes T-6.2's scope line true rather than
+    # aspirational: "only images this pipeline built may run". Until now no
+    # namespace carried it, so the signing policy governed nothing that serves
+    # traffic.
+    #
+    # Argo creates this namespace (CreateNamespace=true above), so the label has
+    # to come from here -- there is no Namespace manifest to put it on, and one
+    # applied by hand would be lost on the next rebuild.
+    #
+    # WHAT THIS MAKES POSSIBLE TO BREAK
+    #
+    # policy-controller denies anything matching NO policy. Every image in this
+    # namespace must therefore be covered:
+    #
+    #   core, gateway   xenopsbase-images-are-signed   (Fulcio identity)
+    #   curlimages/curl third-party-images-by-digest   (exact digest)
+    #
+    # Adding an image here without covering it denies the pod -- and not at
+    # deploy time: the manifest applies cleanly and admission refuses the pod
+    # only when one is next created. `make verify-image-allowlist` runs on every
+    # pull request precisely so that lands as a red check instead.
+    #
+    # Verified in a scratch namespace before this was applied: the allowlisted
+    # digest admitted, a DIFFERENT digest of the same image denied, an unrelated
+    # third-party image denied, and a signed image admitted.
+    managedNamespaceMetadata:
+      labels:
+        policy.sigstore.dev/include: "true"
+
   # ARGO MUST NOT OWN replicas ONCE AN HPA DOES (T-2.8, #22).
   #
   # `selfHeal: true` above reverts any live state that differs from git. The
