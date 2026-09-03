@@ -248,6 +248,61 @@ vulnerabilities:
       the match. The driver is unused; this platform runs PostgreSQL.
     expired_at: 2026-10-29
 
+  # -----------------------------------------------------------------------
+  # tempo -- the last three findings on the 2.x line. 1 CRITICAL, 2 HIGH.
+  #
+  # These are what keep the Security workflow red on every push (T-6.12, #384).
+  # grafana/tempo is pinned at 2.10.8 and 2.x ENDS THERE -- probed against the
+  # registry on 2026-09-03, 2.10.9 and 2.11.0 both 404.
+  #
+  # THE 3.x IMAGE WAS CHECKED AND DOES NOT HELP, WHICH REVERSES #384.
+  #
+  # That card recorded `grafana/tempo:3.0.3  Total: 8 (HIGH: 8, CRITICAL: 0)`
+  # with CVE-2026-56854 absent, and concluded the CRITICAL could only be cleared
+  # by migrating to the 3.0 architecture -- a breaking change, since the
+  # ingester module is removed.
+  #
+  # Re-scanned 2026-09-03, both images in one invocation against one database so
+  # the comparison is like for like:
+  #
+  #   grafana/tempo@sha256:f0561deb  (2.10.8)   Total: 11 (HIGH: 10, CRITICAL: 1)
+  #   grafana/tempo@sha256:0296560a  (3.0.3)    Total: 11 (HIGH: 10, CRITICAL: 1)
+  #
+  # Identical finding sets. Same golang.org/x/crypto v0.53.0, same stdlib
+  # v1.26.5, CVE-2026-56854 present in BOTH and still CRITICAL. The digests are
+  # different images -- f0561deb is the pin, 0296560a is what 3.0.3 resolves to
+  # -- so this is not the same image scanned twice.
+  #
+  # So the breaking migration buys nothing here. There is no rebuilt image to
+  # repin to on any line, which is what this file's rule actually asks, and the
+  # 3.x upgrade goes back to being a feature and maintenance question rather
+  # than a security one.
+  #
+  # Reachability, for whoever revisits this: CVE-2026-56854 is in
+  # golang.org/x/crypto/ssh. Tempo serves OTLP and its query API; it does not
+  # serve or dial SSH, so the package is linked and the path is unreached. That
+  # is context for how hard to push, not a claim that it does not matter.
+  - id: CVE-2026-56854
+    statement: >-
+      golang.org/x/crypto v0.53.0 in grafana/tempo; fixed in 0.55.0. 2.x ends at
+      2.10.8 (2.10.9 and 2.11.0 both 404 on the registry) and 3.0.3 was scanned
+      2026-09-03 carrying the SAME v0.53.0, so the breaking 3.x migration is not
+      a repin target either. x/crypto/ssh is linked but unreached: tempo serves
+      OTLP and its query API, not SSH.
+    expired_at: 2026-10-29
+  - id: CVE-2026-43871
+    statement: >-
+      github.com/apache/thrift v0.23.0 in grafana/tempo; fixed in 0.24.0.
+      Present identically in 3.0.3 scanned 2026-09-03, so there is no rebuilt
+      image to repin to on either line.
+    expired_at: 2026-10-29
+  - id: CVE-2026-84304
+    statement: >-
+      google.golang.org/grpc v1.82.1 in grafana/tempo; fixed in 1.83.1. Present
+      identically in 3.0.3 scanned 2026-09-03, so there is no rebuilt image to
+      repin to on either line.
+    expired_at: 2026-10-29
+
 # THE GATE SCANS FOR SECRETS TOO, WHICH IS EASY TO FORGET
 #
 # The trivy action runs vuln AND secret scanning by default, and the gating step
