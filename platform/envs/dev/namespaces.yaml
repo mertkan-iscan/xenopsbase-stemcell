@@ -46,7 +46,32 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: apps
-  labels: {app.kubernetes.io/managed-by: argocd}
+  labels:
+    app.kubernetes.io/managed-by: argocd
+    # IMAGE POLICY ENFORCEMENT (T-6.2, #49).
+    #
+    # This is what makes T-6.2's scope line true rather than aspirational --
+    # "only images this pipeline built may run". policy-controller's webhook
+    # selects on exactly this label and denies anything matching no policy, so
+    # every image here must be covered:
+    #
+    #   core, gateway     xenopsbase-images-are-signed   Fulcio identity
+    #   curlimages/curl   third-party-images-by-digest   exact digest
+    #
+    # IT HAS TO BE HERE, NOT ON THE services APPLICATION.
+    #
+    # #418 put it in that Application's `managedNamespaceMetadata`, which is the
+    # documented way to label a namespace Argo creates -- and it silently lost.
+    # This Namespace object is owned by the `root` Application
+    # (`argocd.argoproj.io/tracking-id: root:/Namespace:/apps`), so root
+    # reasserts these labels on every sync and strips anything another
+    # Application added. The label appeared, survived about two minutes, and was
+    # gone; enforcement was off and nothing reported it.
+    #
+    # Caught only by trying to run an unsigned image in `apps` and watching it be
+    # ADMITTED. A label that is present in the manifest and absent on the cluster
+    # is exactly the shape of control this repository keeps finding.
+    policy.sigstore.dev/include: "true"
 ---
 # The in-memory store (ADR-0009). Named for what may live in it, not for the
 # product that implements it: nothing authoritative belongs here, and a
