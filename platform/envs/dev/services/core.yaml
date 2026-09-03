@@ -290,6 +290,25 @@ spec:
             # environment variables, so it is a heuristic -- and when it misses,
             # the probe paths below 404 and the pod never becomes ready, which
             # reads as an application failure.
+            # BUSINESS CACHE (T-3.22, #264; ADR-0011).
+            #
+            # Points at valkey-CACHE, not valkey. T-2.19 (#262) split them so a
+            # cached entry can never evict a session; pointing this at the
+            # sessions instance rebuilds the exact failure that card prevented,
+            # and the symptom would be users logged out at random under cache
+            # load, looking like an authentication bug.
+            #
+            # Losing this must not fail a request: reads fall through to
+            # Postgres, evictions after a committed write are swallowed, and the
+            # readiness group below is `readinessState,db` and deliberately does
+            # not include redis -- so an absent cache cannot take the pod out of
+            # the Service. That is proven by DocumentCacheDegradationIT rather
+            # than asserted here.
+            - {name: CACHE_ENABLED, value: "true"}
+            - {name: CACHE_VALKEY_HOST, value: valkey-cache.cache.svc.cluster.local}
+            - name: CACHE_VALKEY_PASSWORD
+              valueFrom: {secretKeyRef: {name: valkey-client, key: password}}
+
             - {name: MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED, value: "true"}
           startupProbe:
             # Generous, because this is the probe that covers Flyway. A slow
