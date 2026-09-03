@@ -606,6 +606,13 @@ hpa-local: ## Rehearse the gateway HPA on a throwaway local k3s cluster (T-2.8)
 load: ## Load baseline: k6 in-cluster against the gateway, thresholds are the SLOs (T-5.6)
 	@bash $(SCRIPTS)/load-test.sh "$(ENV)"
 
+.PHONY: load-trend
+load-trend: ## Is the baseline drifting? The scheduled runs as a series, not a verdict (T-5.10)
+	@# Reads the artifacts the scheduled runs keep. A threshold catches a
+	@# regression that arrives at once; this catches the one that arrives at 3% a
+	@# week, where every individual run passes.
+	@bash $(SCRIPTS)/load-trend.sh $(RUNS)
+
 .PHONY: load-ratelimit
 load-ratelimit: ## Is the rate limit real, and is it per client? (T-8.3)
 	@# Two identities at once: one floods and must be limited, one behaves and
