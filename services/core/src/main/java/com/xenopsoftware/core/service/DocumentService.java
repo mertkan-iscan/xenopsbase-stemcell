@@ -4,6 +4,7 @@ import com.xenopsoftware.core.config.ApplicationProperties;
 import com.xenopsoftware.core.config.ConditionalOnDocumentStorage;
 import com.xenopsoftware.core.domain.Document;
 import com.xenopsoftware.core.repository.DocumentRepository;
+import com.xenopsoftware.core.service.dto.CachedDocumentPage;
 import com.xenopsoftware.core.service.storage.DocumentStorage;
 import java.net.URI;
 import java.time.Instant;
@@ -15,6 +16,8 @@ import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -55,11 +58,18 @@ public class DocumentService {
     private final DocumentRepository repository;
     private final DocumentStorage storage;
     private final ApplicationProperties.Storage settings;
+    private final ApplicationEventPublisher events;
 
-    public DocumentService(DocumentRepository repository, DocumentStorage storage, ApplicationProperties properties) {
+    public DocumentService(
+        DocumentRepository repository,
+        DocumentStorage storage,
+        ApplicationProperties properties,
+        ApplicationEventPublisher events
+    ) {
         this.repository = repository;
         this.storage = storage;
         this.settings = properties.getStorage();
+        this.events = events;
     }
 
     /**
@@ -121,7 +131,12 @@ public class DocumentService {
         document.setSizeBytes(stored.sizeBytes());
         document.setStatus(Document.Status.AVAILABLE);
         document.setCompletedAt(Instant.now());
-        return Optional.of(repository.save(document));
+        Document saved = repository.save(document);
+
+        // PENDING -> AVAILABLE, so this row now belongs in the owner's list. Consumed after commit;
+        // see DocumentCacheEviction for why it cannot be a @CacheEvict here.
+        events.publishEvent(new DocumentsChanged(owner));
+        return Optional.of(saved);
     }
 
     /** A short-lived URL for the client to GET the object directly. */
@@ -136,6 +151,55 @@ public class DocumentService {
     @Transactional(readOnly = true)
     public Page<Document> listAvailable(String owner, Pageable pageable) {
         return repository.findByOwnerAndStatus(owner, Document.Status.AVAILABLE, pageable);
+    }
+
+    /**
+     * The same page, cache-aside through Valkey (T-3.22, #264; ADR-0011).
+     *
+     * <p>This is the only read path in this service that is cached, and the only one that can be:
+     * {@code presignDownload} returns a credential with its own expiry, which ADR-0011's never-cache
+     * list rules out, and everything else here backs a write.
+     *
+     * <p><b>The key carries the owner, and that is a correctness property rather than a naming
+     * convention.</b> {@code findByOwnerAndStatus} enforces authorisation by not returning the row;
+     * a cache keyed on the page alone would answer a request the database itself would have refused,
+     * with another user's documents. ADR-0011 is explicit that this is a different severity class
+     * from a stale read, which is why the owner is first in the key and why the DTO does not repeat
+     * it in the value -- a second copy of the field that decides who may read the entry is a second
+     * chance to get it wrong.
+     *
+     * <p>The discriminator is the page coordinates. Sort is included because two pages that differ
+     * only by ordering are different answers, and omitting it would serve one for the other.
+     *
+     * <p>Returns a DTO, never the entity: ADR-0011 refuses to serialise a JPA entity, which carries
+     * lazy proxies and a persistence context it cannot be separated from.
+     *
+     * <p>On a cache miss, an unreachable Valkey, or a value that will not deserialise, this falls
+     * through to the query above. That is not incidental -- it is T-3.22's acceptance criterion, and
+     * {@code CacheConfiguration}'s error handler is what makes it true.
+     */
+    @Cacheable(
+        cacheNames = BusinessCaches.DOCUMENT_LIST,
+        key = "#owner + ':' + #pageable.pageNumber + '-' + #pageable.pageSize + '-' + #pageable.sort"
+    )
+    @Transactional(readOnly = true)
+    public CachedDocumentPage listAvailableCached(String owner, Pageable pageable) {
+        Page<Document> page = repository.findByOwnerAndStatus(owner, Document.Status.AVAILABLE, pageable);
+        List<CachedDocumentPage.CachedDocument> content = page
+            .getContent()
+            .stream()
+            .map(document ->
+                new CachedDocumentPage.CachedDocument(
+                    document.getId(),
+                    document.getFilename(),
+                    document.getContentType(),
+                    document.getSizeBytes(),
+                    document.getStatus().name(),
+                    document.getCreatedAt()
+                )
+            )
+            .toList();
+        return new CachedDocumentPage(content, page.getTotalElements());
     }
 
     /**
@@ -156,6 +220,7 @@ public class DocumentService {
         repository.flush();
 
         storage.delete(objectKey);
+        events.publishEvent(new DocumentsChanged(owner));
         return true;
     }
 

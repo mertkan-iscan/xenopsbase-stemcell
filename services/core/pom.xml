@@ -321,6 +321,25 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>
         </dependency>
+        <!--
+            Valkey as a business cache (T-3.22, #264; ADR-0011).
+
+            `spring-boot-starter-cache` brings the abstraction; `-data-redis` brings Lettuce, which
+            speaks the Valkey wire protocol. The blocking client, not the reactive one: `core` is a
+            servlet application and the gateway's reactive dependency is for sessions, not this.
+
+            NOT `spring-boot-starter-session-data-redis`. Sessions belong to the gateway and live in
+            a different Valkey instance (T-2.19, #262); pulling session support in here would have
+            `core` writing to a store it does not own.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-cache</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-jackson</artifactId>

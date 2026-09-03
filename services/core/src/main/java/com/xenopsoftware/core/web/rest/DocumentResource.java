@@ -4,6 +4,7 @@ import com.xenopsoftware.core.config.ConditionalOnDocumentStorage;
 import com.xenopsoftware.core.domain.Document;
 import com.xenopsoftware.core.security.SecurityUtils;
 import com.xenopsoftware.core.service.DocumentService;
+import com.xenopsoftware.core.service.dto.CachedDocumentPage;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
@@ -13,6 +14,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -132,9 +134,18 @@ public class DocumentResource {
     public ResponseEntity<List<DocumentView>> list(
         @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
     ) {
-        Page<Document> page = documentService.listAvailable(currentOwner(), capped(pageable));
+        // Cache-aside through Valkey (T-3.22, #264). A miss, an unreachable cache or an entry that
+        // will not deserialise all fall through to Postgres inside the service, so this method has
+        // no cache-specific branch and no way to behave differently when Valkey is gone.
+        Pageable requested = capped(pageable);
+        CachedDocumentPage cached = documentService.listAvailableCached(currentOwner(), requested);
+
+        // Rebuilt rather than cached: PageImpl carries the Pageable that produced it and has no
+        // stable JSON contract, so only the content and the total are stored (ADR-0011). The
+        // pagination headers need a Page, and this is the cheapest honest way to give them one.
+        Page<CachedDocumentPage.CachedDocument> page = new PageImpl<>(cached.content(), requested, cached.totalElements());
         HttpHeaders headers = PaginationUtil.generatePaginationHttpHeaders(ServletUriComponentsBuilder.fromCurrentRequest(), page);
-        return ResponseEntity.ok().headers(headers).body(page.getContent().stream().map(DocumentView::of).toList());
+        return ResponseEntity.ok().headers(headers).body(cached.content().stream().map(DocumentView::of).toList());
     }
 
     /**
@@ -197,6 +208,16 @@ public class DocumentResource {
     public record UploadTicket(Long id, URI uploadUrl, long expiresInSeconds, long contentLength, String contentType) {}
 
     public record DocumentView(Long id, String filename, String contentType, Long sizeBytes, String status, Instant createdAt) {
+        /**
+         * From the cached DTO. Kept as a separate type from {@code CachedDocument} on purpose: the
+         * wire format is this repository's public contract and the cached shape is an internal one,
+         * and letting them be the same type means a wire change silently reinterprets entries
+         * already sitting in Valkey under the current schema version.
+         */
+        static DocumentView of(CachedDocumentPage.CachedDocument d) {
+            return new DocumentView(d.id(), d.filename(), d.contentType(), d.sizeBytes(), d.status(), d.createdAt());
+        }
+
         static DocumentView of(Document d) {
             return new DocumentView(
                 d.getId(),

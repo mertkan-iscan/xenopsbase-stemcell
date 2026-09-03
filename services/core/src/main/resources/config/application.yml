@@ -144,6 +144,25 @@ spring:
     jpa:
       repositories:
         bootstrap-mode: deferred
+    # Valkey, for the business cache only (T-3.22, #264). Nested under the
+    # existing spring.data rather than a second `data:` key, which YAML would
+    # resolve last-wins and silently drop the JPA settings above.
+    #
+    # No default host, deliberately: an unset CACHE_VALKEY_HOST with caching ON
+    # fails at startup naming the variable, rather than resolving to localhost
+    # and turning every cache operation into a logged warning nobody reads.
+    #
+    # This must point at the CACHE instance, never the one holding sessions.
+    # T-2.19 (#262) split them precisely so a cache cannot evict a session, and
+    # pointing this at the wrong one rebuilds the failure that card prevented.
+    redis:
+      host: ${CACHE_VALKEY_HOST:}
+      port: ${CACHE_VALKEY_PORT:6379}
+      password: ${CACHE_VALKEY_PASSWORD:}
+      # Bounded like every other outbound call (T-3.9). An unreachable cache must
+      # fail fast and fall through to Postgres, not hold the request thread.
+      timeout: 500ms
+      connect-timeout: 500ms
   jpa:
     open-in-view: false
     properties:
@@ -289,6 +308,15 @@ jhipster:
 # Application-specific properties
 # ===================================================================
 application:
+  # Valkey as a business cache (T-3.22, #264; ADR-0011).
+  #
+  # OFF unless a deployment turns it on, for the same reason `storage.bucket` is
+  # unset below: a fork that does not want a cache should carry no cache
+  # configuration rather than a disabled one. With this false there is no cache
+  # manager and no eviction listener, and the cached read path is a plain query.
+  cache:
+    enabled: ${CACHE_ENABLED:false}
+
   # Document storage over the S3 API (T-3.7).
   #
   # bucket and endpoint are intentionally UNSET here. Without them the storage
