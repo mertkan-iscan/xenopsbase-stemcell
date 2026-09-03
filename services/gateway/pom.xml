@@ -148,7 +148,7 @@
         -->
         <jacoco.minimum.instruction>0.80</jacoco.minimum.instruction>
         <jacoco.minimum.branch>0.70</jacoco.minimum.branch>
-        <jhipster-framework.version>8.12.0</jhipster-framework.version>
+        <jhipster-framework.version>9.1.0</jhipster-framework.version>
         <jib-maven-plugin.architecture>amd64</jib-maven-plugin.architecture>
         <!--
             Pinned by digest, not by tag. T-6.1 requires that the same commit
