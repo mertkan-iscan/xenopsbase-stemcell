@@ -59,17 +59,20 @@ public class DocumentService {
     private final DocumentStorage storage;
     private final ApplicationProperties.Storage settings;
     private final ApplicationEventPublisher events;
+    private final SingleFlight singleFlight;
 
     public DocumentService(
         DocumentRepository repository,
         DocumentStorage storage,
         ApplicationProperties properties,
-        ApplicationEventPublisher events
+        ApplicationEventPublisher events,
+        SingleFlight singleFlight
     ) {
         this.repository = repository;
         this.storage = storage;
         this.settings = properties.getStorage();
         this.events = events;
+        this.singleFlight = singleFlight;
     }
 
     /**
@@ -182,8 +185,31 @@ public class DocumentService {
         cacheNames = BusinessCaches.DOCUMENT_LIST,
         key = "#owner + ':' + #pageable.pageNumber + '-' + #pageable.pageSize + '-' + #pageable.sort"
     )
-    @Transactional(readOnly = true)
     public CachedDocumentPage listAvailableCached(String owner, Pageable pageable) {
+        // Concurrent misses on one key rebuild it ONCE per replica (T-3.23, #265). Waiters hold no
+        // transaction and therefore no connection, which is the whole point: a cold cache must not
+        // put one Postgres primary under one request's worth of load per in-flight request.
+        //
+        // Deliberately NOT @Transactional. The annotation here would open a transaction -- and take
+        // a Hikari connection -- for every waiting thread before the coalescing had a chance to
+        // stop it, which is exactly the pressure this is meant to remove. The repository call below
+        // gets its own transaction, so only the thread that actually queries holds a connection.
+        // The SAME key the @Cacheable annotation above builds, sort included. Omitting the sort
+        // would coalesce two callers asking for different orderings into one load and hand one of
+        // them the other's answer -- a correctness bug, not a tuning detail.
+        String key =
+            BusinessCaches.keyPrefix(BusinessCaches.DOCUMENT_LIST) +
+            owner +
+            ":" +
+            pageable.getPageNumber() +
+            "-" +
+            pageable.getPageSize() +
+            "-" +
+            pageable.getSort();
+        return singleFlight.call(key, () -> loadAvailable(owner, pageable));
+    }
+
+    private CachedDocumentPage loadAvailable(String owner, Pageable pageable) {
         Page<Document> page = repository.findByOwnerAndStatus(owner, Document.Status.AVAILABLE, pageable);
         List<CachedDocumentPage.CachedDocument> content = page
             .getContent()
