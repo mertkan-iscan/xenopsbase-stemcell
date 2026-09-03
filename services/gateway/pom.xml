@@ -80,7 +80,7 @@
         <spring-boot.version>${project.parent.version}</spring-boot.version>
         <archunit-junit5.version>1.4.2</archunit-junit5.version>
         <blockhound-junit-platform.version>1.0.17.RELEASE</blockhound-junit-platform.version>
-        <checkstyle.version>13.7.0</checkstyle.version>
+        <checkstyle.version>14.0.0</checkstyle.version>
         <commons-beanutils.version>1.11.0</commons-beanutils.version>
         <cucumber-bom.version>7.34.4</cucumber-bom.version>
         <jackson-databind-nullable.version>0.2.10</jackson-databind-nullable.version>
