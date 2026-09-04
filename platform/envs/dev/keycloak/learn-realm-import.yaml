@@ -1,0 +1,528 @@
+# The xenopslearn realm, on the SAME Keycloak the stemcell runs.
+#
+# A second realm, not a second Keycloak: this is a different product sharing one
+# identity provider, which is a different thing from a different customer. A
+# customer is a row inside a realm and never a realm of its own -- that is
+# xenopsbase-learn's ADR-0102, and it is the reason this file is one realm and
+# not one per company.
+#
+# WHAT THIS DOES AND DOES NOT MANAGE
+#
+# KeycloakRealmImport only ever CREATES a realm that does not exist. It is the
+# bootstrap and nothing more. Every later change -- settings, clients, roles --
+# goes through `make realm-apply` in the learn repository, which PUTs the realm
+# representation and partial-imports clients and roles while never touching a
+# user.
+#
+# The obvious alternative for changing an existing realm is to delete it and let
+# the import recreate it, and against real people that destroys every account
+# while reading as routine maintenance. learn's T-1.7 is entirely about refusing
+# that, and its runbook (docs/runbooks/keycloak-realm.md there) is the long form.
+#
+# THE USERS IN HERE ARE DEVELOPMENT FIXTURES
+#
+# Five of them, and they carry EXPLICIT ids, which is what makes a re-import
+# idempotent rather than a fresh set of accounts with new subjects -- learn's
+# LocalRealmTest fails the build if a declared user lacks one. That matters more
+# than it sounds: identity links a person by `sub`, so a re-import that minted
+# new subjects would orphan every attempt, score and completion those people
+# made.
+#
+# They exist because this is the dev cluster and somebody has to be able to sign
+# in. A real installation's people arrive by signing in for the first time, and
+# `realm-apply` never writes a user.
+apiVersion: k8s.keycloak.org/v2beta1
+kind: KeycloakRealmImport
+metadata:
+  name: xenopslearn
+  namespace: keycloak
+spec:
+  keycloakCRName: keycloak
+  # Matching the stemcell's own import. The operator runs this as a Job with a
+  # full Keycloak in it, so it needs a Keycloak's memory rather than a script's.
+  resources:
+    requests: {memory: 896Mi}
+    limits: {memory: 1280Mi}
+  realm:
+    {
+      "realm": "xenopslearn",
+      "enabled": true,
+      "displayName": "XenOpsBase Learn (local)",
+      "registrationAllowed": false,
+      "resetPasswordAllowed": true,
+      "verifyEmail": false,
+      "loginWithEmailAllowed": true,
+      "duplicateEmailsAllowed": false,
+      "sslRequired": "none",
+      "accessTokenLifespan": 300,
+      "ssoSessionIdleTimeout": 1800,
+      "ssoSessionMaxLifespan": 36000,
+      "roles": {
+        "realm": [
+          {
+            "name": "platform",
+            "description": "Platform-side principal. Coarse only -- fine-grained permissions are ours (ADR-0103)."
+          },
+          {
+            "name": "tenant",
+            "description": "Tenant-side principal. Coarse only."
+          }
+        ]
+      },
+      "clients": [
+        {
+          "clientId": "gateway",
+          "name": "API gateway (BFF)",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": false,
+          "secret": "local-development-only-gateway-secret",
+          "standardFlowEnabled": true,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "serviceAccountsEnabled": true,
+          "redirectUris": [
+            "http://localhost:8080/login/oauth2/code/oidc"
+          ],
+          "webOrigins": [
+            "http://localhost:8080"
+          ],
+          "attributes": {
+            "post.logout.redirect.uris": "http://localhost:8080"
+          },
+          "defaultClientScopes": [
+            "basic",
+            "acr",
+            "profile",
+            "email",
+            "roles",
+            "web-origins"
+          ],
+          "optionalClientScopes": [
+            "offline_access"
+          ],
+          "protocolMappers": [
+            {
+              "name": "gateway-audience",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-audience-mapper",
+              "consentRequired": false,
+              "config": {
+                "included.client.audience": "gateway",
+                "id.token.claim": "false",
+                "access.token.claim": "true",
+                "introspection.token.claim": "true"
+              }
+            },
+            {
+              "name": "tenant_id-claim",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-usermodel-attribute-mapper",
+              "consentRequired": false,
+              "config": {
+                "user.attribute": "tenant_id",
+                "claim.name": "tenant_id",
+                "jsonType.label": "String",
+                "id.token.claim": "true",
+                "access.token.claim": "true",
+                "introspection.token.claim": "true",
+                "userinfo.token.claim": "true"
+              }
+            },
+            {
+              "name": "side-claim",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-usermodel-attribute-mapper",
+              "consentRequired": false,
+              "config": {
+                "user.attribute": "side",
+                "claim.name": "side",
+                "jsonType.label": "String",
+                "id.token.claim": "true",
+                "access.token.claim": "true",
+                "introspection.token.claim": "true",
+                "userinfo.token.claim": "true"
+              }
+            }
+          ]
+        },
+        {
+          "clientId": "frontend",
+          "name": "Web application",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": true,
+          "standardFlowEnabled": true,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "redirectUris": [
+            "http://localhost:5173/*",
+            "http://localhost:8080/*"
+          ],
+          "webOrigins": [
+            "http://localhost:5173",
+            "http://localhost:8080"
+          ],
+          "attributes": {
+            "pkce.code.challenge.method": "S256",
+            "post.logout.redirect.uris": "http://localhost:5173/*##http://localhost:8080/*"
+          },
+          "defaultClientScopes": [
+            "basic",
+            "acr",
+            "profile",
+            "email",
+            "roles",
+            "web-origins"
+          ],
+          "optionalClientScopes": [
+            "offline_access"
+          ],
+          "protocolMappers": [
+            {
+              "name": "gateway-audience",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-audience-mapper",
+              "consentRequired": false,
+              "config": {
+                "included.client.audience": "gateway",
+                "id.token.claim": "false",
+                "access.token.claim": "true",
+                "introspection.token.claim": "true"
+              }
+            },
+            {
+              "name": "tenant_id-claim",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-usermodel-attribute-mapper",
+              "consentRequired": false,
+              "config": {
+                "user.attribute": "tenant_id",
+                "claim.name": "tenant_id",
+                "jsonType.label": "String",
+                "id.token.claim": "true",
+                "access.token.claim": "true",
+                "introspection.token.claim": "true",
+                "userinfo.token.claim": "true"
+              }
+            },
+            {
+              "name": "side-claim",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-usermodel-attribute-mapper",
+              "consentRequired": false,
+              "config": {
+                "user.attribute": "side",
+                "claim.name": "side",
+                "jsonType.label": "String",
+                "id.token.claim": "true",
+                "access.token.claim": "true",
+                "introspection.token.claim": "true",
+                "userinfo.token.claim": "true"
+              }
+            }
+          ]
+        },
+        {
+          "clientId": "local-tests",
+          "name": "Test token issuer -- DEVELOPMENT ONLY",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": false,
+          "secret": "local-development-only-test-secret",
+          "standardFlowEnabled": false,
+          "directAccessGrantsEnabled": true,
+          "serviceAccountsEnabled": false,
+          "defaultClientScopes": [
+            "basic",
+            "acr",
+            "profile",
+            "email",
+            "roles",
+            "web-origins"
+          ],
+          "protocolMappers": [
+            {
+              "name": "gateway-audience",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-audience-mapper",
+              "consentRequired": false,
+              "config": {
+                "included.client.audience": "gateway",
+                "id.token.claim": "false",
+                "access.token.claim": "true",
+                "introspection.token.claim": "true"
+              }
+            },
+            {
+              "name": "tenant_id-claim",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-usermodel-attribute-mapper",
+              "consentRequired": false,
+              "config": {
+                "user.attribute": "tenant_id",
+                "claim.name": "tenant_id",
+                "jsonType.label": "String",
+                "id.token.claim": "true",
+                "access.token.claim": "true",
+                "introspection.token.claim": "true",
+                "userinfo.token.claim": "true"
+              }
+            },
+            {
+              "name": "side-claim",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-usermodel-attribute-mapper",
+              "consentRequired": false,
+              "config": {
+                "user.attribute": "side",
+                "claim.name": "side",
+                "jsonType.label": "String",
+                "id.token.claim": "true",
+                "access.token.claim": "true",
+                "introspection.token.claim": "true",
+                "userinfo.token.claim": "true"
+              }
+            }
+          ]
+        },
+        {
+          "clientId": "svc-identity",
+          "name": "identity service",
+          "description": "Service credentials for identity (T-9.11). Client credentials only; per-service secret.",
+          "enabled": true,
+          "publicClient": false,
+          "serviceAccountsEnabled": true,
+          "standardFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "secret": "local-development-only-identity-secret",
+          "attributes": {
+            "access.token.lifespan": "300"
+          },
+          "protocolMappers": [
+            {
+              "name": "service-id-claim",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-hardcoded-claim-mapper",
+              "consentRequired": false,
+              "config": {
+                "claim.name": "svc",
+                "claim.value": "identity",
+                "jsonType.label": "String",
+                "id.token.claim": "false",
+                "access.token.claim": "true"
+              }
+            }
+          ],
+          "protocol": "openid-connect"
+        },
+        {
+          "clientId": "svc-streaming",
+          "name": "streaming service",
+          "description": "Service credentials for streaming (T-9.11). Client credentials only; per-service secret.",
+          "enabled": true,
+          "publicClient": false,
+          "serviceAccountsEnabled": true,
+          "standardFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "secret": "local-development-only-streaming-secret",
+          "attributes": {
+            "access.token.lifespan": "300"
+          },
+          "protocolMappers": [
+            {
+              "name": "service-id-claim",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-hardcoded-claim-mapper",
+              "consentRequired": false,
+              "config": {
+                "claim.name": "svc",
+                "claim.value": "streaming",
+                "jsonType.label": "String",
+                "id.token.claim": "false",
+                "access.token.claim": "true"
+              }
+            }
+          ],
+          "protocol": "openid-connect"
+        },
+        {
+          "clientId": "svc-reporting",
+          "name": "reporting service",
+          "description": "Service credentials for reporting (T-9.11). Client credentials only; per-service secret.",
+          "enabled": true,
+          "publicClient": false,
+          "serviceAccountsEnabled": true,
+          "standardFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "secret": "local-development-only-reporting-secret",
+          "attributes": {
+            "access.token.lifespan": "300"
+          },
+          "protocolMappers": [
+            {
+              "name": "service-id-claim",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-hardcoded-claim-mapper",
+              "consentRequired": false,
+              "config": {
+                "claim.name": "svc",
+                "claim.value": "reporting",
+                "jsonType.label": "String",
+                "id.token.claim": "false",
+                "access.token.claim": "true"
+              }
+            }
+          ],
+          "protocol": "openid-connect"
+        }
+      ],
+      "users": [
+        {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "username": "platform-admin",
+          "enabled": true,
+          "emailVerified": true,
+          "email": "platform-admin@xenopslearn.test",
+          "firstName": "Platform",
+          "lastName": "Admin",
+          "attributes": {
+            "side": [
+              "PLATFORM"
+            ]
+          },
+          "credentials": [
+            {
+              "type": "password",
+              "value": "platform-admin",
+              "temporary": false
+            }
+          ],
+          "realmRoles": [
+            "platform"
+          ]
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000011",
+          "username": "acme-admin",
+          "enabled": true,
+          "emailVerified": true,
+          "email": "acme-admin@acme.test",
+          "firstName": "Ada",
+          "lastName": "Yilmaz",
+          "attributes": {
+            "tenant_id": [
+              "acme"
+            ],
+            "side": [
+              "TENANT"
+            ]
+          },
+          "credentials": [
+            {
+              "type": "password",
+              "value": "acme-admin",
+              "temporary": false
+            }
+          ],
+          "realmRoles": [
+            "tenant"
+          ]
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000012",
+          "username": "acme-learner",
+          "enabled": true,
+          "emailVerified": true,
+          "email": "acme-learner@acme.test",
+          "firstName": "Berk",
+          "lastName": "Kaya",
+          "attributes": {
+            "tenant_id": [
+              "acme"
+            ],
+            "side": [
+              "TENANT"
+            ]
+          },
+          "credentials": [
+            {
+              "type": "password",
+              "value": "acme-learner",
+              "temporary": false
+            }
+          ],
+          "realmRoles": [
+            "tenant"
+          ]
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000021",
+          "username": "globex-admin",
+          "enabled": true,
+          "emailVerified": true,
+          "email": "globex-admin@globex.test",
+          "firstName": "Ada",
+          "lastName": "Yilmaz",
+          "attributes": {
+            "tenant_id": [
+              "globex"
+            ],
+            "side": [
+              "TENANT"
+            ]
+          },
+          "credentials": [
+            {
+              "type": "password",
+              "value": "globex-admin",
+              "temporary": false
+            }
+          ],
+          "realmRoles": [
+            "tenant"
+          ]
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000022",
+          "username": "globex-learner",
+          "enabled": true,
+          "emailVerified": true,
+          "email": "globex-learner@globex.test",
+          "firstName": "Berk",
+          "lastName": "Kaya",
+          "attributes": {
+            "tenant_id": [
+              "globex"
+            ],
+            "side": [
+              "TENANT"
+            ]
+          },
+          "credentials": [
+            {
+              "type": "password",
+              "value": "globex-learner",
+              "temporary": false
+            }
+          ],
+          "realmRoles": [
+            "tenant"
+          ]
+        }
+      ],
+      "components": {
+        "org.keycloak.userprofile.UserProfileProvider": [
+          {
+            "name": "declarative-user-profile",
+            "providerId": "declarative-user-profile",
+            "subComponents": {},
+            "config": {
+              "kc.user.profile.config": [
+                "{\"attributes\": [{\"name\": \"username\", \"displayName\": \"${username}\", \"validations\": {\"length\": {\"min\": 3, \"max\": 255}, \"username-prohibited-characters\": {}, \"up-username-not-idn-homograph\": {}}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false}, {\"name\": \"email\", \"displayName\": \"${email}\", \"validations\": {\"email\": {}, \"length\": {\"max\": 255}}, \"required\": {\"roles\": [\"user\"]}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false}, {\"name\": \"firstName\", \"displayName\": \"${firstName}\", \"validations\": {\"length\": {\"max\": 255}, \"person-name-prohibited-characters\": {}}, \"required\": {\"roles\": [\"user\"]}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false}, {\"name\": \"lastName\", \"displayName\": \"${lastName}\", \"validations\": {\"length\": {\"max\": 255}, \"person-name-prohibited-characters\": {}}, \"required\": {\"roles\": [\"user\"]}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false}, {\"name\": \"tenant_id\", \"displayName\": \"Tenant\", \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\"]}, \"multivalued\": false}, {\"name\": \"side\", \"displayName\": \"Side\", \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\"]}, \"multivalued\": false}], \"unmanagedAttributePolicy\": \"ENABLED\"}"
+              ]
+            }
+          }
+        ]
+      }
+    }

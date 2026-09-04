@@ -1,0 +1,63 @@
+# xenopsbase-learn's application services.
+#
+# THE ONLY Application POINTING AT ANOTHER REPOSITORY.
+#
+# Everything else here is either this repository's own platform or an upstream
+# chart. This one reconciles a different product's services from a different
+# git history, and that is the shape the relationship is meant to have: the
+# stemcell owns the cluster, Postgres, Keycloak, Valkey and the ingress; learn
+# owns its three services and versions their manifests beside the code they
+# deploy.
+#
+# What lives HERE for learn is the platform's half and only that: its databases
+# and roles (database/learn-databases.yaml, the roles in database/cluster.yaml),
+# its realm (keycloak/learn-realm-import.yaml), its namespace and its image
+# policy. Those are decisions about this cluster, so they belong to whoever
+# operates it.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: learn
+  namespace: argocd
+  annotations:
+    # Wave 4, the same as `services`: after Postgres (2) and Keycloak (3).
+    # Each of these validates its schema against the database at startup and
+    # waits on the OIDC issuer before its context builds, so starting earlier
+    # just produces an Init wait until its dependencies arrive.
+    argocd.argoproj.io/sync-wave: "4"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mertkan-iscan/xenopsbase-learn.git
+    targetRevision: main
+    path: platform/envs/dev/services
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: learn
+  syncPolicy:
+    automated:
+      # prune: true, like `services` and unlike the database and Keycloak.
+      # These are stateless: deleting a Deployment from git should remove it,
+      # and there is nothing here whose loss is not recoverable by a sync.
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # The Namespace itself is declared in namespaces.yaml and owned by `root`,
+      # because that is the only place the policy enrolment label survives. This
+      # is here for a first sync that races it.
+      - CreateNamespace=true
+      - ServerSideApply=true
+
+  # NO HPA HERE YET, so no ignoreDifferences on replicas.
+  #
+  # `services` needs that block because an HPA and Argo's selfHeal write the
+  # same field against each other. These three run at one replica and nothing
+  # scales them, so adding the exception now would be carrying a workaround for
+  # a problem this Application does not have -- and it would silently stop Argo
+  # reconciling a replica count somebody changed by hand.
+  #
+  # It becomes necessary the moment an HPA lands beside them, and the symptom
+  # if it is forgotten is not "autoscaling is broken": it is a service that
+  # never has enough replicas while the HPA reports the right desired count.
