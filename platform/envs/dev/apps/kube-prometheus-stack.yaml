@@ -65,7 +65,21 @@ spec:
                       storage: 10Gi
 
             resources:
-              requests: {cpu: 200m, memory: 768Mi}
+              # DERIVED, not inherited (T-2.27, #341). Measured 2026-09-04 on a
+              # cluster at application floor:
+              #
+              #   working set   925Mi
+              #   request       768Mi   <- UNDER-declared by 157Mi
+              #
+              # Being over its own request is legal for a Burstable pod and is
+              # not free: T-2.28's eviction ranks victims by usage-over-request,
+              # so Prometheus was first in line to be evicted under node memory
+              # pressure -- which is precisely when the metrics are wanted.
+              #
+              # 1024Mi is the measured working set plus about 10%. The limit
+              # stays at 1536Mi: it was sized against a load run, not against
+              # idle, and nothing here measured the ceiling.
+              requests: {cpu: 200m, memory: 1024Mi}
               limits:   {memory: 1536Mi}
 
             # Discover monitors from EVERY namespace, not just this chart's own
@@ -230,7 +244,17 @@ spec:
             # at 99.8% of the limit and the kernel spent the difference on
             # reclaim, so /api/health timed out and the liveness probe killed it
             # the moment anyone opened a dashboard.
-            requests: {cpu: 50m, memory: 512Mi}
+            #
+            # DERIVED (T-2.27, #341). Measured 2026-09-04 at floor: working set
+            # 694Mi against a 512Mi request -- under-declared by 182Mi, and the
+            # second-largest thing in this namespace sitting at the front of the
+            # eviction queue for the same reason Prometheus was.
+            #
+            # 768Mi is the measured working set plus about 10%. Note the idle
+            # figure in the paragraph above (~330Mi) is the FRESH-START number;
+            # 694Mi is what it settles at once dashboards have been opened,
+            # which is the state it actually runs in.
+            requests: {cpu: 50m, memory: 768Mi}
             limits:   {memory: 1Gi}
 
           grafana.ini:

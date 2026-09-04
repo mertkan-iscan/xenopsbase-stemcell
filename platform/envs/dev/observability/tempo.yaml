@@ -225,7 +225,28 @@ spec:
           # docs/slos.md -- lowering it moves the point at which the
           # cluster-autoscaler is asked for a node.
           resources:
-            requests: {cpu: 500m, memory: 768Mi}
+            # DERIVED (T-2.27, #341). Measured 2026-09-04 at floor:
+            #
+            #   working set   348Mi
+            #   request       768Mi   <- over-provisioned by more than 2x
+            #
+            # The 768Mi above was set after the T-5.11 OOMKills described in the
+            # paragraphs above, which is why it was generous -- it was chosen to
+            # stop a crash loop, not from a measurement of steady state. This is
+            # that measurement: 448Mi is the observed working set plus about 30%,
+            # a wider margin than the other components here because Tempo's
+            # footprint moves with trace volume and dev's is currently low.
+            #
+            # The limit is unchanged at 1536Mi. It is the OOMKill boundary and
+            # was sized against load; lowering it on the strength of an idle
+            # measurement is how the T-5.11 crash loop happened in the first
+            # place.
+            #
+            # Tracing is KEPT rather than dropped, deliberately. Tempo holds real
+            # traces here (gateway spans, verified 2026-09-04), and a tracing
+            # pipeline that is not exercised in dev is one that breaks in
+            # production without warning -- the failure T-2.12 (#155) is about.
+            requests: {cpu: 500m, memory: 448Mi}
             limits: {memory: 1536Mi}
           volumeMounts:
             - {name: config, mountPath: /conf}

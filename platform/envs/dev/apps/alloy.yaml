@@ -66,7 +66,19 @@ spec:
           # trace sampling; reserving for it would book a core on every node in
           # the cluster to serve a peak that a sampling change removes.
           resources:
-            requests: {cpu: 300m, memory: 256Mi}
+            # DERIVED (T-2.27, #341). Measured 2026-09-04 at floor, per node:
+            #
+            #   110Mi   152Mi   267Mi        against a 256Mi request
+            #
+            # The spread is the point. Alloy's footprint follows what the node
+            # is running, so the busiest node exceeded the request while the
+            # quietest sat at 43% of it. Sizing on the average would leave the
+            # busiest one over -- and over-request is what T-2.28's eviction
+            # ranks on, so it would be the first agent evicted on the node whose
+            # logs are most worth having.
+            #
+            # 320Mi is the highest observed plus about 20%.
+            requests: {cpu: 300m, memory: 320Mi}
             limits:   {memory: 512Mi}
 
           # Needs the host log directory to read container stdout/stderr.
