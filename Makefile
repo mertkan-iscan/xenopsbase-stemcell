@@ -100,6 +100,9 @@ ENV         ?= dev
 # running the drill, which is what makes it outlive the cluster.
 STATE       ?= restore-state.json
 
+# T-2.27's node memory ceiling, as a percentage of PHYSICAL memory.
+THRESHOLD   ?= 75
+
 # Apply and destroy prompt for confirmation by default, which is correct for a
 # human at a terminal and essential for prod. Automation passes AUTO=1.
 #
@@ -709,6 +712,13 @@ verify-volume-attachments: ## Does Kubernetes agree with Hetzner about where vol
 	@# against and kept reporting success, so no fresh attach was ever issued.
 	@# Invisible from inside Kubernetes -- every object involved says it is fine.
 	@KUBECONFIG="$(CURDIR)/infra/terraform/cluster/kubeconfig" bash $(SCRIPTS)/check-volume-attachments.sh
+
+.PHONY: verify-node-memory
+verify-node-memory: ## Is any node above 75% of its PHYSICAL memory, at floor? (T-2.27)
+	@# Committed memory over physical memory -- not `kubectl top`, which counts
+	@# reclaimable page cache as used and divides by an allocatable that moves
+	@# whenever kubelet reservations change. The two disagreed by 30 points.
+	@KUBECONFIG="$(CURDIR)/infra/terraform/cluster/kubeconfig" bash $(SCRIPTS)/check-node-memory.sh $(THRESHOLD)
 
 .PHONY: verify-headroom
 verify-headroom: ## Can a fixed worker still place an ordinary platform pod? (T-2.29)
