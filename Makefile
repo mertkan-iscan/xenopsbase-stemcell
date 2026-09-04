@@ -753,6 +753,14 @@ verify-headroom: ## Can a fixed worker still place an ordinary platform pod? (T-
 verify-resources: ## Every workload we own declares CPU and memory requests (T-2.15)
 	@bash $(SCRIPTS)/verify-resources.sh
 
+.PHONY: verify-makefile
+verify-makefile: ## Does the Makefile parse, guard credentials, and write kubeconfig safely?
+	@# Static, and about this file. No CI job read the Makefile until this
+	@# one: the terraform workflow filters on infra/terraform/ and the
+	@# services workflow on the service trees, so a Makefile change matched
+	@# neither. #427 merged that way.
+	@bash $(SCRIPTS)/verify-makefile.sh
+
 .PHONY: secrets-verify
 secrets-verify: ## Assert every encrypted file carries every recipient .sops.yaml names
 	@bash $(SCRIPTS)/verify-secret-recipients.sh
