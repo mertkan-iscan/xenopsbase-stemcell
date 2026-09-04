@@ -44,7 +44,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Review what this pull request adds
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
@@ -74,7 +74,7 @@ jobs:
         service: [core, gateway]
 
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # The digest the cluster runs, not `:main`. A tag moves, and scanning
       # something other than what is deployed is the kind of green tick this
@@ -112,7 +112,7 @@ jobs:
 
       - name: Upload findings
         if: always()
-        uses: github/codeql-action/upload-sarif@42947a340483f03ba47bb1a039b2c519aab3df85 # v3.37.8
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: trivy-${{ matrix.service }}.sarif
           category: trivy-${{ matrix.service }}
@@ -143,7 +143,7 @@ jobs:
     outputs:
       matrix: ${{ steps.list.outputs.matrix }}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Which images does platform/ declare
         id: list
@@ -175,7 +175,7 @@ jobs:
       matrix: ${{ fromJSON(needs.platform-images.outputs.matrix) }}
 
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: What is being scanned, and how precisely
         run: |
@@ -202,7 +202,7 @@ jobs:
 
       - name: Upload findings
         if: always()
-        uses: github/codeql-action/upload-sarif@42947a340483f03ba47bb1a039b2c519aab3df85 # v3.37.8
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: trivy-platform-${{ matrix.name }}.sarif
           category: trivy-platform-${{ matrix.name }}
@@ -269,7 +269,7 @@ jobs:
         service: [core, gateway]
 
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Resolve the deployed digest
         id: digest
@@ -296,7 +296,7 @@ jobs:
       # writing release plumbing inside a security task. The SBOM exists and is
       # downloadable from the run that produced the image; wiring it to a
       # release is one line in whichever workflow creates releases.
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sbom-${{ matrix.service }}
           path: sbom-${{ matrix.service }}.cdx.json
