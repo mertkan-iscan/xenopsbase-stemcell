@@ -32,3 +32,38 @@ spec:
             # Anchored at both ends. An unanchored pattern would also match a
             # repository whose name merely CONTAINS this one.
             subjectRegExp: '^https://github\.com/mertkan-iscan/xenopsbase-stemcell/\.github/workflows/.+$'
+---
+# The same claim for xenopsbase-learn, which is a SEPARATE POLICY rather than
+# another glob on the one above (T-9.3 there, #11).
+#
+# Two policies because the identity differs, and the identity is the whole
+# point. `xenopsbase-images-are-signed` requires a Fulcio certificate naming a
+# workflow in the STEMCELL repository; learn's images are signed by a workflow
+# in learn's. Widening the glob without widening the identity would admit
+# nothing; widening both in one policy would say "signed by either pipeline,
+# for either registry path", which is weaker than what either repository can
+# claim on its own.
+#
+# As written, a learn image signed by the stemcell's pipeline is denied, and a
+# stemcell image signed by learn's is denied. That is the property worth having.
+apiVersion: policy.sigstore.dev/v1beta1
+kind: ClusterImagePolicy
+metadata:
+  name: xenopsbase-learn-images-are-signed
+spec:
+  images:
+    - glob: "ghcr.io/mertkan-iscan/xenopsbase-learn/**"
+  authorities:
+    - keyless:
+        url: https://fulcio.sigstore.dev
+        identities:
+          - issuer: https://token.actions.githubusercontent.com
+            # Anchored at both ends. An unanchored pattern would also match a
+            # repository whose name merely CONTAINS this one.
+            #
+            # Verified against a real signature before being written here: the
+            # learn pipeline's own `cosign verify` step uses this identity and
+            # this issuer, and passed on all three images at 0747e6c. The
+            # certificate subject it produced reads
+            #   https://github.com/mertkan-iscan/xenopsbase-learn/.github/workflows/ci.yml@refs/heads/main
+            subjectRegExp: '^https://github\.com/mertkan-iscan/xenopsbase-learn/\.github/workflows/.+$'

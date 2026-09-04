@@ -1,0 +1,54 @@
+# The xenopsbase-learn services' databases.
+#
+# THREE DATABASES, NOT ONE, AND NOT A SECOND CLUSTER.
+#
+# Three because learn's own rule says so: no module reads another module's
+# schema, and the enforcement it names is credentials rather than convention.
+# One database with three schemas would make that rule a review comment; three
+# databases with three roles makes it something Postgres refuses.
+#
+# Inside THIS cluster because the isolation that matters -- one service unable
+# to read or rewrite another's tables -- comes from separate roles and
+# databases, not from separate Postgres clusters. It also keeps learn's data
+# under the same WAL archive as everything else, so ADR-0002's durable-state
+# boundary gains no new exception. A second cluster would be a second backup
+# story, a second restore drill, and a second thing to forget.
+#
+# Prefixed `learn_` because this cluster already contains `core` and `keycloak`
+# and will contain more. A database called `identity` would be ambiguous the
+# first time anything else in the platform wants that word.
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: learn-identity
+  namespace: database
+spec:
+  cluster: {name: postgres}
+  name: learn_identity
+  owner: learn_identity
+  # retain, not delete. Deleting this manifest -- or mistyping a path in git --
+  # must not DROP DATABASE. Everything else here is recreated by reconciliation;
+  # a dropped database is only recovered from backup.
+  databaseReclaimPolicy: retain
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: learn-streaming
+  namespace: database
+spec:
+  cluster: {name: postgres}
+  name: learn_streaming
+  owner: learn_streaming
+  databaseReclaimPolicy: retain
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: learn-reporting
+  namespace: database
+spec:
+  cluster: {name: postgres}
+  name: learn_reporting
+  owner: learn_reporting
+  databaseReclaimPolicy: retain

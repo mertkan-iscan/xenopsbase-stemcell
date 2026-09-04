@@ -6,4 +6,5 @@ kind: Kustomization
 resources:
   - keycloak.yaml
   - realm-import.yaml
+  - learn-realm-import.yaml
   - ingress.yaml

@@ -32,6 +32,7 @@ resources:
   - apps/loki.yaml
   - apps/alloy.yaml
   - apps/services.yaml
+  - apps/learn.yaml
   - issuers/letsencrypt.yaml
 
   # Argo CD installs itself from Terraform, but its ingress is an ordinary

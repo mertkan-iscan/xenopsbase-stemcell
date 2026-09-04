@@ -203,6 +203,52 @@ spec:
         inherit: true
         connectionLimit: -1
 
+      # THE xenopsbase-learn ROLES.
+      #
+      # One role per learn service, owning one database each. That is learn's
+      # own rule arriving in the platform: no module reads another module's
+      # schema, and the enforcement it names is credentials rather than
+      # convention. Three roles is what makes it something Postgres refuses
+      # rather than something a review has to catch.
+      #
+      # None of them is superuser or createdb. Each owns its own database,
+      # which is all Flyway needs to run its migrations inside it.
+      - name: learn_identity
+        ensure: present
+        login: true
+        superuser: false
+        createdb: false
+        createrole: false
+        passwordSecret:
+          name: learn-identity-db
+        comment: "Owner of the learn_identity database. Managed by CNPG, password from SOPS."
+        inherit: true
+        connectionLimit: -1
+
+      - name: learn_streaming
+        ensure: present
+        login: true
+        superuser: false
+        createdb: false
+        createrole: false
+        passwordSecret:
+          name: learn-streaming-db
+        comment: "Owner of the learn_streaming database. Managed by CNPG, password from SOPS."
+        inherit: true
+        connectionLimit: -1
+
+      - name: learn_reporting
+        ensure: present
+        login: true
+        superuser: false
+        createdb: false
+        createrole: false
+        passwordSecret:
+          name: learn-reporting-db
+        comment: "Owner of the learn_reporting database. Managed by CNPG, password from SOPS."
+        inherit: true
+        connectionLimit: -1
+
   # RECOVERY, not initdb.
   #
   # bootstrap only runs when the Cluster is CREATED, so this is what happens on

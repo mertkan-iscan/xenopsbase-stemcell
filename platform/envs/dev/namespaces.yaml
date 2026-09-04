@@ -82,3 +82,28 @@ kind: Namespace
 metadata:
   name: cache
   labels: {app.kubernetes.io/managed-by: argocd}
+---
+# xenopsbase-learn's three services.
+#
+# Its own namespace rather than sharing `apps`, because the two products have
+# different release cadences and different Argo Applications, and `prune: true`
+# on either should never be reasoning about the other's resources.
+#
+# THE POLICY LABEL HAS TO BE HERE, on the Namespace object owned by the `root`
+# Application -- not in the learn Application's managedNamespaceMetadata. #418
+# proved that the hard way for `apps`: root reasserts its labels on every sync
+# and strips whatever another Application added, so the label appeared, lasted
+# about two minutes, and left enforcement off with nothing reporting it.
+#
+# Every image that runs in here must be covered by some policy, because
+# policy-controller denies anything matching none:
+#
+#   identity, streaming, reporting   xenopsbase-learn-images-are-signed
+#   curlimages/curl (initContainer)  third-party-images-by-digest
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: learn
+  labels:
+    app.kubernetes.io/managed-by: argocd
+    policy.sigstore.dev/include: "true"

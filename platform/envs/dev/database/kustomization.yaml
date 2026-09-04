@@ -8,6 +8,7 @@ resources:
   - cluster.yaml
   - keycloak-database.yaml
   - core-database.yaml
+  - learn-databases.yaml
   - scheduledbackup.yaml
   # A PostSync hook rather than a steady-state resource: it binds core's session
   # limits to the ROLE so they survive a pooler (ADR-0012 section 5, T-2.18).
