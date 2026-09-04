@@ -20,11 +20,16 @@ The rule: **decisions about this cluster belong to whoever operates it**; decisi
 service belong beside its code. A learn developer changing a resource request should not need a
 pull request here, and an operator changing the backup policy should not need one there.
 
-## What is NOT wired, and cannot be from a pull request
+## The secrets, and what had to be done by hand
 
-**Six secrets.** SOPS decrypts with an age private key that is deliberately not in this
-repository (ADR-0003, `docs/runbooks/secrets.md`), so these have to be created by someone holding
-it. Everything else in this change references them and will sit unready until they exist.
+**Eight files, and they exist now — for `dev`.** They were written by someone holding the age
+private key, which is deliberately not in this repository (ADR-0003, `docs/runbooks/secrets.md`),
+and that is why they could not arrive with the manifests that reference them. The tables below are
+what a *new* environment needs, and the record of what these hold.
+
+The count is eight rather than the six this file first said: the three role passwords and the
+three application-side copies, plus `learn-service-clients` and the `valkey-client` copy, both of
+which are just as necessary and neither of which is optional.
 
 Three role passwords, in the `database` namespace — CNPG reads these to create the roles named in
 `platform/envs/dev/database/cluster.yaml`:
@@ -48,8 +53,18 @@ service-to-service client secrets:
 | `secrets/learn-reporting-db-app.yaml` | `learn-reporting-db` (ns `learn`) | `username`, `password` |
 | `secrets/learn-service-clients.yaml` | `learn-service-clients` (ns `learn`) | `identity`, `streaming`, `reporting` |
 
-The `learn` namespace also needs the existing **`valkey-client`** secret copied into it — all three
-services read the cache and this cluster's Valkey requires a password.
+The `learn` namespace also needs the existing **`valkey-client`** secret copied into it
+(`secrets/learn-valkey-client.yaml`, the same password and deliberately not the server's conf
+fragment) — all three services read the cache and this cluster's Valkey requires a password.
+
+That copy is not a nicety. Without it every cache read returns NOAUTH, and learn's permission
+cache fails *permissive* when the cache is unreachable — correct for an outage, and exactly wrong
+here, because a missing password becomes a permission system that quietly stops consulting
+anything while every pod reports Ready.
+
+The three database passwords were generated at creation and exist only inside these files; the
+service-client values are learn's development ones, carried verbatim from its realm file so both
+sides agree on a first sync.
 
 Two secrets per database rather than one, because they live in different namespaces and a
 Kubernetes Secret does not cross one. That is the same shape `core-db.yaml` and `core-db-app.yaml`
@@ -86,7 +101,8 @@ The realm import carries learn's development values. **Change both together or n
 
 ## Order of operations
 
-1. Create and encrypt the six secrets, and copy `valkey-client` into `learn`.
+1. Create and encrypt the eight secrets, and copy `valkey-client` into `learn`. **Done for dev**;
+   this is the step a new environment starts at.
 2. Merge this change. Argo creates the namespace, the roles, the databases, the realm and the
    policy.
 3. Confirm the roles and databases exist before expecting a pod to start — the services validate
