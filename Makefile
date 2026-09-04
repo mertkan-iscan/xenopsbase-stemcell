@@ -340,21 +340,30 @@ edge-apply: ## Apply Cloudflare edge configuration
 #
 # Needs TF_VAR_cloudflare_api_token scoped to Zone / DNS / Edit on the mail zone.
 # That is a DIFFERENT token from the edge one, on a different account.
+#
+# These targets also carry check_creds, which the other modules get via
+# check_env. preflight is not a substitute: it verifies the Cloudflare
+# token's SCOPE, and the state still lives in R2 under the AWS_* names.
+# check_env itself does not apply here -- there is no per-environment
+# tfvars to check ENV against.
 # ------------------------------------------------------------------------------
 
 MAIL_VARS = -var-file=mail.tfvars $$(test -f mail.secrets.tfvars && echo -var-file=mail.secrets.tfvars)
 
 .PHONY: mail-dns-init
 mail-dns-init: ## terraform init for the mail DNS module
+	$(call check_creds)
 	@cd $(MAIL_DIR) && $(TF_GIT) terraform init -input=false -reconfigure -backend-config=backend.hcl -backend-config="key=$(MAIL_KEY)"
 
 .PHONY: mail-dns-plan
 mail-dns-plan: ## Plan the mail deliverability records
+	$(call check_creds)
 	$(call preflight,mail-dns)
 	@cd $(MAIL_DIR) && terraform plan -input=false $(MAIL_VARS)
 
 .PHONY: mail-dns-apply
 mail-dns-apply: ## Apply the mail deliverability records
+	$(call check_creds)
 	$(call preflight,mail-dns)
 	@cd $(MAIL_DIR) && terraform apply $(APPROVE) $(MAIL_VARS)
 
@@ -587,7 +596,23 @@ verify-exposure: ## Probe every public address and assert only intended ports an
 
 .PHONY: kubeconfig
 kubeconfig: ## Write the kubeconfig out of Terraform state (gitignored)
-	@cd $(CLUSTER_DIR) && terraform output -raw kubeconfig > kubeconfig
+	$(call check_creds)
+	@# Written through a temp file, and moved into place only once it holds
+	@# something. A plain `>` redirect truncates kubeconfig to zero bytes
+	@# BEFORE terraform runs, so a failed read -- wrong credentials, no
+	@# state, no cluster -- leaves an EMPTY file behind. kubectl treats an
+	@# empty kubeconfig as no kubeconfig and falls back to its built-in
+	@# http://localhost:8080, so the next command reports "connection
+	@# refused to localhost:8080" and reads as a dead cluster rather than a
+	@# missing file. The `test -s` covers the other route to the same
+	@# symptom: terraform exiting 0 with no such output in state.
+	@cd $(CLUSTER_DIR) && { \
+	  terraform output -raw kubeconfig > kubeconfig.tmp && test -s kubeconfig.tmp || { \
+	    rm -f kubeconfig.tmp; \
+	    echo "error: could not read a kubeconfig out of Terraform state."; \
+	    echo "       $(CLUSTER_DIR)/kubeconfig is unchanged."; \
+	    exit 1; }; \
+	  mv kubeconfig.tmp kubeconfig; }
 	@echo "wrote $(CLUSTER_DIR)/kubeconfig"
 	@echo "  export KUBECONFIG=\$$PWD/$(CLUSTER_DIR)/kubeconfig"
 
@@ -727,6 +752,14 @@ verify-headroom: ## Can a fixed worker still place an ordinary platform pod? (T-
 .PHONY: verify-resources
 verify-resources: ## Every workload we own declares CPU and memory requests (T-2.15)
 	@bash $(SCRIPTS)/verify-resources.sh
+
+.PHONY: verify-makefile
+verify-makefile: ## Does the Makefile parse, guard credentials, and write kubeconfig safely?
+	@# Static, and about this file. No CI job read the Makefile until this
+	@# one: the terraform workflow filters on infra/terraform/ and the
+	@# services workflow on the service trees, so a Makefile change matched
+	@# neither. #427 merged that way.
+	@bash $(SCRIPTS)/verify-makefile.sh
 
 .PHONY: secrets-verify
 secrets-verify: ## Assert every encrypted file carries every recipient .sops.yaml names

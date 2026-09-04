@@ -43,6 +43,7 @@ crash.*.log
 
 # --- kubernetes --------------------------------------------------------------
 kubeconfig
+kubeconfig.tmp
 kubeconfig.yaml
 *.kubeconfig
 
