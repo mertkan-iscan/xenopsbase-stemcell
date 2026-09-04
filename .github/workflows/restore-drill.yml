@@ -1,0 +1,250 @@
+name: Restore drill
+
+# A backup that has never been restored is not a backup (T-7.3, #55).
+#
+# Builds dev from nothing, lets Postgres recover from the WAL archive, asserts
+# that a document written BEFORE the rebuild is still downloadable BY ITS OWNER,
+# and destroys it again.
+#
+# WHY THE ASSERTION IS NOT "THE DATABASE CAME BACK"
+#
+# Ownership spans two systems. A document's owner is the Keycloak `sub`, which
+# lives in Keycloak's Postgres schema; the row lives in a different database and
+# the bytes live in object storage. A drill that restores Postgres, counts rows
+# and never signs in would report success against exactly the failure T-7.8
+# (#147) is about: every row present, every object present, and nothing
+# reachable, because the users came back with new subs.
+#
+# So the check signs in through Keycloak and pulls bytes through a presigned
+# redirect. `infra/drill/restore-anchor.json` says what must still be true.
+#
+# WHY IT RUNS IN dev'S OVERNIGHT WINDOW RATHER THAN ITS OWN ENVIRONMENT
+#
+# At EUR 0.0408/hour a drill costs about three cents, so money is not the
+# constraint -- colliding with somebody working in dev is. dev is torn down by
+# hand most nights, so the window exists already, and a dedicated environment
+# would need its own tfvars, buckets and secrets (T-6.6, #194) before the drill
+# could start.
+#
+# IT REFUSES TO RUN IF A CLUSTER EXISTS. That is the whole safety property: this
+# workflow ends in `make down`, and running it against a cluster somebody left up
+# on purpose would destroy their work. The guard is the same one
+# load-regression.yml uses, with the opposite sense -- that one skips when there
+# is NO cluster, this one skips when there IS.
+#
+# 03:00 UTC: 06:00 Europe/Istanbul, comfortably after the evening teardown and
+# before anybody starts. The cost check (T-8.4) reports at 06:00 UTC on a
+# cluster still up, so the two do not fight over the same window.
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Run even though a cluster exists. It WILL be destroyed.'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  ENVIRONMENT: dev
+
+concurrency:
+  # Never two of these at once. Each ends in a teardown, and two overlapping
+  # runs would have one destroying the cluster the other is still asserting
+  # against.
+  group: restore-drill
+  cancel-in-progress: false
+
+jobs:
+  drill:
+    name: rebuild, restore, verify, destroy
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # THE GUARD. Before anything is built and before the runner joins
+      # anything: if a cluster exists, somebody is using it, and this workflow
+      # ends in `make down`.
+      - name: Is dev free?
+        id: free
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          count="$(curl -sS -H "Authorization: Bearer ${HCLOUD_TOKEN}" \
+            'https://api.hetzner.cloud/v1/servers?per_page=1' \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["meta"]["pagination"]["total_entries"])')"
+          echo "servers=${count}" >> "$GITHUB_OUTPUT"
+
+          if [ "${count}" -eq 0 ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "dev is empty — drilling."
+          elif [ "${FORCE}" = "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::${count} server(s) running and force was set. They will be destroyed."
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${count} server(s) already running, so dev is in use. Skipping rather than destroying somebody's cluster."
+          fi
+
+      # THE CREDENTIAL THIS CANNOT RUN WITHOUT, CHECKED BEFORE BUILDING ANYTHING.
+      #
+      # `make up` passes TF_VAR_sops_age_key to the cluster module, which writes
+      # it to the control plane so Argo can decrypt the platform's SOPS secrets.
+      # Without it the servers build, the platform never decrypts, and
+      # wait-for-stack times out after 20 minutes having billed for a cluster
+      # that was never going to work.
+      #
+      # There is no such repository secret today (T-7.3, #55). Adding one is a
+      # deliberate security decision -- it is the key that decrypts every secret
+      # in this repository -- so this SKIPS AND SAYS SO rather than failing
+      # nightly or, worse, half-building.
+      - name: Is the platform decryption key available?
+        id: creds
+        if: steps.free.outputs.run == 'true'
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+        run: |
+          if [ -z "${SOPS_AGE_KEY}" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::SOPS_AGE_KEY is not configured, so the platform could not decrypt its secrets. Skipping rather than billing for a cluster that cannot converge. See #55."
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        if: steps.creds.outputs.run == 'true'
+        with:
+          terraform_version: 1.14.8
+
+      - name: Join the tailnet
+        if: steps.creds.outputs.run == 'true'
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          hostname: gh-restoredrill-${{ github.run_id }}
+
+      # THE RESTORE ITSELF IS NOT A STEP. Postgres bootstraps by `recovery` from
+      # the WAL archive rather than initdb (platform/envs/dev/database), so
+      # building the cluster IS the restore. There is nothing to invoke, and that
+      # is the property being tested: a rebuild restores without anybody
+      # remembering to ask it to.
+      - name: Build dev from nothing
+        id: build
+        if: steps.creds.outputs.run == 'true'
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          # The cluster module reads TF_VAR_sops_age_key, not SOPS_AGE_KEY --
+          # variables.tf is explicit that it arrives this way and never from a
+          # file or a tfvars.
+          TF_VAR_sops_age_key: ${{ secrets.SOPS_AGE_KEY }}
+          TF_VAR_hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          TF_VAR_tailscale_auth_key: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          TF_VAR_firewall_source_cidrs: ${{ secrets.FIREWALL_SOURCE_CIDRS }}
+          TF_VAR_hetzner_s3_access_key: ${{ secrets.HETZNER_S3_ACCESS_KEY }}
+          TF_VAR_hetzner_s3_secret_key: ${{ secrets.HETZNER_S3_SECRET_KEY }}
+        run: |
+          echo "started=$(date -u +%s)" >> "$GITHUB_OUTPUT"
+          make up ENV="${ENVIRONMENT}" AUTO=1
+          echo "built=$(date -u +%s)" >> "$GITHUB_OUTPUT"
+
+      # THE ASSERTION. Ownership and bytes, from outside, as the owning user.
+      - name: A document written before the rebuild is still downloadable by its owner
+        id: verify
+        if: steps.creds.outputs.run == 'true'
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          # Passed explicitly: the script falls back to `terraform output` from
+          # the edge module, which a runner has not initialised.
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          bash infra/scripts/restore-verify.sh verify "${ENVIRONMENT}" infra/drill/restore-anchor.json
+          echo "verified=$(date -u +%s)" >> "$GITHUB_OUTPUT"
+
+      # The application, end to end, on the restored data. The assertion above
+      # proves the restore; this proves the thing is usable.
+      - name: Smoke
+        if: steps.creds.outputs.run == 'true'
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: bash infra/scripts/smoke.sh "${ENVIRONMENT}"
+
+      # RTO, as a number rather than an impression.
+      - name: Record the timings
+        id: timings
+        if: always() && steps.creds.outputs.run == 'true'
+        run: |
+          started="${{ steps.build.outputs.started }}"
+          built="${{ steps.build.outputs.built }}"
+          verified="${{ steps.verify.outputs.verified }}"
+          now="$(date -u +%s)"
+
+          mkdir -p drill-results
+          python3 - "$started" "${built:-0}" "${verified:-0}" "$now" <<'PY' | tee "drill-results/restore-drill-${{ github.run_id }}.json"
+          import json, sys, datetime
+          started, built, verified, now = (int(x) for x in sys.argv[1:5])
+          out = {
+              "run_id": "${{ github.run_id }}",
+              "at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              "commit": "${{ github.sha }}"[:7],
+              "build_seconds": (built - started) if built else None,
+              "verify_seconds": (verified - built) if (verified and built) else None,
+              "total_seconds": now - started,
+              "outcome": "${{ job.status }}",
+          }
+          print(json.dumps(out, indent=2))
+          PY
+
+      # ALWAYS, and this is the step that must not be skipped. A drill that
+      # leaves a cluster running turns a three-cent check into a billed day, and
+      # the next night's run would then skip because "dev is in use".
+      #
+      # `if: always()` covers a failed build, a failed assertion, and a cancelled
+      # run. It does NOT cover the runner dying, which is why the cost check
+      # (T-8.4) reporting at 06:00 is the backstop rather than a duplicate.
+      - name: Destroy
+        if: always() && steps.creds.outputs.run == 'true'
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          TF_VAR_hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          TF_VAR_sops_age_key: ${{ secrets.SOPS_AGE_KEY }}
+          TF_VAR_tailscale_auth_key: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          TF_VAR_firewall_source_cidrs: ${{ secrets.FIREWALL_SOURCE_CIDRS }}
+          TF_VAR_hetzner_s3_access_key: ${{ secrets.HETZNER_S3_ACCESS_KEY }}
+          TF_VAR_hetzner_s3_secret_key: ${{ secrets.HETZNER_S3_SECRET_KEY }}
+        run: make down ENV="${ENVIRONMENT}" AUTO=1
+
+      # Prove the teardown worked rather than assuming it. A leaked volume or
+      # load balancer is billed indefinitely and is invisible until somebody
+      # looks at an invoice.
+      - name: Nothing left behind
+        if: always() && steps.creds.outputs.run == 'true'
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: bash infra/scripts/verify-teardown.sh "${ENVIRONMENT}"
+
+      # THE TREND. Same reasoning as T-5.10 (#207): Prometheus cannot hold this,
+      # because its storage is a PVC inside the cluster this job destroys.
+      # Artifacts outlive it, which is the property that matters.
+      - name: Keep the numbers
+        if: always() && steps.creds.outputs.run == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: restore-drill-${{ github.run_id }}
+          path: drill-results/
+          retention-days: 90
+          if-no-files-found: warn

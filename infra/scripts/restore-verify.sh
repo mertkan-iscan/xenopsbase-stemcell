@@ -243,7 +243,21 @@ if sub_changed:
         "that no longer exists (ADR-0010, #147)." % (before["sub"], sub)
     )
 
-if int(total) != int(before["total"]):
+# `total` is OPTIONAL, and its absence is how a caller says which claim it is
+# making.
+#
+# A record/verify pair around one rebuild expects the count to be identical, and
+# a change there is a real failure. The nightly drill (T-7.3) cannot make that
+# claim: it compares against a fixed anchor, and the document set legitimately
+# moves between runs -- every smoke run creates one and deletes it. Asserting the
+# count there would fail nightly for a reason that has nothing to do with restore.
+#
+# So the anchor file omits it, and what stays asserted is the part T-7.8 (#147)
+# is actually about: the OWNER is the same person, and their oldest document
+# still returns the same bytes.
+if before.get("total") is None:
+    print("  (no expected count in the anchor; asserting ownership and bytes only)")
+elif int(total) != int(before["total"]):
     failures.append("document count %s -> %s" % (before["total"], total))
 
 want = before["document"]
@@ -251,9 +265,11 @@ if sha != want["sha256"]:
     failures.append("document %s bytes differ: sha256 %s -> %s" % (want["id"], want["sha256"][:16], sha[:16]))
 
 # Not a failure on its own, but the thing that makes the result meaningful.
-print("  recorded %s" % before["recorded_at"])
+# Absent in an anchor, which describes a durable expectation rather than a
+# moment; present in a record/verify snapshot.
+print("  recorded %s" % before.get("recorded_at", "(anchor - no timestamp)"))
 print("  owner    %s (%s)" % (before["username"], (before.get("sub") or "?")[:8]))
-print("  expected %s document(s); oldest %s created %s" % (before["total"], want["id"], want.get("created_at")))
+print("  expected %s; oldest %s created %s" % (("%s document(s)" % before["total"]) if before.get("total") is not None else "any number of documents", want["id"], want.get("created_at")))
 print("")
 
 if failures:
@@ -268,7 +284,11 @@ if failures:
         print("  belong to a user who cannot sign in (#147).")
     sys.exit(1)
 
-print("  PASSED - the owner signed in, sees the same %s document(s), and the oldest" % before["total"])
-print("           one still returns byte-identical content.")
+if before.get("total") is None:
+    print("  PASSED - the owner signed in and their oldest document still returns")
+    print("           byte-identical content, under the same sub.")
+else:
+    print("  PASSED - the owner signed in, sees the same %s document(s), and the oldest" % before["total"])
+    print("           one still returns byte-identical content.")
 sys.exit(0)
 PY

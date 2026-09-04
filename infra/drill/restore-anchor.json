@@ -1,0 +1,12 @@
+{
+  "_comment": "A deliberately chosen durable document, not a snapshot. See README.md beside this file.",
+  "username": "smoke",
+  "sub": "af70f9df-8441-4259-9d56-ebb6d1868ac4",
+  "document": {
+    "id": 2,
+    "filename": "probe.txt",
+    "created_at": "2026-08-21T14:51:15.202180Z",
+    "sha256": "626cf1d17bd9d9ed4642a5836f8ea209c25a383bd93c0eaa3a871f7c3bc692b5",
+    "bytes": 35
+  }
+}
