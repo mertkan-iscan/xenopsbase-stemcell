@@ -50,6 +50,10 @@ permissions:
 
 env:
   ENVIRONMENT: dev
+  # Kept identical to cluster-lifecycle.yml's pin, which is the other workflow
+  # that tears a cluster down. Bump both together. If the download 404s the
+  # install step fails loudly, which is the point: see the step's comment.
+  HCLOUD_VERSION: '1.51.0'
 
 concurrency:
   # Never two of these at once. Each ends in a teardown, and two overlapping
@@ -121,6 +125,24 @@ jobs:
         if: steps.creds.outputs.run == 'true'
         with:
           terraform_version: 1.14.8
+
+      # THE BINARY THE TEARDOWN STEPS ARE MADE OF. Not on the ubuntu-latest
+      # image, and nothing here installed it, so `make down`'s two sweeps skipped
+      # and its gate counted zero for every resource class -- a nightly drill
+      # whose entire justification is proving the teardown left nothing billing,
+      # asserting that from a runner that could not call Hetzner at all.
+      #
+      # Installed before the build rather than before the destroy: the destroy
+      # runs `if: always()`, including after a failed build, and it is the run
+      # that failed halfway that is most likely to leave something behind.
+      - name: Install the hcloud CLI
+        if: steps.creds.outputs.run == 'true'
+        run: |
+          url="https://github.com/hetznercloud/cli/releases/download/v${HCLOUD_VERSION}/hcloud-linux-amd64.tar.gz"
+          curl -fsSL "$url" -o /tmp/hcloud.tar.gz
+          tar -xzf /tmp/hcloud.tar.gz -C /tmp hcloud
+          sudo install -m 0755 /tmp/hcloud /usr/local/bin/hcloud
+          hcloud version
 
       - name: Join the tailnet
         if: steps.creds.outputs.run == 'true'
@@ -235,6 +257,13 @@ jobs:
         if: always() && steps.creds.outputs.run == 'true'
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          # The other half of what this script asserts is the durable one: the
+          # three buckets and their lifecycle rules, read with the Hetzner S3
+          # keys. Without them it exits 2 at its credential check having tested
+          # neither half -- so the step that proves the teardown was failing for
+          # want of a variable, one line above where it needed it.
+          TF_VAR_hetzner_s3_access_key: ${{ secrets.HETZNER_S3_ACCESS_KEY }}
+          TF_VAR_hetzner_s3_secret_key: ${{ secrets.HETZNER_S3_SECRET_KEY }}
         run: bash infra/scripts/verify-teardown.sh "${ENVIRONMENT}"
 
       # THE TREND. Same reasoning as T-5.10 (#207): Prometheus cannot hold this,

@@ -31,7 +31,7 @@ slowest single step in a genuinely cold start.
 |---|---|
 | Terraform ≥ 1.10 | Everything |
 | Packer **exactly 1.16.0** | Building the OS snapshot, once per project |
-| hcloud CLI | Verifying the snapshot exists |
+| hcloud CLI | Verifying the snapshot exists. Also **required** by `make down`: without it the sweeps and the teardown gate refuse to run rather than report a clean teardown they could not see |
 | kubectl | Talking to the cluster afterwards |
 | An SSH key pair | Node access. `ssh-keygen -t ed25519` if you have none |
 

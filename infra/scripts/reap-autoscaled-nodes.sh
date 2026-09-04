@@ -46,13 +46,32 @@ CLUSTER_DIR="$ROOT/infra/terraform/cluster"
 CLUSTER="${CLUSTER_NAME:-xenopsbase}-${ENVIRONMENT}"
 NODE_GROUP="${CLUSTER}-autoscaled"
 
+# THESE USED TO exit 0, AND THAT IS HOW THE GATE WENT BLIND.
+#
+# A skip here is announced on stderr and then buried under ten minutes of
+# terraform output, and the only thing downstream that would have caught it --
+# verify-teardown.sh -- was counting zeros for the same missing binary. A
+# skipped sweep followed by a gate that cannot see is a teardown that reports
+# success having done neither.
+#
+# The objection to failing is that a teardown gets blocked when there was
+# probably nothing to reap. It does not survive: verify-teardown.sh now exits 2
+# without this binary, and has always exited 2 without this token, so `make
+# down` cannot reach a clean exit either way. The choice is only whether it
+# stops here, before the destroy, or ten minutes later after one. Here is
+# cheaper and the message is about the actual cause.
+#
+# `make down` is the only caller, and it needs both of these for the destroy
+# itself, not merely for this sweep.
 command -v hcloud >/dev/null 2>&1 || {
-  echo "  hcloud CLI not found — cannot reap autoscaled nodes." >&2
-  exit 0
+  echo "  error: hcloud CLI not found — cannot reap autoscaled nodes." >&2
+  echo "         They hold the private network: without them removed the destroy" >&2
+  echo "         does not fail, it hangs on a subnet deletion (#294)." >&2
+  exit 1
 }
 [ -n "${HCLOUD_TOKEN:-}" ] || {
-  echo "  HCLOUD_TOKEN is not set — skipping the autoscaled-node sweep." >&2
-  exit 0
+  echo "  error: HCLOUD_TOKEN is not set — cannot reap autoscaled nodes." >&2
+  exit 1
 }
 
 # ---------------------------------------------------------------------------
@@ -82,7 +101,13 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-servers="$(hcloud server list -o noheader -o columns=id,name -l "hcloud/node-group=${NODE_GROUP}" 2>/dev/null)"
+# A failed call and an empty list look identical once stderr is discarded, and
+# reading the first as the second is precisely how a node survives to hold the
+# subnet the destroy then waits nine minutes on.
+servers="$(hcloud server list -o noheader -o columns=id,name -l "hcloud/node-group=${NODE_GROUP}" 2>&1)" || {
+  echo "  error: \`hcloud server list\` failed, so nothing was reaped: ${servers}" >&2
+  exit 1
+}
 
 if [ -z "$servers" ]; then
   echo "  no autoscaled nodes to reap (${NODE_GROUP})."
