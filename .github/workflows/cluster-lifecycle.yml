@@ -131,7 +131,7 @@ jobs:
       ACTION: ${{ inputs.action || 'down' }}
 
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # An environment protection rule stops an unapproved prod run; it does not
       # stop the wrong entry being picked from a dropdown by someone who meant
@@ -212,7 +212,7 @@ jobs:
           fi
           exit "${missing}"
 
-      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         if: steps.state.outputs.run == 'true'
         with:
           terraform_version: ${{ env.TF_VERSION }}
