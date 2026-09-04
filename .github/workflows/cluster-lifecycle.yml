@@ -1,0 +1,412 @@
+name: Cluster lifecycle
+
+# WHY THIS EXISTS
+#
+# `make up` and `make down` are the two commands here that take twenty minutes,
+# cannot be interrupted, and until now ran only on a developer's machine. So the
+# machine had to stay awake for the whole of a teardown whose entire purpose is
+# to stop paying for something nobody is using. ADR-0002's near-zero-when-idle
+# promise was, in practice, conditional on somebody keeping a laptop open at
+# bedtime.
+#
+# Nothing about either command is local. State lives in R2 (ADR-0005), the
+# cluster is reached over the tailnet, and every credential is already a
+# repository secret. The only thing missing was somewhere else to run them.
+#
+# THIS IS NOT NEW PLUMBING. The restore drill (T-7.3) has invoked `make up` and
+# `make down` on a runner since it was written. This exposes the same two
+# commands on their own, without the destructive rebuild-and-assert around them.
+#
+# What that workflow gets for free and a standalone lifecycle button does not:
+#
+#   the SSH key files   cluster/main.tf:433-434 read both through
+#                       file(pathexpand(...)) at the top level, so they are
+#                       evaluated on plan, apply AND destroy. A runner has
+#                       neither, and dev.tfvars names ~/.ssh/xenopsbase_ed25519.
+#                       See "Provide the SSH keys".
+#
+#   terraform init      `make down` does not init. cluster-destroy assumes the
+#                       .terraform directory the developer's last `make up`
+#                       left behind; a fresh checkout has none, and without it
+#                       both `terraform destroy` and the `terraform output`
+#                       inside release-cluster-volumes.sh fail -- the second of
+#                       those by printing "no kubeconfig in Terraform state"
+#                       and skipping the volume release, which reads as nothing
+#                       to do rather than as an uninitialised backend.
+#
+#   the kubeconfig      flush-wal.sh looks for cluster/kubeconfig and treats its
+#                       absence as "cluster already gone, nothing to flush". On
+#                       a live cluster that silently accepts exactly the
+#                       five-minute WAL loss T-7.2 exists to prevent.
+#
+#   the hcloud CLI      not on the runner image. Both reap scripts check for it
+#                       and skip, and verify-teardown.sh -- the gate that proves
+#                       nothing is still billing -- runs under `set -uo
+#                       pipefail` with no such check, so count_hcloud() reports
+#                       zero for every resource class and the teardown PASSES
+#                       without having looked. A false clean is worse than a
+#                       failure here, because the whole point of the gate is
+#                       that somebody stops checking the invoice by hand.
+#
+# The drill escapes the middle two because its own `make up` runs first in the
+# same job, leaving both behind.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'up = build and wait until serving. down = destroy every billable resource.'
+        required: true
+        type: choice
+        options: [up, down]
+      environment:
+        description: 'Environment'
+        required: true
+        default: dev
+        type: choice
+        options: [dev, staging, prod]
+      confirm:
+        description: 'For staging and prod only: type the environment name to confirm.'
+        required: false
+        type: string
+
+  # THE POINT OF THE WHOLE FILE: dev tears itself down whether or not anybody
+  # remembers. Leaving it up overnight costs a billed day AND makes the next
+  # night's restore drill skip itself -- its guard reads a running cluster as
+  # "dev is in use", so one forgotten teardown silently cancels the disaster
+  # recovery test as well.
+  #
+  # 01:00 UTC, chosen around what is already scheduled rather than picked: the
+  # load baseline runs at 17:00, the restore drill at 03:00, the state backup at
+  # 03:17 and the cost report at 06:00. This has to land before the drill so the
+  # drill finds dev empty, and after the load run so it does not destroy the
+  # cluster being measured.
+  schedule:
+    - cron: '0 1 * * *'
+
+permissions:
+  contents: read
+
+env:
+  TF_VERSION: '1.14.8'
+  # The one version in here that is not copied from something already in this
+  # repository, because nothing in it installs this CLI yet. If the download
+  # 404s, bump it -- the install step below fails loudly rather than letting a
+  # missing binary reach verify-teardown.sh, for the reason in the header.
+  HCLOUD_VERSION: '1.51.0'
+  # Same override every other Terraform path here carries, so a CI invocation is
+  # identical to a local one rather than subtly different.
+  GIT_CONFIG_COUNT: '1'
+  GIT_CONFIG_KEY_0: core.autocrlf
+  GIT_CONFIG_VALUE_0: 'false'
+
+concurrency:
+  # Per environment, and never cancelled. A half-finished apply or destroy is
+  # the one state this repository has no automated recovery for, so a second
+  # request waits rather than interrupting the first.
+  #
+  # NOTE: restore-drill.yml uses the group `restore-drill`, so it does NOT
+  # serialise against this. A `down` dispatched at 03:10 can still land on the
+  # cluster the drill is mid-rebuild on. Pointing both at this group would fix
+  # that, and is a change to that workflow rather than to this one.
+  group: cluster-lifecycle-${{ inputs.environment || 'dev' }}
+  cancel-in-progress: false
+
+jobs:
+  lifecycle:
+    name: ${{ inputs.action || 'down' }} (${{ inputs.environment || 'dev' }})
+    runs-on: ubuntu-latest
+    # The GitHub Environment, not just a label: it is what carries per-
+    # environment secrets and, for prod, the approval gate. Same mechanism
+    # terraform.yml's apply job uses.
+    environment: ${{ inputs.environment || 'dev' }}
+    timeout-minutes: 90
+
+    env:
+      # A scheduled run has no inputs. It is always a dev teardown -- an
+      # unattended `up` would build a cluster nobody asked for and bill for it
+      # until somebody noticed, and an unattended prod anything is not a thing
+      # this file should be able to do.
+      ENVIRONMENT: ${{ inputs.environment || 'dev' }}
+      ACTION: ${{ inputs.action || 'down' }}
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # An environment protection rule stops an unapproved prod run; it does not
+      # stop the wrong entry being picked from a dropdown by someone who meant
+      # dev. Typing the name is the cheap half of that, and it is checked before
+      # anything is installed or joined.
+      - name: Confirm a non-dev target was meant
+        if: env.ENVIRONMENT != 'dev'
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "${CONFIRM}" != "${ENVIRONMENT}" ]; then
+            echo "::error::This run targets ${ENVIRONMENT}. Re-dispatch with confirm=${ENVIRONMENT} to proceed."
+            exit 1
+          fi
+
+      # WHETHER THERE IS ANYTHING TO DO, ASKED OF HETZNER RATHER THAN ASSUMED.
+      #
+      # The scheduled teardown runs every night and dev is empty most nights, so
+      # the common case is nothing to destroy. Skipping it keeps a red run
+      # meaningful: a failure here should mean a teardown that did not work, not
+      # a destroy against an empty project.
+      #
+      # `up` is deliberately NOT skipped when servers exist. terraform apply is
+      # idempotent and converging a partly-built cluster is a legitimate reason
+      # to run this -- `make up` retries its own apply for exactly that case.
+      - name: How much is running?
+        id: state
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: |
+          count="$(curl -sS -H "Authorization: Bearer ${HCLOUD_TOKEN}" \
+            'https://api.hetzner.cloud/v1/servers?per_page=1' \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["meta"]["pagination"]["total_entries"])')"
+          echo "servers=${count}" >> "$GITHUB_OUTPUT"
+
+          if [ "${ACTION}" = "down" ] && [ "${count}" -eq 0 ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No servers in the project, so there is nothing to tear down. This is the normal state between working sessions (ADR-0002)."
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "${count} server(s) currently running."
+          fi
+
+      # THE CREDENTIALS FOR AN `up`, CHECKED BEFORE ANYTHING IS BUILT.
+      #
+      # Both are absent from CI today, and both are absent on purpose:
+      #
+      #   SSH_PRIVATE_KEY  kube-hetzner provisions the control plane over SSH,
+      #                    so a real apply needs the key that grants root on
+      #                    every node. terraform.yml deliberately puts only a
+      #                    throwaway in CI and keeps its plans honest with the
+      #                    real PUBLIC half.
+      #   SOPS_AGE_KEY     decrypts every secret in this repository. Without it
+      #                    the servers build, Argo never decrypts, and
+      #                    wait-for-stack times out after twenty minutes having
+      #                    billed for a cluster that was never going to work
+      #                    (#55).
+      #
+      # Adding either is a security decision, not plumbing, so this FAILS and
+      # says which one is missing. A skip would be worse: someone would dispatch
+      # `up`, see green, and find no cluster.
+      #
+      # `down` needs neither -- see "Provide the SSH keys".
+      - name: Are the provisioning credentials available?
+        if: steps.state.outputs.run == 'true' && env.ACTION == 'up'
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          missing=0
+          if [ -z "${SSH_PRIVATE_KEY}" ]; then
+            echo "::error::SSH_PRIVATE_KEY is not configured. kube-hetzner provisions the control plane over SSH, so a build cannot run from a runner without it. It is the key that grants root on every node -- adding it to CI is a deliberate decision. Until then, run 'make up ENV=${ENVIRONMENT}' locally; 'down' from here works without it."
+            missing=1
+          fi
+          if [ -z "${SOPS_AGE_KEY}" ]; then
+            echo "::error::SOPS_AGE_KEY is not configured, so the platform could not decrypt its secrets and the cluster would never converge. See #55."
+            missing=1
+          fi
+          exit "${missing}"
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        if: steps.state.outputs.run == 'true'
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          # Every command below is invoked through make and its output is read
+          # by scripts. The wrapper rewrites both.
+          terraform_wrapper: false
+
+      # Required, not optional, and verified rather than hoped for. Read the
+      # hcloud paragraph in the header: a teardown without this binary reports
+      # success over resources that are still billing.
+      - name: Install the hcloud CLI
+        if: steps.state.outputs.run == 'true'
+        run: |
+          url="https://github.com/hetznercloud/cli/releases/download/v${HCLOUD_VERSION}/hcloud-linux-amd64.tar.gz"
+          curl -fsSL "$url" -o /tmp/hcloud.tar.gz
+          tar -xzf /tmp/hcloud.tar.gz -C /tmp hcloud
+          sudo install -m 0755 /tmp/hcloud /usr/local/bin/hcloud
+          hcloud version
+
+      # A REAL PUBLIC KEY AND A THROWAWAY PRIVATE ONE, at the paths the tfvars
+      # name -- cluster/main.tf:433-434 resolve them with file(pathexpand(...)),
+      # which every operation evaluates, destroy included.
+      #
+      # This is terraform.yml's arrangement for the same reason: the public key
+      # becomes an hcloud_ssh_key resource, so a different value plans a
+      # replacement that does not match reality, while the private key is only
+      # ever used by creation-time provisioners. A destroy runs none, so a
+      # throwaway satisfies the variable and grants access to nothing.
+      #
+      # For `up` the real private key is required and comes from the secret the
+      # step above insists on. Written with printf rather than echo so a
+      # multi-line PEM survives, and never left at 0644.
+      - name: Provide the SSH keys
+        if: steps.state.outputs.run == 'true'
+        env:
+          SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          if [ "${ACTION}" = "up" ]; then
+            printf '%s\n' "${SSH_PRIVATE_KEY}" > ~/.ssh/xenopsbase_ed25519
+          else
+            ssh-keygen -t ed25519 -N '' -C 'ci-throwaway-never-authorised' \
+              -f ~/.ssh/xenopsbase_ed25519 >/dev/null
+          fi
+          # After ssh-keygen, deliberately: it writes its own .pub alongside the
+          # key, and the value terraform must see is the REAL one.
+          printf '%s\n' "${SSH_PUBLIC_KEY}" > ~/.ssh/xenopsbase_ed25519.pub
+          chmod 600 ~/.ssh/xenopsbase_ed25519
+          chmod 644 ~/.ssh/xenopsbase_ed25519.pub
+
+      # backend.hcl is gitignored -- only backend.hcl.example is tracked -- so
+      # every CI path writes it. The state KEY is not written here: the Makefile
+      # derives it from ENV and passes -reconfigure on every init, which is the
+      # property that stops one environment's variables being applied onto
+      # another's state (T-1.4).
+      - name: Write the backend config
+        if: steps.state.outputs.run == 'true'
+        working-directory: infra/terraform/cluster
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          cat > backend.hcl <<EOF
+          bucket = "xenopsbase-tfstate"
+          region = "auto"
+          endpoints = { s3 = "${R2_ENDPOINT}" }
+          EOF
+
+      # Needed by both halves, for different reasons. `up` ends in
+      # wait-for-stack.sh, which polls the API server; `down` begins with
+      # verify-backup.sh and flush-wal.sh, which read the live database. Under
+      # node_transport_mode = tailscale there is no other route in.
+      - name: Join the tailnet
+        if: steps.state.outputs.run == 'true'
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          # The action builds its own `tailscale up`, so this is its input and
+          # not `args: --hostname=...`. Untagged, matching the node key from
+          # T-1.17: advertising tag:ci with it fails the join outright.
+          hostname: gh-lifecycle-${{ github.run_id }}
+
+      - name: Build the stack
+        id: up
+        if: steps.state.outputs.run == 'true' && env.ACTION == 'up'
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          # The cluster module reads TF_VAR_sops_age_key, not SOPS_AGE_KEY --
+          # variables.tf is explicit that it arrives this way and never from a
+          # file or a tfvars.
+          TF_VAR_sops_age_key: ${{ secrets.SOPS_AGE_KEY }}
+          TF_VAR_hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          TF_VAR_tailscale_auth_key: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          TF_VAR_firewall_source_cidrs: ${{ secrets.FIREWALL_SOURCE_CIDRS }}
+          TF_VAR_hetzner_s3_access_key: ${{ secrets.HETZNER_S3_ACCESS_KEY }}
+          TF_VAR_hetzner_s3_secret_key: ${{ secrets.HETZNER_S3_SECRET_KEY }}
+        run: |
+          # AUTO=1, not -auto-approve by hand: it is what the Makefile turns into
+          # both the approval and -input=false, and combining those wrongly fails
+          # with "error asking for approval: EOF" instead of asking.
+          #
+          # Deliberately the whole target rather than cluster-apply. `up` is
+          # init, an apply retried three times through Hetzner's 5xx, the
+          # kubeconfig, and wait-for-stack.sh -- and it is that last step that
+          # separates applied from serving.
+          make up ENV="${ENVIRONMENT}" AUTO=1
+
+      # THE TWO THINGS `make down` ASSUMES A DEVELOPER'S MACHINE ALREADY HAS.
+      #
+      # cluster-destroy does no init and never writes the kubeconfig, because
+      # locally the last `make up` left both. Skipping this does not fail
+      # honestly: terraform destroy stops on an uninitialised backend, and
+      # before that release-cluster-volumes.sh reports "no kubeconfig in
+      # Terraform state -- nothing to clean up" and flush-wal.sh reports
+      # "cluster already gone, nothing to flush", both of which are how those
+      # scripts say a teardown has nothing left to do.
+      - name: Initialise the backend and fetch the kubeconfig
+        if: steps.state.outputs.run == 'true' && env.ACTION == 'down'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          TF_VAR_hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          TF_VAR_tailscale_auth_key: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          TF_VAR_firewall_source_cidrs: ${{ secrets.FIREWALL_SOURCE_CIDRS }}
+          TF_VAR_hetzner_s3_access_key: ${{ secrets.HETZNER_S3_ACCESS_KEY }}
+          TF_VAR_hetzner_s3_secret_key: ${{ secrets.HETZNER_S3_SECRET_KEY }}
+        run: |
+          make cluster-init ENV="${ENVIRONMENT}"
+          make kubeconfig ENV="${ENVIRONMENT}"
+          chmod 600 infra/terraform/cluster/kubeconfig
+
+      - name: Destroy every billable resource
+        id: down
+        if: steps.state.outputs.run == 'true' && env.ACTION == 'down'
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          TF_VAR_hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          TF_VAR_tailscale_auth_key: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          TF_VAR_firewall_source_cidrs: ${{ secrets.FIREWALL_SOURCE_CIDRS }}
+          TF_VAR_hetzner_s3_access_key: ${{ secrets.HETZNER_S3_ACCESS_KEY }}
+          TF_VAR_hetzner_s3_secret_key: ${{ secrets.HETZNER_S3_SECRET_KEY }}
+        run: |
+          # SKIP_BACKUP_CHECK is deliberately NOT set, including on the nightly.
+          # verify-backup.sh reads the bucket and refuses a teardown it cannot
+          # prove is recoverable, and that refusal is the whole reason the check
+          # sits in front of the destroy. An unattended run is exactly when
+          # nobody is watching: a failed night costs a billed day, and skipping
+          # the check would cost the data. If a teardown does stop here the fix
+          # is the backup, and `SKIP_BACKUP_CHECK=1 make down` is the deliberate
+          # override to run by hand.
+          make down ENV="${ENVIRONMENT}" AUTO=1
+
+      # Cheap, and the one thing anybody reading a notification actually wants
+      # to know. `make down` already ends in verify-teardown.sh, so a green run
+      # means the boundary was asserted rather than assumed.
+      - name: Say what happened
+        if: always()
+        env:
+          # Through env rather than interpolated into the script, as every other
+          # step here passes a value.
+          RUN: ${{ steps.state.outputs.run }}
+          SERVERS: ${{ steps.state.outputs.servers }}
+        run: |
+          # RUN is empty, not "false", when the guard never executed -- a failed
+          # confirmation stops the job before Hetzner is asked anything. Writing
+          # "no cluster was running" there would be a claim nothing checked.
+          {
+            echo "### ${ACTION} - ${ENVIRONMENT}"
+            echo
+            if [ -z "${RUN}" ]; then
+              echo "Stopped before reading the project's state; nothing was changed."
+            else
+              echo "Servers in the project before this run: ${SERVERS}"
+            fi
+            if [ -z "${RUN}" ]; then
+              :
+            elif [ "${RUN}" != "true" ]; then
+              echo
+              echo "Nothing to do; no cluster was running."
+            elif [ "${ACTION}" = "down" ]; then
+              echo
+              echo "\`verify-teardown.sh\` is the gate at the end of \`make down\`:"
+              echo "a green run means the durable buckets and both snapshots survived,"
+              echo "and no volume, load balancer or placement group was left billing."
+            else
+              echo
+              echo "\`wait-for-stack.sh\` is the gate at the end of \`make up\`:"
+              echo "a green run means serving, not merely applied."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
