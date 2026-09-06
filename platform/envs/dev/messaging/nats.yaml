@@ -161,6 +161,12 @@ spec:
         # before the volume does. A full PVC is a stuck pod; a full store is an
         # error the publisher sees.
         resources: {requests: {storage: 1Gi}}
+        # Declared rather than left to default, because the API server writes it
+        # back into the template and Argo CD then diffs against a manifest that
+        # never said it. Two of the three fields it injects can be declared here;
+        # `status` cannot, which is why the Application also carries an
+        # ignoreDifferences for it.
+        volumeMode: Filesystem
 ---
 # DEFAULT DENY, THEN ONE ALLOWANCE.
 #
