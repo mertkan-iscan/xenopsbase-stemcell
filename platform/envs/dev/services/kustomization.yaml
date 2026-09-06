@@ -123,7 +123,20 @@ images:
     # svc-core client credential, whose secret must equal the realm's copy in
     # keycloak-clients; virtual threads are on, so Tomcat's 200-thread pool is
     # no longer the admission control and hikari.maximum-pool-size is.
-    digest: sha256:4ed3605aea60f414c16cbdf7269364c40da03dd5314d8b3bc54fe928bedc9609
+    #
+    # Commit e32a2ef -- THE STREAM EXISTS NOW, AND THE PUBLISH IS CONFIRMED
+    # (T-9.9). The previous digest published into nothing: JetStream was on with
+    # no stream bound to any subject, and core NATS publish is fire-and-forget,
+    # so the relay set published_at on messages the broker had dropped. Measured
+    # on this cluster under that image: in_msgs 2, JetStream storage 0.
+    #
+    # `Streams` declares `platform.>` from the connection listener, and
+    # jetStream().publish blocks until the server confirms storage -- so a
+    # missing stream is now an exception the relay retries rather than a lie in
+    # the table. Rooted at `platform.>` rather than `>` because xenopsbase-learn
+    # already owns identity.>, catalog.>, streaming.> and reporting.> on this
+    # same broker, and JetStream refuses overlapping subjects.
+    digest: sha256:e706c5ed7840eed13dc435f36aa6cd091dde8a64ed188270a014373beaf120fe
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway
     # Commit c805107 -- the gateway can shed load without the circuit breaker
     # counting it as core failing, and the fallback stops telling the caller
@@ -196,4 +209,8 @@ images:
     # infrastructure panel, because `/` must serve something to an authenticated
     # caller or SecurityConfiguration's anyExchange().authenticated() and
     # smoke.sh both pass against a 404.
-    digest: sha256:451fa38b0003e8d6a7e417b62ac6dfa171411f6fae3a5cd9a0df2f88f6954be1
+    #
+    # Commit e32a2ef -- no gateway change of its own. It moves because
+    # platform-common did (T-9.9); the gateway neither publishes nor consumes,
+    # so what it gains is the shared module and nothing observable.
+    digest: sha256:f7b4fadeaf75103eaf434a6687f2dd76a8ab9c1c2ef68e3fa71c06fba6fb5783
