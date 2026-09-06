@@ -66,6 +66,10 @@ spec:
           {
             "name": "tenant",
             "description": "Tenant-side principal. Coarse only."
+          },
+          {
+            "name": "svc-caller",
+            "description": "May make inter-service calls. The GATE, separate from the `svc` claim that says WHICH service is calling -- a claim mapper is a per-client detail nobody reviews, a role is a grant somebody makes and can take away. Same name and meaning as the xenopsbase realm's (T-9.12)."
           }
         ]
       },
@@ -378,6 +382,27 @@ spec:
         }
       ],
       "users": [
+        {
+          "id": "00000000-0000-4000-8000-0000000000a1",
+          "username": "service-account-svc-identity",
+          "enabled": true,
+          "serviceAccountClientId": "svc-identity",
+          "realmRoles": ["svc-caller"]
+        },
+        {
+          "id": "00000000-0000-4000-8000-0000000000a2",
+          "username": "service-account-svc-streaming",
+          "enabled": true,
+          "serviceAccountClientId": "svc-streaming",
+          "realmRoles": ["svc-caller"]
+        },
+        {
+          "id": "00000000-0000-4000-8000-0000000000a3",
+          "username": "service-account-svc-reporting",
+          "enabled": true,
+          "serviceAccountClientId": "svc-reporting",
+          "realmRoles": ["svc-caller"]
+        },
         {
           "id": "00000000-0000-4000-8000-000000000001",
           "username": "platform-admin",
