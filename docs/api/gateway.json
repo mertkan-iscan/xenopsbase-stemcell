@@ -133,9 +133,19 @@
         ]
       }
     },
-    "/fallback/core" : {
+    "/fallback/{service}" : {
       "delete" : {
-        "operationId" : "core_3",
+        "operationId" : "fallback_3",
+        "parameters" : [
+          {
+            "in" : "path",
+            "name" : "service",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
         "responses" : {
           "200" : {
             "content" : {
@@ -153,7 +163,17 @@
         ]
       },
       "get" : {
-        "operationId" : "core",
+        "operationId" : "fallback",
+        "parameters" : [
+          {
+            "in" : "path",
+            "name" : "service",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
         "responses" : {
           "200" : {
             "content" : {
@@ -171,7 +191,17 @@
         ]
       },
       "head" : {
-        "operationId" : "core_5",
+        "operationId" : "fallback_5",
+        "parameters" : [
+          {
+            "in" : "path",
+            "name" : "service",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
         "responses" : {
           "200" : {
             "content" : {
@@ -189,7 +219,17 @@
         ]
       },
       "options" : {
-        "operationId" : "core_6",
+        "operationId" : "fallback_6",
+        "parameters" : [
+          {
+            "in" : "path",
+            "name" : "service",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
         "responses" : {
           "200" : {
             "content" : {
@@ -207,7 +247,17 @@
         ]
       },
       "patch" : {
-        "operationId" : "core_4",
+        "operationId" : "fallback_4",
+        "parameters" : [
+          {
+            "in" : "path",
+            "name" : "service",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
         "responses" : {
           "200" : {
             "content" : {
@@ -225,7 +275,17 @@
         ]
       },
       "post" : {
-        "operationId" : "core_1",
+        "operationId" : "fallback_1",
+        "parameters" : [
+          {
+            "in" : "path",
+            "name" : "service",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
         "responses" : {
           "200" : {
             "content" : {
@@ -243,7 +303,17 @@
         ]
       },
       "put" : {
-        "operationId" : "core_2",
+        "operationId" : "fallback_2",
+        "parameters" : [
+          {
+            "in" : "path",
+            "name" : "service",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
         "responses" : {
           "200" : {
             "content" : {

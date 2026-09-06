@@ -43,10 +43,21 @@ usage() {
 
 [ -n "$SERVICE" ] && [ -n "$FROM" ] && [ -n "$TO" ] || usage
 
-case "$SERVICE" in
-  core | gateway) SERVICES="$SERVICE" ;;
-  all) SERVICES="core gateway" ;;
-  *) usage ;;
+# Derived from services/pom.xml rather than typed (T-9.7). A service missing
+# from a hardcoded list here cannot be promoted or rolled back, and the script
+# answers `usage` -- which reads as the operator mistyping rather than as the
+# script not knowing the service exists.
+KNOWN="$(bash "$(dirname "${BASH_SOURCE[0]}")/service-modules.sh")"
+case " $KNOWN " in
+  *" $SERVICE "*) SERVICES="$SERVICE" ;;
+  *)
+    if [ "$SERVICE" = "all" ]; then
+      SERVICES="$KNOWN"
+    else
+      echo "unknown service '$SERVICE'; this repository builds: $KNOWN" >&2
+      usage
+    fi
+    ;;
 esac
 
 if [ "$FROM" = "$TO" ]; then

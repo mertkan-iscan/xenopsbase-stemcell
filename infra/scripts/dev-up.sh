@@ -48,9 +48,9 @@ echo "2/5  dependencies"
 # realm import finishes, and starting the services against a half-imported realm
 # fails as an issuer error that names nothing useful.
 # Two calls. `--wait` counts the one-shot bucket creator's clean exit(0) as a
-# failed service, so the wait lists only the four long-running dependencies.
+# failed service, so the wait lists only the five long-running dependencies.
 "${COMPOSE[@]}" up -d 2>&1 | sed 's/^/     /'
-"${COMPOSE[@]}" up -d --wait postgres keycloak minio valkey 2>&1 | sed 's/^/     /'
+"${COMPOSE[@]}" up -d --wait postgres keycloak minio valkey nats 2>&1 | sed 's/^/     /'
 if [ "${PIPESTATUS[0]}" -ne 0 ]; then
   echo "     dependencies did not become healthy. Logs:"
   "${COMPOSE[@]}" ps | sed 's/^/       /'
@@ -68,7 +68,7 @@ start_service() {
     OIDC_ISSUER_URI=http://localhost:9080/realms/xenopsbase \
     OIDC_CLIENT_SECRET=local-dev-gateway-secret \
     CORE_URI=http://localhost:8081 \
-    VALKEY_HOST=localhost \
+    VALKEY_HOST=localhost \n    OUTBOX_PUBLISHER=nats \n    PLATFORM_OUTBOX_NATS_URL=nats://localhost:4222 \
     VALKEY_PASSWORD=localdev \
     DOCUMENTS_ENDPOINT=http://localhost:9000 \
     DOCUMENTS_BUCKET=xenopsbase-dev-documents \

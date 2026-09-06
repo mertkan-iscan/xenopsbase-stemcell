@@ -145,6 +145,7 @@ reproduces from nothing.
 - [CHANGELOG.md](CHANGELOG.md) — what moved away from the generated defaults, and why
 - [services/README.md](services/README.md) — package conventions and the tech.jhipster exit path
 - [CONTRIBUTING.md](CONTRIBUTING.md) — branching, commits, and the no-manual-configuration rule
+- [Adding a service](docs/runbooks/adding-a-service.md) — the four edits, and the six lists that derive
 - [Forking this into a new project](docs/forking.md) — what to rename, what to delete, what to keep
 - [Service level objectives](docs/slos.md) — measured latency and throughput, and what they say about autoscaling
 - Runbooks

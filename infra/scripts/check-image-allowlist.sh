@@ -37,7 +37,12 @@ POLICY="platform/envs/dev/policy/third-party-allowlist.yaml"
 # The namespaces enrolled in policy enforcement. Kept here rather than derived,
 # because enrolling one is a deliberate act and this check should fail loudly if
 # it is enrolled without its images being accounted for.
-ENROLLED_DIRS="platform/envs/dev/services"
+#
+# `messaging` joined in T-9.6 (ADR-0018). It was enrolled in namespaces.yaml and
+# NOT added here at first, which is exactly the gap this comment warns about:
+# the check passed, reported "every third-party image is allowlisted", and had
+# never looked at the one namespace whose only image is third-party.
+ENROLLED_DIRS="platform/envs/dev/services platform/envs/dev/messaging"
 
 PY_BIN=""
 for candidate in python3 python; do

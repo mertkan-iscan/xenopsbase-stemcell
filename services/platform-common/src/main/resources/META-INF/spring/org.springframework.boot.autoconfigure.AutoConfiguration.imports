@@ -3,7 +3,7 @@
 # This file is the fix for the failure the module split would otherwise have introduced: these
 # classes sit outside every service's @ComponentScan root, and a @Configuration that scanning does
 # not find produces no error -- only absent beans. Boot reads this file from every jar on the
-# classpath, so adding the dependency is what wires them (ADR-0018).
+# classpath, so adding the dependency is what wires them (ADR-0017).
 #
 # Order is not significant here; Boot orders auto-configurations by their own @AutoConfiguration
 # before/after declarations.
@@ -11,5 +11,6 @@ com.xenopsoftware.common.config.AsyncConfiguration
 com.xenopsoftware.common.config.JacksonConfiguration
 com.xenopsoftware.common.config.LoggingAspectConfiguration
 com.xenopsoftware.common.config.LoggingConfiguration
+com.xenopsoftware.common.outbox.NatsConnectionConfiguration
 com.xenopsoftware.common.outbox.OutboxAutoConfiguration
 com.xenopsoftware.common.storage.StorageConfiguration

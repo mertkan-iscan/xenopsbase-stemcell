@@ -1,4 +1,5 @@
 # The servlet half. See platform-common's copy of this file for why beans are contributed this way
-# rather than component-scanned (ADR-0018).
+# rather than component-scanned (ADR-0017).
 com.xenopsoftware.common.config.DateTimeFormatConfiguration
 com.xenopsoftware.common.config.PlatformWebAutoConfiguration
+com.xenopsoftware.common.service.ServiceCallAutoConfiguration

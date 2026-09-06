@@ -56,8 +56,15 @@
             REGRESSION today, and the number is raised deliberately as tests
             are added. Re-read it from CI's job summary before raising it — a
             floor set from a developer machine is how the last ratchet failed.
+
+            RAISED 2026-09-06, T-9.6: 0.26 to 0.31 on instruction, measured
+            0.3257. The branch floor stays at 0.34 against a measured 0.3537 —
+            NatsPublisher and the relay scheduler are mostly straight-line code,
+            so the new tests moved instruction coverage and barely touched
+            branch. Raising branch on that evidence would be raising it on
+            nothing.
         -->
-        <jacoco.minimum.instruction>0.26</jacoco.minimum.instruction>
+        <jacoco.minimum.instruction>0.31</jacoco.minimum.instruction>
         <jacoco.minimum.branch>0.34</jacoco.minimum.branch>
     </properties>
 
@@ -156,6 +163,22 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!--
+            The message broker (T-9.6, ADR-0018). Optional for the same reason
+            Hibernate is: a service that neither publishes nor consumes must not
+            inherit a broker client by depending on this library, and the gateway
+            is the live example rather than a hypothetical one.
+
+            NatsPublisher is behind @ConditionalOnClass for the same reason, so a
+            service without this on its classpath gets LoggingMessagePublisher
+            and starts.
+        -->
+        <dependency>
+            <groupId>io.nats</groupId>
+            <artifactId>jnats</artifactId>
             <optional>true</optional>
         </dependency>
 

@@ -1,0 +1,194 @@
+# NATS with JetStream — the message broker (T-9.6, ADR-0018).
+#
+# ONE REPLICA, AND ITS STORE IS DISPOSABLE. Both of those are decisions, not
+# defaults, and ADR-0018 is where the argument lives. The short version: the
+# durable record of everything published is `outbox_message` in Postgres, which
+# ADR-0002 already makes durable. JetStream here is a transport with a spool.
+# A cluster rebuild recreates the stream empty and the relay republishes
+# whatever it has not marked published, which is why one replica is enough and
+# why losing the PVC is not an incident.
+#
+# WHAT WOULD MAKE THAT UNTRUE: publishing to NATS directly instead of through
+# OutboxService. Do not. See ADR-0018's "what this makes hard".
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nats-config
+  namespace: messaging
+data:
+  nats.conf: |
+    # Client, monitoring. No cluster block and no gateway block: this is one
+    # server, and configuring routes for peers that do not exist is how a
+    # single-node NATS spends its startup retrying connections to itself.
+    port: 4222
+    http: 8222
+
+    server_name: nats-0
+
+    jetstream {
+      store_dir: /data
+      # Bounded, and the bound is the PVC. Left unset, JetStream will happily
+      # fill the volume and then fail writes with a message about storage rather
+      # than about the limit -- and a full PVC on a StatefulSet is recovered by
+      # deleting the volume, which is only acceptable here BECAUSE the store is
+      # disposable. Stating the limit means hitting it is a NATS error a
+      # publisher can see and retry, not a stuck pod.
+      max_file_store: 900MB
+      # No memory store. Everything goes to the file store, so a restart keeps
+      # what has not been consumed and the relay is not the only thing standing
+      # between a redelivery and a lost message.
+      max_memory_store: 0
+    }
+
+    # No authorization block, deliberately, and this is the boundary worth being
+    # explicit about: the NetworkPolicy below is what controls who may connect,
+    # not a credential. That is the same posture the in-cluster Postgres and
+    # Valkey take -- with one difference stated so it is not assumed. Valkey
+    # DOES carry a password because it is reachable from two namespaces and its
+    # keys are session material; this is reachable from one and its contents are
+    # reconstructible.
+    #
+    # A fork exposing NATS beyond the cluster must add credentials here AND a
+    # Secret, and should treat the absence of both as the signal that it has
+    # changed the threat model.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats
+  namespace: messaging
+  labels: {app.kubernetes.io/name: nats}
+spec:
+  # Headless. A StatefulSet's stable DNS is what a client reconnects to, and a
+  # ClusterIP in front of one replica adds a hop that hides which pod answered.
+  clusterIP: None
+  selector: {app.kubernetes.io/name: nats}
+  ports:
+    - {name: client, port: 4222, targetPort: 4222}
+    - {name: monitor, port: 8222, targetPort: 8222}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nats
+  namespace: messaging
+  labels: {app.kubernetes.io/name: nats}
+spec:
+  serviceName: nats
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: nats}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: nats}
+    spec:
+      # No service account token: NATS talks to nothing in the Kubernetes API,
+      # and a mounted token is a credential in a pod that has no use for one.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: nats
+          # PINNED BY DIGEST, and it has to be: the `messaging` namespace is
+          # enrolled in the image policy, and third-party-allowlist.yaml matches
+          # on the exact digest. Repinning means editing both, and `make
+          # verify-image-allowlist` is what catches it in CI rather than at the
+          # next pod restart.
+          #
+          # Resolved from nats:2.12-alpine.
+          image: nats@sha256:b270f5e2428354c0335612694d7dd2fb588148e567a5757fdff325ef9c9332e6
+          args: ["--config", "/etc/nats/nats.conf"]
+          ports:
+            - {name: client, containerPort: 4222}
+            - {name: monitor, containerPort: 8222}
+          # THE BUDGET, AND WHERE IT COMES FROM (ADR-0018).
+          #
+          # 64Mi booked against 1836Mi free on the fixed workers, measured
+          # 2026-09-03 and recorded in check-worker-headroom.sh. That is 3.5% of
+          # the booked headroom, and the gate that matters -- 256Mi schedulable
+          # per fixed worker -- has room to absorb it.
+          #
+          # The MEMORY limit is four times the request rather than equal to it,
+          # because JetStream's memory use follows consumer count and message
+          # size, neither of which this template can predict for a fork. A
+          # request sized to the idle case and a limit sized to a busy one is the
+          # honest shape; equal values would be a claim nobody measured.
+          #
+          # NO CPU LIMIT, and that is the repository's policy rather than an
+          # omission (T-2.15, #209). A CPU limit is enforced by CFS throttling,
+          # which stalls a request mid-flight and surfaces as tail latency; the
+          # REQUEST is what the scheduler books and what actually matters. This
+          # manifest had `cpu: 500m` in its limits until verify-resources.sh
+          # refused it -- which is the guard doing exactly its job, on a file
+          # written by somebody who had read the policy and set one anyway.
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          # /healthz, not the client port. NATS accepts TCP on 4222 before
+          # JetStream has finished recovering its store, so a port probe reports
+          # Ready while a publish would still fail -- the same class of mistake
+          # as waiting on Keycloak's port instead of its discovery document.
+          startupProbe:
+            httpGet: {path: /healthz, port: monitor}
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: {path: /healthz, port: monitor}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: monitor}
+            periodSeconds: 20
+            failureThreshold: 3
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: config, mountPath: /etc/nats}
+      volumes:
+        - name: config
+          configMap: {name: nats-config}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        # 1Gi against a 900MB max_file_store, so the store hits its own limit
+        # before the volume does. A full PVC is a stuck pod; a full store is an
+        # error the publisher sees.
+        resources: {requests: {storage: 1Gi}}
+---
+# DEFAULT DENY, THEN ONE ALLOWANCE.
+#
+# The broker is reachable from `apps` and from nowhere else. Not because a
+# NATS server is especially dangerous, but because it has no authorization of
+# its own (see the config above): this policy IS the access control, and an
+# unrestricted broker in a cluster is a subscriber on every subject for anyone
+# who can reach it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nats
+  namespace: messaging
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: nats}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: apps}
+      ports:
+        - {protocol: TCP, port: 4222}
+    # Prometheus scrapes the monitoring port. Separated from the clause above
+    # rather than merged, so that opening the client port to another namespace
+    # cannot accidentally open the monitoring one as well.
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: observability}
+      ports:
+        - {protocol: TCP, port: 8222}

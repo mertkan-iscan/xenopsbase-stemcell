@@ -232,10 +232,10 @@ dev-logs: ## Follow both service logs
 .PHONY: dev-deps
 dev-deps: dev-realm ## Dependencies only, for running the services from an IDE
 	@# Two calls, deliberately. `--wait` treats the one-shot bucket creator's
-	@# clean exit(0) as a failed service, so the wait names only the four
+	@# clean exit(0) as a failed service, so the wait names only the five
 	@# long-running dependencies while the first call still runs the one-shot.
 	@$(DEV_COMPOSE) up -d
-	@$(DEV_COMPOSE) up -d --wait postgres keycloak minio valkey
+	@$(DEV_COMPOSE) up -d --wait postgres keycloak minio valkey nats
 	@echo
 	@echo "Dependencies are up. To run the services from an IDE, set:"
 	@for v in $(DEV_ENV); do echo "    $$v"; done

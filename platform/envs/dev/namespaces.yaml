@@ -107,3 +107,29 @@ metadata:
   labels:
     app.kubernetes.io/managed-by: argocd
     policy.sigstore.dev/include: "true"
+---
+# The message broker (ADR-0018).
+#
+# Its own namespace, like `cache` and for the same reason: the name says what
+# may live here. Nothing authoritative belongs on the broker -- JetStream's
+# store is a cache of the Postgres outbox and a rebuild recreates it empty -- so
+# a pull request that puts a source of truth in `messaging` should look wrong at
+# a glance.
+#
+# ENROLLED IN THE IMAGE POLICY, and the one image that runs here is covered by
+# third-party-images-by-digest. policy-controller denies anything matching no
+# policy, so adding a sidecar here without pinning it first denies the whole
+# pod -- at the next restart, not at deploy time.
+#
+# The label is on THIS object, owned by the `root` Application, and not in the
+# nats Application's managedNamespaceMetadata. #418 proved why: root reasserts
+# its labels on every sync and strips what another Application added, so the
+# label appears, lasts about two minutes, and leaves enforcement off with
+# nothing reporting it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: messaging
+  labels:
+    app.kubernetes.io/managed-by: argocd
+    policy.sigstore.dev/include: "true"

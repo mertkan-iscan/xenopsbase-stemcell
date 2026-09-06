@@ -89,6 +89,19 @@
             <groupId>com.xenopsoftware</groupId>
             <artifactId>platform-common-web</artifactId>
         </dependency>
+
+        <!--
+            The NATS client (T-9.6, ADR-0018). Declared HERE rather than being
+            inherited, because it is optional in platform-common on purpose: a
+            service opts into a broker, it does not get one by depending on the
+            shared library. Removing this line and setting
+            platform.outbox.publisher back to its default is all a fork that
+            wants no broker has to do.
+        -->
+        <dependency>
+            <groupId>io.nats</groupId>
+            <artifactId>jnats</artifactId>
+        </dependency>
         <dependency>
             <groupId>tech.jhipster</groupId>
             <artifactId>jhipster-framework</artifactId>

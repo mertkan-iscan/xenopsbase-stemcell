@@ -39,12 +39,20 @@ cd "$ROOT" || exit 1
 ENVIRONMENT="${1:-dev}"
 SERVICE="${2:-all}"
 
-case "$SERVICE" in
-  core | gateway) SERVICES="$SERVICE" ;;
-  all) SERVICES="core gateway" ;;
+# Derived from services/pom.xml rather than typed (T-9.7). A service missing
+# from a hardcoded list here cannot be rolled back, and the script reports a
+# usage error -- which reads as the operator mistyping rather than as the script
+# not knowing the service exists. That is the wrong message during an incident.
+KNOWN="$(bash "$(dirname "${BASH_SOURCE[0]}")/service-modules.sh")"
+case " $KNOWN " in
+  *" $SERVICE "*) SERVICES="$SERVICE" ;;
   *)
-    echo "usage: $0 <env> <core|gateway|all>" >&2
-    exit 2
+    if [ "$SERVICE" = "all" ]; then
+      SERVICES="$KNOWN"
+    else
+      echo "usage: $0 <env> <$(echo "$KNOWN" | tr ' ' '|')|all>" >&2
+      exit 2
+    fi
     ;;
 esac
 
