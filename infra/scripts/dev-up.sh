@@ -68,7 +68,9 @@ start_service() {
     OIDC_ISSUER_URI=http://localhost:9080/realms/xenopsbase \
     OIDC_CLIENT_SECRET=local-dev-gateway-secret \
     CORE_URI=http://localhost:8081 \
-    VALKEY_HOST=localhost \n    OUTBOX_PUBLISHER=nats \n    PLATFORM_OUTBOX_NATS_URL=nats://localhost:4222 \
+    VALKEY_HOST=localhost \
+    OUTBOX_PUBLISHER=nats \
+    OUTBOX_NATS_URL=nats://localhost:4222 \
     VALKEY_PASSWORD=localdev \
     DOCUMENTS_ENDPOINT=http://localhost:9000 \
     DOCUMENTS_BUCKET=xenopsbase-dev-documents \

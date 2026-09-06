@@ -256,7 +256,7 @@ spec:
             # answered. What it produces instead is a growing outbox_message
             # table with last_error set, which is what to alert on.
             - {name: OUTBOX_PUBLISHER, value: nats}
-            - {name: PLATFORM_OUTBOX_NATS_URL, value: "nats://nats.messaging.svc.cluster.local:4222"}
+            - {name: OUTBOX_NATS_URL, value: "nats://nats.messaging.svc.cluster.local:4222"}
 
             - {name: SERVICE_AUTH_CLIENT_ID, value: svc-core}
             - name: SERVICE_AUTH_CLIENT_SECRET

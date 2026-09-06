@@ -384,6 +384,12 @@ platform:
     # `platform.probe.initiated` to the same subject and each would receive the
     # other's messages.
     subject-prefix: ${OUTBOX_SUBJECT_PREFIX:}
+    nats:
+      # Only read when `publisher` is `nats`. Declared here rather than left to
+      # the @Value default in NatsConnectionConfiguration, because a knob that
+      # exists only in Java is a knob an operator cannot find: everything else
+      # this service can be pointed at is in this file.
+      url: ${OUTBOX_NATS_URL:nats://localhost:4222}
   service-auth:
     # Defaults to this service's own issuer, because a service that accepts
     # tokens from one realm while obtaining them from another is a
