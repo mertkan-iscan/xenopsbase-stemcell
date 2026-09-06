@@ -40,6 +40,23 @@ relay then republishes everything it has not marked published, because `outbox_m
 lives in Postgres, which ADR-0002 already makes durable. Nothing is lost that the database did not
 already lose.
 
+> **Correction, 2026-09-07 (T-9.9).** When this ADR was accepted, the paragraph above was not true
+> and neither was "a fork that adds a consumer gets messages rather than log lines" further down.
+> **No stream existed.** JetStream was enabled on the server and nothing was bound to any subject,
+> and `NatsPublisher` used a core NATS publish — which is fire-and-forget, and to which a subject
+> with no stream is not an error but a message nobody kept. So the relay set `published_at` on rows
+> the broker had dropped, and a rebuild would not republish them, because they were marked.
+>
+> Measured on dev the day the broker went in: `in_msgs 2`, JetStream storage `0`, zero streams,
+> `published_at` set on both rows. A mechanism reporting success while delivering nothing, which is
+> the thing this ADR exists to end, one layer further out than where it was looking.
+>
+> Two changes make the claims hold. `Streams` declares the stream in code and applies it on every
+> connect and reconnect — borrowed from xenopsbase-learn, which had solved this first. And the
+> publish is now acknowledged (`jetStream().publish`), so a missing stream, a full stream or an
+> absent broker is an exception the relay retries rather than a row marked published. See the
+> reversal recorded on `NatsPublisher` itself.
+
 The consequence is at-least-once delivery, which is not a new obligation: the outbox pattern was
 already at-least-once — the relay can publish and fail before recording that it did — and
 `MessagePublisher`'s contract has said "implementations must be safe to call twice with the same
@@ -64,7 +81,10 @@ notices. ShedLock would be a third coordination mechanism for a problem two line
 
 ### What this makes easy
 
-- The outbox delivers. A fork that adds a consumer gets messages rather than log lines.
+- The outbox delivers. A fork that adds a consumer gets messages rather than log lines — and gets
+  the ones published before it subscribed, because the stream retains them for seven days. That was
+  the point of a broker with persistence rather than a bare pub/sub, and it only became true with
+  T-9.9; see the correction above.
 - `NatsPublisher` is the only broker-aware class, behind `@ConditionalOnProperty`. Replacing NATS
   means writing one `MessagePublisher`.
 - A rebuild needs no broker-side recovery procedure, because there is nothing on the broker worth
