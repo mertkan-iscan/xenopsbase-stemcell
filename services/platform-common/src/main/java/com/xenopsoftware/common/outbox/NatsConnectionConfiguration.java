@@ -1,6 +1,7 @@
 package com.xenopsoftware.common.outbox;
 
 import io.nats.client.Connection;
+import io.nats.client.ConnectionListener;
 import io.nats.client.Nats;
 import io.nats.client.Options;
 import java.time.Duration;
@@ -56,7 +57,8 @@ public class NatsConnectionConfiguration {
     @ConditionalOnMissingBean
     public Connection natsConnection(
         @Value("${platform.outbox.nats.url:nats://localhost:4222}") String url,
-        @Value("${spring.application.name:unknown}") String applicationName
+        @Value("${spring.application.name:unknown}") String applicationName,
+        @Value("${platform.outbox.subject-prefix:}") String subjectPrefix
     ) throws Exception {
         Options options = new Options.Builder()
             .server(url)
@@ -70,7 +72,29 @@ public class NatsConnectionConfiguration {
             // THE LINE THAT MAKES STARTUP SURVIVE AN ABSENT BROKER. Without it, connect() throws
             // when nothing is listening and the whole context fails -- for a background path.
             .noRandomize()
-            .connectionListener((connection, event) -> LOG.info("NATS connection {}: {}", event, connection.getConnectedUrl()))
+            // THE TOPOLOGY IS APPLIED FROM THE LISTENER, not once after connect, because this
+            // connection is allowed to start disconnected (see below). A stream declared only at
+            // startup would never be declared at all on the run where the broker came up second --
+            // and that run looks identical to a healthy one until a consumer finds nothing.
+            //
+            // Every reconnect re-applies it. Streams.apply creates what is missing and updates what
+            // drifted, so doing it repeatedly costs one round trip and converges the broker on the
+            // file rather than on whatever the last operator did.
+            .connectionListener((connection, event) -> {
+                LOG.info("NATS connection {}: {}", event, connection.getConnectedUrl());
+                if (event == ConnectionListener.Events.CONNECTED || event == ConnectionListener.Events.RECONNECTED) {
+                    try {
+                        Streams.apply(connection.jetStreamManagement(), subjectPrefix);
+                    } catch (Exception e) {
+                        // Logged, not thrown. This runs on the client's callback thread, where a
+                        // throw would be swallowed by the library anyway, and the publish path
+                        // already fails loudly on a missing stream -- an acknowledged publish
+                        // cannot succeed without one. So the visible failure stays where it can be
+                        // acted on: the outbox row keeps its last_error and the relay retries.
+                        LOG.error("Could not declare the JetStream topology; publishes will fail until this is fixed", e);
+                    }
+                }
+            })
             .errorListener(
                 new io.nats.client.ErrorListener() {
                     @Override
