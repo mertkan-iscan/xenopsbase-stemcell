@@ -47,7 +47,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.0.8</version>
+        <version>4.1.1</version>
         <relativePath/>
     </parent>
 
@@ -162,11 +162,11 @@
         <!-- The OpenAPI generator emits a reactive API for the gateway, a servlet one elsewhere. -->
         <openapi.generator.reactive>false</openapi.generator.reactive>
 
-        <archunit-junit5.version>1.4.2</archunit-junit5.version>
-        <awssdk.version>2.46.7</awssdk.version>
+        <archunit-junit5.version>1.5.0</archunit-junit5.version>
+        <awssdk.version>2.54.11</awssdk.version>
         <checkstyle.version>13.7.0</checkstyle.version>
-        <cucumber-bom.version>7.34.4</cucumber-bom.version>
-        <jackson-databind-nullable.version>0.2.10</jackson-databind-nullable.version>
+        <cucumber-bom.version>7.34.7</cucumber-bom.version>
+        <jackson-databind-nullable.version>0.2.11</jackson-databind-nullable.version>
         <jacoco-maven-plugin.version>0.8.15</jacoco-maven-plugin.version>
         <!--
             THE ENFORCED FLOOR, WHICH IS NOT THE TARGET.
@@ -268,7 +268,7 @@
             move and be deleted within a day. Each module's pom carries its own
             measured number and the run it came from, same convention as here.
         -->
-        <jhipster-framework.version>9.1.0</jhipster-framework.version>
+        <jhipster-framework.version>9.3.0</jhipster-framework.version>
         <jib-maven-plugin.architecture>amd64</jib-maven-plugin.architecture>
         <!--
             Pinned by digest, not by tag. T-6.1 requires that the same commit
@@ -278,13 +278,13 @@
             Update deliberately, the same way a dependency version is updated.
         -->
         <jib-maven-plugin.image>eclipse-temurin@sha256:1a99f30a84d58729f1184c1c693f25fb6f91970ddf05395515540bc5773b8edd</jib-maven-plugin.image>
-        <jib-maven-plugin.version>3.5.1</jib-maven-plugin.version>
+        <jib-maven-plugin.version>3.5.2</jib-maven-plugin.version>
         <lifecycle-mapping.version>1.0.0</lifecycle-mapping.version>
         <mapstruct.version>1.6.3</mapstruct.version>
         <maven-checkstyle-plugin.version>3.6.0</maven-checkstyle-plugin.version>
-        <modernizer-maven-plugin.version>3.4.0</modernizer-maven-plugin.version>
+        <modernizer-maven-plugin.version>3.5.0</modernizer-maven-plugin.version>
         <nohttp-checkstyle.version>0.0.11</nohttp-checkstyle.version>
-        <openapi-generator-maven-plugin.version>7.23.0</openapi-generator-maven-plugin.version>
+        <openapi-generator-maven-plugin.version>7.25.0</openapi-generator-maven-plugin.version>
         <profile.api-docs/>
         <profile.e2e/>
         <profile.test/>
@@ -292,7 +292,7 @@
         <properties-maven-plugin.version>1.3.0</properties-maven-plugin.version>
         <resource.delimiter>@</resource.delimiter>
         <sonar-maven-plugin.version>5.7.0.6970</sonar-maven-plugin.version>
-        <spotless-maven-plugin.version>3.8.0</spotless-maven-plugin.version>
+        <spotless-maven-plugin.version>3.10.1</spotless-maven-plugin.version>
         <!--
             2025.1.3, which is the GATEWAY's version. core was one patch behind
             at 2025.1.2 for no recorded reason; consolidating had to pick one,
@@ -301,7 +301,7 @@
         <spring-cloud-dependencies.version>2025.1.3</spring-cloud-dependencies.version>
         <spring.profiles.active>dev</spring.profiles.active>
         <!-- One version, two starters: the servlet one and the reactive one. -->
-        <springdoc-openapi.version>3.0.3</springdoc-openapi.version>
+        <springdoc-openapi.version>3.1.0</springdoc-openapi.version>
 
         <!-- Gateway-only, declared here so no version is stated in a module pom. -->
         <blockhound-junit-platform.version>1.0.17.RELEASE</blockhound-junit-platform.version>
