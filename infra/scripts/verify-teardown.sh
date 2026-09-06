@@ -45,12 +45,48 @@ if [ -z "$AK" ] || [ -z "$SK" ] || [ -z "${HCLOUD_TOKEN:-}" ]; then
   exit 2
 fi
 
+# THE GATE MAY NOT PASS WITHOUT HAVING LOOKED.
+#
+# The two reap scripts have always checked for `hcloud`; they used to skip and
+# now refuse, for the reason written in their own headers. This one had no check
+# at all, and what it did instead was not skipping. Under `set -uo
+# pipefail` with no `-e`, a missing binary sent its error to /dev/null, the
+# pipeline produced nothing, `grep -c` printed 0 and the non-zero exit went
+# nowhere -- so every resource class read as empty and TEARDOWN CLEAN came from
+# a script that had never reached Hetzner. `aws` fails the opposite way, calling
+# every durable bucket GONE: loud, but it names the wrong defect.
+#
+# A sweep may skip. A gate may not. This is the only thing standing between an
+# orphaned volume and an invoice nobody reads for a month, and it runs unattended
+# in T-7.3's nightly drill, where there is no human to notice the silence.
+for bin in hcloud aws; do
+  command -v "$bin" >/dev/null 2>&1 || {
+    echo "error: the ${bin} CLI is not on PATH." >&2
+    echo "       Refusing to report on a teardown this script cannot look at." >&2
+    exit 2
+  }
+done
+
 s3() { AWS_ACCESS_KEY_ID="$AK" AWS_SECRET_ACCESS_KEY="$SK" \
        aws --endpoint-url "$ENDPOINT" --region "$REGION" "$@"; }
 
 # hcloud prints a header even when the list is empty, so counting raw lines
 # reports 1 for "nothing". Counting IDs is unambiguous.
-count_hcloud() { hcloud "$1" list -o columns=id 2>/dev/null | tail -n +2 | grep -c '[0-9]'; }
+#
+# The call's exit status is checked rather than discarded, for the same reason
+# the PATH check above exists: an expired token, a 503 or a rate limit also
+# produce no output, and no output must never be allowed to read as nothing is
+# there.
+count_hcloud() {
+  local out status
+  out="$(hcloud "$1" list -o columns=id 2>&1)"
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    printf 'error: `hcloud %s list` failed: %s\n' "$1" "$out" >&2
+    return 1
+  fi
+  printf '%s\n' "$out" | tail -n +2 | grep -c '[0-9]' || true
+}
 
 echo "=================================================================="
 echo " MUST SURVIVE  (the durable column of ADR-0002)"
@@ -93,7 +129,18 @@ done
 # message says nothing about servers.
 check_no_autoscaled() {
   printf '  %-30s ' "autoscaled nodes"
-  left="$(hcloud server list -o noheader -o columns=name -l "hcloud/node-group=${CLUSTER_NAME:-xenopsbase}-${ENVIRONMENT}-autoscaled" 2>/dev/null | grep -c . || true)"
+  local out status
+  out="$(hcloud server list -o noheader -o columns=name -l "hcloud/node-group=${CLUSTER_NAME:-xenopsbase}-${ENVIRONMENT}-autoscaled" 2>&1)"
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    # Same rule as count_hcloud: a failed call is not an empty list. This one
+    # matters more than most, because "none" here is the reading that lets the
+    # next teardown hang.
+    echo "UNKNOWN  <-- the API call failed: ${out}"
+    FAILED=1
+    return
+  fi
+  left="$(printf '%s\n' "$out" | grep -c . || true)"
   if [ "${left:-0}" -eq 0 ]; then
     echo "none"
   else
@@ -161,7 +208,13 @@ echo "=================================================================="
 # Networks and firewalls are deliberately absent: they are free, and failing a
 # teardown check over something that costs nothing trains people to ignore it.
 for kind in server volume load-balancer placement-group primary-ip floating-ip; do
-  n=$(count_hcloud "$kind")
+  if ! n=$(count_hcloud "$kind"); then
+    printf '  %-30s %s\n' "${kind}s" "UNKNOWN"
+    echo "      ^ the API call failed (message above), so this class was never"
+    echo "        checked. Failing rather than reporting a count of zero."
+    FAILED=1
+    continue
+  fi
   printf '  %-30s %s\n' "${kind}s" "$n"
   if [ "$n" -ne 0 ]; then
     echo "      ^ ORPHANED. Terraform no longer tracks these; they will not"

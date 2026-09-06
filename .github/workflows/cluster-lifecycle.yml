@@ -39,17 +39,20 @@ name: Cluster lifecycle
 #                       a live cluster that silently accepts exactly the
 #                       five-minute WAL loss T-7.2 exists to prevent.
 #
-#   the hcloud CLI      not on the runner image. Both reap scripts check for it
-#                       and skip, and verify-teardown.sh -- the gate that proves
-#                       nothing is still billing -- runs under `set -uo
-#                       pipefail` with no such check, so count_hcloud() reports
-#                       zero for every resource class and the teardown PASSES
-#                       without having looked. A false clean is worse than a
-#                       failure here, because the whole point of the gate is
-#                       that somebody stops checking the invoice by hand.
+#   the hcloud CLI      not on the runner image. All three teardown steps that
+#                       call it now refuse to run without it: both reap scripts,
+#                       and verify-teardown.sh, which is the gate that proves
+#                       nothing is still billing. Until they did, the sweeps
+#                       skipped and the gate -- under `set -uo pipefail` with no
+#                       such check -- had count_hcloud() report zero for every
+#                       resource class, so the teardown PASSED without having
+#                       looked. A false clean is worse than a failure here,
+#                       because the whole point of the gate is that somebody
+#                       stops checking the invoice by hand.
 #
 # The drill escapes the middle two because its own `make up` runs first in the
-# same job, leaving both behind.
+# same job, leaving both behind. It installs the CLI itself, for the reason
+# above.
 
 on:
   workflow_dispatch:
@@ -89,10 +92,10 @@ permissions:
 
 env:
   TF_VERSION: '1.14.8'
-  # The one version in here that is not copied from something already in this
-  # repository, because nothing in it installs this CLI yet. If the download
-  # 404s, bump it -- the install step below fails loudly rather than letting a
-  # missing binary reach verify-teardown.sh, for the reason in the header.
+  # restore-drill.yml pins the same version for the same install step. Bump both
+  # together. If the download 404s, bump it -- the install step below fails
+  # loudly rather than letting a missing binary reach verify-teardown.sh, for
+  # the reason in the header. (v1.51.0 still resolves; latest is v1.67.0.)
   HCLOUD_VERSION: '1.51.0'
   # Same override every other Terraform path here carries, so a CI invocation is
   # identical to a local one rather than subtly different.

@@ -39,17 +39,34 @@ set -uo pipefail
 
 ENVIRONMENT="${1:-dev}"
 
+# THESE USED TO exit 0. See the same block in reap-autoscaled-nodes.sh.
+#
+# This is the sweep for the failure the whole file is about: a volume the CSI
+# driver could not release inside its 300s budget, which Terraform no longer
+# tracks and no future destroy will reach. Skipping it quietly and then handing
+# off to a gate that was counting zeros for the identical missing binary is how
+# a leak reaches an invoice instead of a console.
+#
+# Failing costs a teardown that would have exited non-zero at the gate anyway,
+# a few minutes later and for a less obvious reason.
 command -v hcloud >/dev/null 2>&1 || {
-  echo "  hcloud CLI not found — cannot reap orphaned volumes." >&2
-  exit 0
+  echo "  error: hcloud CLI not found — cannot sweep for orphaned volumes." >&2
+  echo "         An unreleased volume bills indefinitely and is invisible until" >&2
+  echo "         somebody reads an invoice (#159)." >&2
+  exit 1
 }
 
 [ -n "${HCLOUD_TOKEN:-}" ] || {
-  echo "  HCLOUD_TOKEN is not set — skipping the orphaned-volume sweep." >&2
-  exit 0
+  echo "  error: HCLOUD_TOKEN is not set — cannot sweep for orphaned volumes." >&2
+  exit 1
 }
 
-volumes="$(hcloud volume list -o noheader -o columns=id,name,server 2>/dev/null)"
+# A failed call and an empty list look identical once stderr is discarded, and
+# only one of them means there is nothing to reap.
+volumes="$(hcloud volume list -o noheader -o columns=id,name,server 2>&1)" || {
+  echo "  error: \`hcloud volume list\` failed, so nothing was swept: ${volumes}" >&2
+  exit 1
+}
 
 if [ -z "$volumes" ]; then
   exit 0
