@@ -27,17 +27,24 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
  * failure worth having, and it is the one line a new service copies. See
  * docs/runbooks/adding-a-service.md.
  *
- * <h2>The first argument is the whole application package, not just {@code .domain}</h2>
+ * <h2>Both lists name the whole application package, not a sub-package of it</h2>
  *
  * Because declaring an {@code @EntityScan} at all replaces the default, and the default was every
  * entity under {@code com.xenopsoftware.core} — including {@code repository.timezone.DateTimeWrapper},
  * which exists only in test sources. Narrowing to {@code .domain} while adding the shared packages
  * looked tidier and broke the Cucumber context with "Not a managed type" for a class nobody had
- * touched. Widen this list; never narrow it.
+ * touched.
+ *
+ * <p>The repository list learned the same lesson a second time, from the other side: it named
+ * {@code .repository} explicitly, so moving the probe's repository into {@code .platform} (T-9.2)
+ * left it unscanned and the context failed on a missing bean. Both are now the application package,
+ * which is the only list that cannot go stale when code moves within it.
+ *
+ * <p><b>Widen these; never narrow them.</b>
  */
 @Configuration
 @EntityScan({ "com.xenopsoftware.core", "com.xenopsoftware.common" })
-@EnableJpaRepositories({ "com.xenopsoftware.core.repository", "com.xenopsoftware.common" })
+@EnableJpaRepositories({ "com.xenopsoftware.core", "com.xenopsoftware.common" })
 @EnableJpaAuditing(auditorAwareRef = "springSecurityAuditorAware")
 @EnableTransactionManagement
 public class DatabaseConfiguration {}

@@ -11,20 +11,20 @@ They are different claims and it matters.
 specific rebuild and compared immediately after it. Committing one would mean asserting a moment
 against a rebuild it never saw, so it stays out of the repository.
 
-This file is an **anchor**: one deliberately chosen, long-lived document that the drill re-checks
-every night. It is not a picture of current state and does not go stale when the document set
+This file is an **anchor**: one deliberately chosen, long-lived probe that the drill re-checks
+every night. It is not a picture of current state and does not go stale when the probe set
 changes.
 
 ## What it deliberately does not contain
 
-A `total`. The document set moves legitimately between runs — every smoke run creates one and
+A `total`. The probe set moves legitimately between runs — every smoke run creates one and
 deletes it — so asserting a count here would fail nightly for a reason that has nothing to do with
 restore. `restore-verify.sh` treats a missing `total` as "assert ownership and bytes only", which is
 exactly the claim T-7.8 (#147) asked for:
 
-> A document uploaded **before** a rebuild is downloadable by its owner **after** one.
+> A probe uploaded **before** a rebuild is downloadable by its owner **after** one.
 
-## What makes this document a good anchor
+## What makes this probe a good anchor
 
 - **Created 2026-08-21**, so it already predates many full destroy-and-rebuild cycles.
 - **Owned by a pinned sub.** `smoke` carries an explicit `id` in `realm-import.yaml` (ADR-0010), so
@@ -35,7 +35,7 @@ exactly the claim T-7.8 (#147) asked for:
 
 ## When it legitimately needs updating
 
-If this document is ever deleted, or the realm's pinned ids change. Both are deliberate acts. Update
+If this probe is ever deleted, or the realm's pinned ids change. Both are deliberate acts. Update
 it by running:
 
 ```bash

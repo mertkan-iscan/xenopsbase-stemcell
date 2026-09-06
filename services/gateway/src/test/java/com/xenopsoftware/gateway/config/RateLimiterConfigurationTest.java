@@ -35,7 +35,7 @@ class RateLimiterConfigurationTest {
     private final KeyResolver resolver = new RateLimiterConfiguration("").clientKeyResolver();
 
     private MockServerWebExchange exchangeFrom(String forwardedFor, String remoteHost) {
-        MockServerHttpRequest.BaseBuilder<?> builder = MockServerHttpRequest.get("/services/core/api/documents");
+        MockServerHttpRequest.BaseBuilder<?> builder = MockServerHttpRequest.get("/services/core/api/platform/probe");
         if (forwardedFor != null) {
             builder = builder.header("X-Forwarded-For", forwardedFor);
         }

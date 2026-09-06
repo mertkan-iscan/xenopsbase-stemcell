@@ -1,5 +1,11 @@
 /*
- * The minimal browser client for T-3.13.
+ * The minimal browser client for T-3.13, reduced to the platform half in T-9.2.
+ *
+ * WHAT IS NOT HERE ANY MORE. The upload panel, the table, the pager and the
+ * delete button were a document manager -- business UI in a template that
+ * claims to have no business logic. They went with the endpoints behind them.
+ * What is left is the session, the log-out, and the infrastructure panel, each
+ * of which proves something about the PLATFORM rather than about a domain.
  *
  * WHY THERE IS NO OIDC CODE HERE
  *
@@ -25,7 +31,6 @@
  */
 
 const CORE = "/services/core/api";
-const PAGE_SIZE = 10;
 
 // Matches AuthoritiesConstants.ADMIN in core. Written out here because there is
 // no build step to share a constant with Java; if the realm renames the role,
@@ -34,7 +39,6 @@ const PAGE_SIZE = 10;
 const ADMIN_AUTHORITY = "app-admin";
 
 const el = (id) => document.getElementById(id);
-const state = { page: 0, links: {}, total: 0 };
 
 /* ------------------------------------------------------------------ *
  * Plumbing
@@ -98,21 +102,6 @@ async function problemMessage(response) {
   }
 }
 
-/**
- * Parses the RFC 8288 Link header that PaginationUtil emits.
- *
- * Not split on "," -- the URLs contain one, in `sort=createdAt,DESC`. Matching
- * the <...>; rel="..." pairs directly sidesteps that; splitting naively yields
- * two broken halves and a "next" page that 404s.
- */
-function parseLinks(header) {
-  const links = {};
-  if (!header) return links;
-  for (const match of header.matchAll(/<([^>]+)>;\s*rel="([^"]+)"/g)) {
-    links[match[2]] = match[1];
-  }
-  return links;
-}
 
 /* ------------------------------------------------------------------ *
  * Presentation
@@ -127,10 +116,10 @@ function banner(message, kind) {
 
 function sessionExpired() {
   banner("Your session ended. Reload the page to sign in again.", "error");
-  el("upload").disabled = true;
   el("logout").disabled = true;
 }
 
+/** Kept from the document UI: the infrastructure meters format bytes too. */
 function formatSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB", "TB"];
@@ -143,69 +132,7 @@ function formatSize(bytes) {
   return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
 }
 
-function formatDate(iso) {
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
-}
 
-/**
- * Rows are built with DOM calls rather than an innerHTML template.
- *
- * A filename is supplied by whoever uploaded it and is echoed straight back
- * here. Through innerHTML that is stored XSS on a page holding a live session;
- * textContent cannot be talked into parsing markup.
- */
-function renderRows(documents) {
-  const body = el("rows");
-  body.replaceChildren();
-
-  for (const doc of documents) {
-    const row = document.createElement("tr");
-
-    const name = document.createElement("td");
-    name.className = "name";
-    name.textContent = doc.filename;
-    row.appendChild(name);
-
-    const type = document.createElement("td");
-    type.textContent = doc.contentType;
-    row.appendChild(type);
-
-    const size = document.createElement("td");
-    size.className = "num";
-    size.textContent = formatSize(doc.sizeBytes);
-    row.appendChild(size);
-
-    const created = document.createElement("td");
-    created.textContent = formatDate(doc.createdAt);
-    row.appendChild(created);
-
-    const actions = document.createElement("td");
-
-    // A plain anchor, with no JavaScript behind it.
-    //
-    // The endpoint answers 302 to a short-lived presigned GET precisely so this
-    // works (see DocumentResource#download). Fetching it instead would follow
-    // the redirect in script and hand us bytes we would then have to turn back
-    // into a download, for nothing.
-    const download = document.createElement("a");
-    download.href = `${CORE}/documents/${doc.id}/download`;
-    download.textContent = "Download";
-    actions.appendChild(download);
-
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "link";
-    remove.textContent = "Delete";
-    remove.addEventListener("click", () => deleteDocument(doc.id, doc.filename));
-    actions.appendChild(remove);
-
-    row.appendChild(actions);
-    body.appendChild(row);
-  }
-
-  el("empty").hidden = documents.length > 0;
-}
 
 /* ------------------------------------------------------------------ *
  * Actions
@@ -222,6 +149,19 @@ async function loadIdentity() {
     el("identity").textContent = who.name ? `Signed in as ${who.name}` : "Signed in";
     el("logout").disabled = false;
 
+    // What CORE sees in the relayed token, spelled out rather than summarised.
+    // This is the page's remaining reason to exist: a misconfigured TokenRelay
+    // does not error, it just delivers an anonymous request downstream, and the
+    // only way to notice is to ask the downstream service who it thinks is
+    // calling.
+    const detail = [
+      who.authenticated ? "authenticated" : "ANONYMOUS at core",
+      who.sub ? `sub ${who.sub}` : null,
+      (who.authorities || []).length ? `authorities ${(who.authorities || []).join(", ")}` : "no authorities",
+      (who.aud || []).length ? `aud ${(who.aud || []).join(", ")}` : null,
+    ].filter(Boolean);
+    el("session-detail").textContent = detail.join(" · ");
+
     // Same source as the authorities core enforces with, so the panel cannot
     // be shown to someone the server would refuse. Hiding it is a courtesy;
     // /api/admin/** is what actually stops anyone reading this.
@@ -231,104 +171,12 @@ async function loadIdentity() {
     }
   } catch {
     el("identity").textContent = "Session unknown";
+    el("session-detail").textContent = "core did not answer /api/whoami";
   }
 }
 
-async function loadPage(pageOrUrl = 0) {
-  let url;
-  if (typeof pageOrUrl === "number") {
-    state.page = pageOrUrl;
-    url = `${CORE}/documents?page=${pageOrUrl}&size=${PAGE_SIZE}&sort=createdAt,desc`;
-  } else {
-    // A URL straight from the Link header. It is same-origin and correctly
-    // prefixed only because the gateway now sends X-Forwarded-Prefix; before
-    // that it named https://core/api/... and was unusable from here.
-    url = pageOrUrl;
-    const parsed = new URL(url, window.location.origin);
-    state.page = Number(parsed.searchParams.get("page") || 0);
-  }
 
-  const response = await api(url);
-  const documents = await response.json();
 
-  state.links = parseLinks(response.headers.get("Link"));
-  state.total = Number(response.headers.get("X-Total-Count") || documents.length);
-
-  renderRows(documents);
-
-  el("total").textContent = state.total ? `(${state.total})` : "";
-  el("page-label").textContent = state.total
-    ? `Page ${state.page + 1} of ${Math.max(1, Math.ceil(state.total / PAGE_SIZE))}`
-    : "";
-  el("prev").disabled = !state.links.prev;
-  el("next").disabled = !state.links.next;
-}
-
-async function upload(file) {
-  // Both of these are rejected by bean validation on the way in -- @Positive on
-  // sizeBytes, @NotBlank on contentType -- and a 400 for an empty file is a
-  // worse answer than saying so here. A browser reports type as "" for anything
-  // it does not recognise, which is common enough to be worth handling.
-  if (file.size === 0) {
-    throw new Error("That file is empty, and an empty upload cannot be signed.");
-  }
-  const contentType = file.type || "application/octet-stream";
-
-  el("upload-status").textContent = "Requesting an upload ticket…";
-  const ticketResponse = await api(`${CORE}/documents`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ filename: file.name, contentType, sizeBytes: file.size }),
-  });
-  const ticket = await ticketResponse.json();
-
-  el("upload-status").textContent = `Uploading ${file.name}…`;
-
-  // Straight to object storage, not through the gateway.
-  //
-  // credentials "omit" on purpose: this is a different origin, the presigned
-  // URL already carries its own authorisation, and the bucket's CORS policy
-  // does not allow credentials -- sending them would fail the check outright.
-  //
-  // Content-Type comes from the TICKET, not from the File. The signature covers
-  // content-length, content-type and host; sending a type even slightly
-  // different from the one core signed produces a 403 from the bucket that says
-  // nothing about why.
-  const put = await fetch(ticket.uploadUrl, {
-    method: "PUT",
-    headers: { "Content-Type": ticket.contentType },
-    body: file,
-    credentials: "omit",
-    mode: "cors",
-  });
-  if (!put.ok) {
-    throw new Error(`The object store rejected the upload (HTTP ${put.status}).`);
-  }
-
-  // Nothing is downloadable until this lands: completion is what verifies the
-  // bytes actually arrived, so a failure here leaves a document that exists but
-  // is not AVAILABLE.
-  el("upload-status").textContent = "Confirming…";
-  await api(`${CORE}/documents/${ticket.id}/complete`, { method: "POST" });
-
-  el("upload-status").textContent = "";
-  banner(`Uploaded ${file.name}.`, "ok");
-  await loadPage(0);
-}
-
-async function deleteDocument(id, filename) {
-  if (!window.confirm(`Delete ${filename}?`)) return;
-  try {
-    await api(`${CORE}/documents/${id}`, { method: "DELETE" });
-    banner(`Deleted ${filename}.`, "ok");
-    // Re-request the page rather than splicing the row out: the row that moves
-    // up into this page comes from the server, and guessing at it locally is
-    // how a list drifts out of step with its own pagination.
-    await loadPage(state.page);
-  } catch (error) {
-    banner(error.message, "error");
-  }
-}
 
 async function logout() {
   el("logout").disabled = true;
@@ -349,28 +197,6 @@ async function logout() {
 /* ------------------------------------------------------------------ *
  * Wiring
  * ------------------------------------------------------------------ */
-
-el("file").addEventListener("change", (event) => {
-  el("upload").disabled = event.target.files.length === 0;
-  banner("");
-});
-
-el("upload").addEventListener("click", async () => {
-  const file = el("file").files[0];
-  if (!file) return;
-
-  el("upload").disabled = true;
-  banner("");
-  try {
-    await upload(file);
-    el("file").value = "";
-  } catch (error) {
-    el("upload-status").textContent = "";
-    if (error.message !== "unauthenticated") banner(error.message, "error");
-  } finally {
-    el("upload").disabled = el("file").files.length === 0;
-  }
-});
 
 /* ------------------------------------------------------------------ *
  * Infrastructure usage (T-3.16)
@@ -574,8 +400,6 @@ async function loadInfra() {
 
 el("infra-refresh").addEventListener("click", () => loadInfra());
 
-el("prev").addEventListener("click", () => loadPage(state.links.prev).catch((e) => banner(e.message, "error")));
-el("next").addEventListener("click", () => loadPage(state.links.next).catch((e) => banner(e.message, "error")));
 el("logout").addEventListener("click", logout);
 
 /*
@@ -590,6 +414,3 @@ window.addEventListener("pageshow", (event) => {
 });
 
 loadIdentity();
-loadPage(0).catch((error) => {
-  if (error.message !== "unauthenticated") banner(error.message, "error");
-});

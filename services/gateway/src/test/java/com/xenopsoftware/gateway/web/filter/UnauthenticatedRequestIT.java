@@ -40,7 +40,7 @@ class UnauthenticatedRequestIT {
     void anApiClientGetsAProblemDetailRatherThanARedirectToALoginPage() {
         webTestClient
             .get()
-            .uri("/api/documents")
+            .uri("/api/platform/probe")
             .accept(MediaType.APPLICATION_JSON)
             .exchange()
             .expectStatus()
@@ -56,12 +56,12 @@ class UnauthenticatedRequestIT {
             .jsonPath("$.title")
             .isEqualTo("Unauthorized")
             .jsonPath("$.instance")
-            .isEqualTo("/api/documents");
+            .isEqualTo("/api/platform/probe");
     }
 
     @Test
     void aRequestWithNoAcceptHeaderIsTreatedAsAnApiClient() {
-        webTestClient.get().uri("/api/documents").exchange().expectStatus().isUnauthorized();
+        webTestClient.get().uri("/api/platform/probe").exchange().expectStatus().isUnauthorized();
     }
 
     @Test
@@ -69,7 +69,7 @@ class UnauthenticatedRequestIT {
         // This test used to send NO Accept header while its comment claimed to cover `*_/_*`, and
         // those are different requests: the first was always a 401, the second was a 302 for
         // months. The case the comment described was never actually exercised (T-3.18, #175).
-        webTestClient.get().uri("/api/documents").header(HttpHeaders.ACCEPT, "*/*").exchange().expectStatus().isUnauthorized();
+        webTestClient.get().uri("/api/platform/probe").header(HttpHeaders.ACCEPT, "*/*").exchange().expectStatus().isUnauthorized();
     }
 
     @Test
@@ -93,7 +93,7 @@ class UnauthenticatedRequestIT {
     void aBrowserNavigationStillRedirectsToLogin() {
         webTestClient
             .get()
-            .uri("/api/documents")
+            .uri("/api/platform/probe")
             .accept(MediaType.TEXT_HTML)
             .exchange()
             .expectStatus()
@@ -108,7 +108,7 @@ class UnauthenticatedRequestIT {
     void everyResponseCarriesACorrelationIdWhetherOrNotTheCallerSuppliedOne() {
         webTestClient
             .get()
-            .uri("/api/documents")
+            .uri("/api/platform/probe")
             .exchange()
             .expectHeader()
             .value(CorrelationId.HEADER, id -> org.assertj.core.api.Assertions.assertThat(id).isNotBlank());
@@ -117,7 +117,7 @@ class UnauthenticatedRequestIT {
         // per hop.
         webTestClient
             .get()
-            .uri("/api/documents")
+            .uri("/api/platform/probe")
             .header(CorrelationId.HEADER, "caller-supplied-id")
             .exchange()
             .expectHeader()
@@ -130,7 +130,7 @@ class UnauthenticatedRequestIT {
         // fabricated log entries.
         webTestClient
             .get()
-            .uri("/api/documents")
+            .uri("/api/platform/probe")
             .header(CorrelationId.HEADER, "bad id with spaces and \"quotes\"")
             .exchange()
             .expectHeader()

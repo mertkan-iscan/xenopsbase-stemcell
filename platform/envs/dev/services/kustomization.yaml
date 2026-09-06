@@ -71,7 +71,7 @@ images:
     #
     # Commit 924c150 -- core caches document pages through Valkey (T-3.22, #264,
     # ADR-0011). Cache-aside on GET /api/documents only, keyed
-    # xob:c:v1:document-list:<owner>:<page> so one user's page can never be
+    # xob:c:v1:probe-list:<owner>:<page> so one user's page can never be
     # served to another, evicted after commit rather than inside the
     # transaction, every entry carrying a jittered TTL.
     #

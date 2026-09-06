@@ -216,6 +216,32 @@ Delete instead:
   [cold-rebuild.md](runbooks/cold-rebuild.md) are all measurements of *this* hardware. Keeping
   someone else's numbers is worse than having none, because they look like yours.
 - `platform/envs/dev/secrets/*.yaml`, as above.
+- **The platform probe**, once your own endpoints exercise the same seams — `core`'s
+  `platform/` package, `V8__platform_probe.sql`, and the `/api/platform/probe` half of
+  `smoke.sh`, the k6 suites and the restore drill.
+
+  It is the template's self-test and it is deliberately not a domain: audit columns, the audit log,
+  soft delete, the tenant discriminator, the outbox, the idempotency filter and object storage are
+  all on one path through it, so that those checks are testing something rather than passing
+  because there is nothing left to check.
+
+  **Re-point the scripts before you delete it, not after.** `smoke.sh` and `restore-verify.sh` are
+  what stand between a broken deploy and a green tick; a fork that deletes the probe and leaves them
+  pointing at a 404 has not removed a test, it has removed the only thing that would have told it so.
+  `PlatformIdentityResource` is the exception — keep `/api/whoami` and one `/api/admin/**` endpoint,
+  or the token relay and the ADMIN authorization rule stop being asserted anywhere.
+
+### Squashing the migration baseline is a fork-time action
+
+`V1`–`V8` carry the stemcell's history, including `V7__drop_demo_domain.sql`, which drops two tables
+your fork will never have had. Collapsing them into one baseline is legitimate **against an empty
+database, before your first deploy, and only then**: delete `db/migration/core/*` and write a single
+`V1__baseline.sql` that produces the schema you actually want.
+
+Doing it after any environment has run is the mistake the `V7` header exists to warn about. Flyway
+validates on every start by comparing checksums against `flyway_schema_history`, so a deleted or
+edited applied migration fails startup everywhere at once with "Detected applied migration not
+resolved locally" — a message that says nothing about somebody having tidied the folder.
 
 ## What to keep
 

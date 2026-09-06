@@ -125,13 +125,13 @@ class RealTokenAuthorizationIT {
     @Test
     @DisplayName("a real user token reaches an authenticated endpoint")
     void realUserTokenIsAccepted() throws Exception {
-        mvc.perform(get("/api/example-items").header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenFor("smoke"))).andExpect(status().isOk());
+        mvc.perform(get("/api/whoami").header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenFor("smoke"))).andExpect(status().isOk());
     }
 
     @Test
     @DisplayName("a real user token is REFUSED the admin endpoint")
     void realUserTokenIsRefusedAdmin() throws Exception {
-        mvc.perform(get("/api/admin/example-items").header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenFor("smoke"))).andExpect(
+        mvc.perform(get("/api/admin/platform/probe").header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenFor("smoke"))).andExpect(
             status().isForbidden()
         );
     }
@@ -139,7 +139,7 @@ class RealTokenAuthorizationIT {
     @Test
     @DisplayName("a real admin token reaches the admin endpoint, so the rule is not denying everyone")
     void realAdminTokenReachesAdmin() throws Exception {
-        mvc.perform(get("/api/admin/example-items").header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenFor("smoke-admin"))).andExpect(
+        mvc.perform(get("/api/admin/platform/probe").header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenFor("smoke-admin"))).andExpect(
             status().isOk()
         );
     }
@@ -149,7 +149,7 @@ class RealTokenAuthorizationIT {
     void forgedTokenIsRefused() throws Exception {
         String forged = tokenFor("smoke-admin") + "tampered";
 
-        mvc.perform(get("/api/admin/example-items").header(HttpHeaders.AUTHORIZATION, "Bearer " + forged)).andExpect(
+        mvc.perform(get("/api/admin/platform/probe").header(HttpHeaders.AUTHORIZATION, "Bearer " + forged)).andExpect(
             status().isUnauthorized()
         );
     }

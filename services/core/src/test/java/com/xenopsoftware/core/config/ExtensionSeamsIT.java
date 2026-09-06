@@ -8,8 +8,8 @@ import com.xenopsoftware.common.outbox.OutboxMessageRepository;
 import com.xenopsoftware.common.outbox.OutboxService;
 import com.xenopsoftware.common.tenancy.TenantContext;
 import com.xenopsoftware.core.IntegrationTest;
-import com.xenopsoftware.core.domain.ExampleItem;
-import com.xenopsoftware.core.repository.ExampleItemRepository;
+import com.xenopsoftware.core.platform.PlatformProbe;
+import com.xenopsoftware.core.platform.PlatformProbeRepository;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,7 +31,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 class ExtensionSeamsIT {
 
     @Autowired
-    private ExampleItemRepository exampleItemRepository;
+    private PlatformProbeRepository probeRepository;
 
     @Autowired
     private OutboxMessageRepository outboxRepository;
@@ -57,28 +57,36 @@ class ExtensionSeamsIT {
         transactionTemplate.executeWithoutResult(status -> {
             jdbcTemplate.update("delete from audit_log");
             jdbcTemplate.update("delete from outbox_message");
-            jdbcTemplate.update("delete from example_item");
+            jdbcTemplate.update("delete from platform_probe");
         });
         TenantContext.clear();
     }
 
-    private ExampleItem newItem(String name) {
-        ExampleItem item = new ExampleItem();
-        item.setName(name);
-        return item;
+    /**
+     * A probe row with the minimum every seam needs. It is never uploaded to and never completed —
+     * the object-storage half of the probe is covered by {@code PlatformProbeResourceIT}; what this
+     * class cares about is what happens to the ROW.
+     */
+    private PlatformProbe newProbe(String label) {
+        PlatformProbe probe = new PlatformProbe();
+        probe.setObjectKey("seams/" + label + "-" + java.util.UUID.randomUUID());
+        probe.setLabel(label);
+        probe.setContentType("text/plain");
+        probe.setOwner("auditor");
+        return probe;
     }
 
     // ---------------------------------------------------------------- audit
 
     @Test
     void everyWriteIsAuditedWithoutTheEntityOptingIn() {
-        ExampleItem saved = transactionTemplate.execute(status -> exampleItemRepository.save(newItem("first")));
+        PlatformProbe saved = transactionTemplate.execute(status -> probeRepository.save(newProbe("first")));
 
         // payload::text, not payload. A jsonb column comes back as a PGobject, and casting that
         // to String throws -- which reads as an audit failure rather than as a JDBC type detail.
         List<Map<String, Object>> entries = jdbcTemplate.queryForList(
             "select entity_type, entity_id, action, actor, actor_name, payload::text as payload " +
-                "from audit_log where entity_type = 'ExampleItem'"
+                "from audit_log where entity_type = 'PlatformProbe'"
         );
 
         assertThat(entries).as("an entity with no audit annotation must still be audited").hasSize(1);
@@ -88,12 +96,12 @@ class ExtensionSeamsIT {
 
     @Test
     void anUpdateRecordsWhatChangedRatherThanTheWholeEntity() {
-        ExampleItem saved = transactionTemplate.execute(status -> exampleItemRepository.save(newItem("before")));
+        PlatformProbe saved = transactionTemplate.execute(status -> probeRepository.save(newProbe("before")));
 
         transactionTemplate.execute(status -> {
-            ExampleItem found = exampleItemRepository.findById(saved.getId()).orElseThrow();
-            found.setName("after");
-            return exampleItemRepository.save(found);
+            PlatformProbe found = probeRepository.findById(saved.getId()).orElseThrow();
+            found.setLabel("after");
+            return probeRepository.save(found);
         });
 
         String payload = jdbcTemplate.queryForObject("select payload::text from audit_log where action = 'UPDATE'", String.class);
@@ -107,8 +115,8 @@ class ExtensionSeamsIT {
     void auditEntriesRollBackWithTheChangeTheyDescribe() {
         assertThatThrownBy(() ->
             transactionTemplate.execute(status -> {
-                exampleItemRepository.save(newItem("doomed"));
-                exampleItemRepository.flush();
+                probeRepository.save(newProbe("doomed"));
+                probeRepository.flush();
                 throw new IllegalStateException("forced rollback");
             })
         ).hasMessageContaining("forced rollback");
@@ -120,7 +128,7 @@ class ExtensionSeamsIT {
 
     @Test
     void theActorIsTheStableIdentifierNotTheUsername() {
-        transactionTemplate.execute(status -> exampleItemRepository.save(newItem("attributed")));
+        transactionTemplate.execute(status -> probeRepository.save(newProbe("attributed")));
 
         Map<String, Object> entry = jdbcTemplate.queryForMap("select actor, actor_name from audit_log");
 
@@ -133,15 +141,15 @@ class ExtensionSeamsIT {
 
     @Test
     void aDeletedRowDisappearsFromQueriesButRemainsInTheTable() {
-        ExampleItem saved = transactionTemplate.execute(status -> exampleItemRepository.save(newItem("gone")));
+        PlatformProbe saved = transactionTemplate.execute(status -> probeRepository.save(newProbe("gone")));
 
-        transactionTemplate.executeWithoutResult(status -> exampleItemRepository.deleteById(saved.getId()));
+        transactionTemplate.executeWithoutResult(status -> probeRepository.deleteById(saved.getId()));
 
-        assertThat(exampleItemRepository.findById(saved.getId())).as("invisible to ordinary queries").isEmpty();
-        assertThat(exampleItemRepository.findAll()).isEmpty();
+        assertThat(probeRepository.findById(saved.getId())).as("invisible to ordinary queries").isEmpty();
+        assertThat(probeRepository.findAll()).isEmpty();
 
         Integer rowsStillPresent = jdbcTemplate.queryForObject(
-            "select count(*) from example_item where id = ? and deleted = true",
+            "select count(*) from platform_probe where id = ? and deleted = true",
             Integer.class,
             saved.getId()
         );
@@ -152,9 +160,9 @@ class ExtensionSeamsIT {
 
     @Test
     void rowsAreWrittenUnderTheDefaultTenantWhileTheSeamIsInert() {
-        transactionTemplate.execute(status -> exampleItemRepository.save(newItem("tenanted")));
+        transactionTemplate.execute(status -> probeRepository.save(newProbe("tenanted")));
 
-        String tenant = jdbcTemplate.queryForObject("select tenant_id from example_item", String.class);
+        String tenant = jdbcTemplate.queryForObject("select tenant_id from platform_probe", String.class);
 
         // NOT NULL and never blank. A row with no tenant matches no tenant filter and becomes
         // invisible to everyone, including whoever owns it.
@@ -164,17 +172,17 @@ class ExtensionSeamsIT {
     @Test
     void aRowWrittenUnderOneTenantIsInvisibleToAnother() {
         TenantContext.set("acme");
-        ExampleItem acme = transactionTemplate.execute(status -> exampleItemRepository.save(newItem("acme-only")));
+        PlatformProbe acme = transactionTemplate.execute(status -> probeRepository.save(newProbe("acme-only")));
 
         // This is the assertion that proves the resolver is actually wired. Without it registered
         // in Hibernate's settings the column would still be written, findAll would still return
         // the row, and the seam would look like it worked.
         TenantContext.set("other");
-        assertThat(exampleItemRepository.findAll()).as("another tenant must not see it").isEmpty();
-        assertThat(exampleItemRepository.findById(acme.getId())).isEmpty();
+        assertThat(probeRepository.findAll()).as("another tenant must not see it").isEmpty();
+        assertThat(probeRepository.findById(acme.getId())).isEmpty();
 
         TenantContext.set("acme");
-        assertThat(exampleItemRepository.findById(acme.getId())).as("its own tenant still sees it").isPresent();
+        assertThat(probeRepository.findById(acme.getId())).as("its own tenant still sees it").isPresent();
     }
 
     // -------------------------------------------------------------- outbox
@@ -182,15 +190,20 @@ class ExtensionSeamsIT {
     @Test
     void aMessageAndTheChangeItAnnouncesCommitTogether() {
         transactionTemplate.execute(status -> {
-            ExampleItem saved = exampleItemRepository.save(newItem("published"));
-            outboxService.record("example.created", "ExampleItem", String.valueOf(saved.getId()), Map.of("name", saved.getName()));
+            PlatformProbe saved = probeRepository.save(newProbe("published"));
+            outboxService.record(
+                "platform.probe.created",
+                "PlatformProbe",
+                String.valueOf(saved.getId()),
+                Map.of("label", saved.getLabel())
+            );
             return saved;
         });
 
         assertThat(outboxRepository.findAll())
             .singleElement()
             .satisfies(message -> {
-                assertThat(message.getMessageType()).isEqualTo("example.created");
+                assertThat(message.getMessageType()).isEqualTo("platform.probe.created");
                 assertThat(message.getPublishedAt()).as("recorded, not yet published").isNull();
                 assertThat(message.getPayload()).contains("published");
             });
@@ -200,8 +213,8 @@ class ExtensionSeamsIT {
     void aRolledBackChangeAnnouncesNothing() {
         assertThatThrownBy(() ->
             transactionTemplate.execute(status -> {
-                ExampleItem saved = exampleItemRepository.save(newItem("never"));
-                outboxService.record("example.created", "ExampleItem", String.valueOf(saved.getId()), Map.of());
+                PlatformProbe saved = probeRepository.save(newProbe("never"));
+                outboxService.record("platform.probe.created", "PlatformProbe", String.valueOf(saved.getId()), Map.of());
                 throw new IllegalStateException("forced rollback");
             })
         ).hasMessageContaining("forced rollback");
@@ -209,7 +222,7 @@ class ExtensionSeamsIT {
         // The failure this pattern exists to prevent: an event announcing something that did not
         // happen. Publishing to a broker inline could not offer this.
         assertThat(outboxRepository.findAll()).isEmpty();
-        assertThat(exampleItemRepository.findAll()).isEmpty();
+        assertThat(probeRepository.findAll()).isEmpty();
     }
 
     @Test
@@ -227,36 +240,36 @@ class ExtensionSeamsIT {
     @Test
     void outboxRowsAreNotThemselvesAudited() {
         transactionTemplate.execute(status -> {
-            ExampleItem saved = exampleItemRepository.save(newItem("noise"));
-            outboxService.record("example.created", "ExampleItem", String.valueOf(saved.getId()), Map.of());
+            PlatformProbe saved = probeRepository.save(newProbe("noise"));
+            outboxService.record("platform.probe.created", "PlatformProbe", String.valueOf(saved.getId()), Map.of());
             return saved;
         });
 
         assertThat(jdbcTemplate.queryForList("select entity_type from audit_log", String.class))
             .as("the audit log must not fill with entries about its own plumbing")
-            .containsExactly("ExampleItem");
+            .containsExactly("PlatformProbe");
     }
 
     @Test
     void aMessageThatCannotBeSerialisedFailsTheWholeTransaction() {
         assertThatThrownBy(() ->
             transactionTemplate.execute(status -> {
-                exampleItemRepository.save(newItem("unserialisable"));
-                outboxService.record("bad", "ExampleItem", "1", new Object());
+                probeRepository.save(newProbe("unserialisable"));
+                outboxService.record("bad", "PlatformProbe", "1", new Object());
                 return null;
             })
         ).isInstanceOf(IllegalArgumentException.class);
 
         // Committing the change and dropping the message would make the outbox best-effort.
-        assertThat(exampleItemRepository.findAll()).isEmpty();
+        assertThat(probeRepository.findAll()).isEmpty();
     }
 
     @Test
     void unpublishedMessagesAreClaimedOldestFirst() {
         transactionTemplate.execute(status -> {
-            ExampleItem saved = exampleItemRepository.save(newItem("batch"));
-            outboxService.record("first", "ExampleItem", String.valueOf(saved.getId()), Map.of());
-            outboxService.record("second", "ExampleItem", String.valueOf(saved.getId()), Map.of());
+            PlatformProbe saved = probeRepository.save(newProbe("batch"));
+            outboxService.record("first", "PlatformProbe", String.valueOf(saved.getId()), Map.of());
+            outboxService.record("second", "PlatformProbe", String.valueOf(saved.getId()), Map.of());
             return saved;
         });
 

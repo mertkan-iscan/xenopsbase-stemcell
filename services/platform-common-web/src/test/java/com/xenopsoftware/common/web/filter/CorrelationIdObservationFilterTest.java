@@ -17,7 +17,7 @@ class CorrelationIdObservationFilterTest {
     private final CorrelationIdObservationFilter filter = new CorrelationIdObservationFilter();
 
     private static ServerRequestObservationContext context(String responseHeaderValue) {
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/documents");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/platform/probe");
         MockHttpServletResponse response = new MockHttpServletResponse();
         if (responseHeaderValue != null) {
             response.setHeader(CorrelationId.HEADER, responseHeaderValue);

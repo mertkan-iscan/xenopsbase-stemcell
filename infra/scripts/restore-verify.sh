@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 #
-# A document uploaded BEFORE a rebuild is downloadable by its OWNER after one
+# A probe uploaded BEFORE a rebuild is downloadable by its OWNER after one
 # (T-7.3, #55; the assertion T-7.8 (#147) closed without and pointed here for).
 #
 # WHY "THE DATABASE CAME BACK" IS THE WRONG ASSERTION
 #
-# Ownership spans two systems. A document's owner is the Keycloak `sub`, which
-# lives in Keycloak's Postgres schema; the document's row lives in a different
+# Ownership spans two systems. A probe's owner is the Keycloak `sub`, which
+# lives in Keycloak's Postgres schema; the probe's row lives in a different
 # database and its bytes live in object storage. A drill that restores Postgres,
 # counts the rows and never signs in would report success against exactly the
 # failure #147 is about: every row present, every object present, and nothing
 # reachable, because the users were recreated with new subs.
 #
 # So the check is end to end and from the outside: sign in as the owning user,
-# confirm the count the API reports for THEM, and pull one document's bytes
+# confirm the count the API reports for THEM, and pull one probe's bytes
 # through its presigned redirect. Anything less passes while the data is
 # orphaned.
 #
@@ -110,7 +110,7 @@ TOKEN="$(echo "$token_json" | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
 }
 echo "  signed in as ${USERNAME}"
 
-# The sub, so the record names WHO the documents must still belong to rather
+# The sub, so the record names WHO the probes must still belong to rather
 # than trusting the username to have kept its identity (ADR-0010).
 SUB="$(
   echo "$TOKEN" | cut -d. -f2 |
@@ -127,14 +127,14 @@ AUTHED=("${ACCESS[@]}" -H "Authorization: Bearer ${TOKEN}")
 headers="$WORK/headers.txt"
 body="$WORK/list.json"
 curl -s --max-time 30 -D "$headers" -o "$body" "${AUTHED[@]}" \
-  -H 'Accept: application/json' "${APP}/services/core/api/documents?size=100"
+  -H 'Accept: application/json' "${APP}/services/core/api/platform/probe?size=100"
 
 TOTAL="$(tr -d '\r' < "$headers" | sed -n 's/^[Xx]-[Tt]otal-[Cc]ount: *//p' | tail -1)"
 [ -n "$TOTAL" ] || {
-  echo "  FAILED  no X-Total-Count on the document list" >&2
+  echo "  FAILED  no X-Total-Count on the probe list" >&2
   exit 1
 }
-echo "  ${USERNAME} can see ${TOTAL} document(s)"
+echo "  ${USERNAME} can see ${TOTAL} probe(s)"
 
 PY_BIN=""
 for candidate in python3 python; do
@@ -156,9 +156,9 @@ else
   STATE_PY="$STATE"
 fi
 
-# The OLDEST document, deliberately. It is the one most likely to predate a
+# The OLDEST probe, deliberately. It is the one most likely to predate a
 # rebuild, and therefore the one whose survival actually means something.
-read -r DOC_ID DOC_NAME DOC_CREATED <<EOF
+read -r PROBE_ID PROBE_LABEL PROBE_CREATED <<EOF
 $("$PY_BIN" - "$WORK_PY/list.json" <<'PY'
 import json
 import sys
@@ -169,25 +169,25 @@ if not docs:
     print("  none")
     raise SystemExit(0)
 oldest = min(docs, key=lambda d: d.get("createdAt") or "")
-print("%s %s %s" % (oldest["id"], oldest.get("filename", "?"), oldest.get("createdAt", "?")))
+print("%s %s %s" % (oldest["id"], oldest.get("label", "?"), oldest.get("createdAt", "?")))
 PY
 )
 EOF
 
-[ -n "${DOC_ID:-}" ] && [ "$DOC_ID" != "none" ] || {
-  echo "  FAILED  ${USERNAME} owns no documents, so there is nothing to prove survived" >&2
+[ -n "${PROBE_ID:-}" ] && [ "$PROBE_ID" != "none" ] || {
+  echo "  FAILED  ${USERNAME} owns no probes, so there is nothing to prove survived" >&2
   exit 1
 }
-echo "  oldest document ${DOC_ID} (${DOC_NAME}) created ${DOC_CREATED}"
+echo "  oldest probe ${PROBE_ID} (${PROBE_LABEL}) created ${PROBE_CREATED}"
 
 # -L, because download answers 302 to a presigned GET. Following it IS the test:
 # a row that lists but whose object cannot be fetched is the half-restore this
 # check exists to catch. curl drops the Authorization header on a cross-host
 # redirect, which is what makes this safe to point at object storage.
 curl -s -L --max-time 60 -o "$WORK/doc.bin" "${AUTHED[@]}" \
-  "${APP}/services/core/api/documents/${DOC_ID}/download"
+  "${APP}/services/core/api/platform/probe/${PROBE_ID}/download"
 [ -s "$WORK/doc.bin" ] || {
-  echo "  FAILED  document ${DOC_ID} listed but downloaded 0 bytes" >&2
+  echo "  FAILED  probe ${PROBE_ID} listed but downloaded 0 bytes" >&2
   exit 1
 }
 SHA="$(sha256sum "$WORK/doc.bin" | cut -d' ' -f1)"
@@ -196,23 +196,23 @@ echo "  downloaded ${BYTES} bytes, sha256 ${SHA:0:16}..."
 echo ""
 
 if [ "$MODE" = "record" ]; then
-  "$PY_BIN" - "$STATE_PY" "$USERNAME" "${SUB:-}" "$TOTAL" "$DOC_ID" "$DOC_NAME" "$DOC_CREATED" "$SHA" "$BYTES" <<'PY'
+  "$PY_BIN" - "$STATE_PY" "$USERNAME" "${SUB:-}" "$TOTAL" "$PROBE_ID" "$PROBE_LABEL" "$PROBE_CREATED" "$SHA" "$BYTES" <<'PY'
 import json
 import sys
 import datetime
 
-path, username, sub, total, doc_id, doc_name, created, sha, size = sys.argv[1:10]
+path, username, sub, total, probe_id, probe_label, created, sha, size = sys.argv[1:10]
 state = {
     "recorded_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     "username": username,
     "sub": sub,
     "total": int(total),
-    "document": {"id": int(doc_id), "filename": doc_name, "created_at": created, "sha256": sha, "bytes": int(size)},
+    "probe": {"id": int(probe_id), "label": probe_label, "created_at": created, "sha256": sha, "bytes": int(size)},
 }
 with open(path, "w", encoding="utf-8", newline="\n") as handle:
     json.dump(state, handle, indent=2)
     handle.write("\n")
-print("  RECORDED - %s owns %s document(s); document %s must still be downloadable" % (username, total, doc_id))
+print("  RECORDED - %s owns %s probe(s); probe %s must still be downloadable" % (username, total, probe_id))
 print("  %s" % path)
 PY
   exit $?
@@ -226,11 +226,11 @@ fi
   exit 1
 }
 
-"$PY_BIN" - "$STATE_PY" "${SUB:-}" "$TOTAL" "$SHA" "$DOC_ID" <<'PY'
+"$PY_BIN" - "$STATE_PY" "${SUB:-}" "$TOTAL" "$SHA" "$PROBE_ID" <<'PY'
 import json
 import sys
 
-path, sub, total, sha, doc_id = sys.argv[1:6]
+path, sub, total, sha, probe_id = sys.argv[1:6]
 with open(path, encoding="utf-8") as handle:
     before = json.load(handle)
 
@@ -239,7 +239,7 @@ failures = []
 sub_changed = bool(before.get("sub")) and bool(sub) and before["sub"] != sub
 if sub_changed:
     failures.append(
-        "the owner's sub CHANGED: %s -> %s. Every document now belongs to a user "
+        "the owner's sub CHANGED: %s -> %s. Every probe now belongs to a user "
         "that no longer exists (ADR-0010, #147)." % (before["sub"], sub)
     )
 
@@ -248,28 +248,28 @@ if sub_changed:
 #
 # A record/verify pair around one rebuild expects the count to be identical, and
 # a change there is a real failure. The nightly drill (T-7.3) cannot make that
-# claim: it compares against a fixed anchor, and the document set legitimately
+# claim: it compares against a fixed anchor, and the probe set legitimately
 # moves between runs -- every smoke run creates one and deletes it. Asserting the
 # count there would fail nightly for a reason that has nothing to do with restore.
 #
 # So the anchor file omits it, and what stays asserted is the part T-7.8 (#147)
-# is actually about: the OWNER is the same person, and their oldest document
+# is actually about: the OWNER is the same person, and their oldest probe
 # still returns the same bytes.
 if before.get("total") is None:
     print("  (no expected count in the anchor; asserting ownership and bytes only)")
 elif int(total) != int(before["total"]):
-    failures.append("document count %s -> %s" % (before["total"], total))
+    failures.append("probe count %s -> %s" % (before["total"], total))
 
-want = before["document"]
+want = before["probe"]
 if sha != want["sha256"]:
-    failures.append("document %s bytes differ: sha256 %s -> %s" % (want["id"], want["sha256"][:16], sha[:16]))
+    failures.append("probe %s bytes differ: sha256 %s -> %s" % (want["id"], want["sha256"][:16], sha[:16]))
 
 # Not a failure on its own, but the thing that makes the result meaningful.
 # Absent in an anchor, which describes a durable expectation rather than a
 # moment; present in a record/verify snapshot.
 print("  recorded %s" % before.get("recorded_at", "(anchor - no timestamp)"))
 print("  owner    %s (%s)" % (before["username"], (before.get("sub") or "?")[:8]))
-print("  expected %s; oldest %s created %s" % (("%s document(s)" % before["total"]) if before.get("total") is not None else "any number of documents", want["id"], want.get("created_at")))
+print("  expected %s; oldest %s created %s" % (("%s probe(s)" % before["total"]) if before.get("total") is not None else "any number of probes", want["id"], want.get("created_at")))
 print("")
 
 if failures:
@@ -285,10 +285,10 @@ if failures:
     sys.exit(1)
 
 if before.get("total") is None:
-    print("  PASSED - the owner signed in and their oldest document still returns")
+    print("  PASSED - the owner signed in and their oldest probe still returns")
     print("           byte-identical content, under the same sub.")
 else:
-    print("  PASSED - the owner signed in, sees the same %s document(s), and the oldest" % before["total"])
+    print("  PASSED - the owner signed in, sees the same %s probe(s), and the oldest" % before["total"])
     print("           one still returns byte-identical content.")
 sys.exit(0)
 PY

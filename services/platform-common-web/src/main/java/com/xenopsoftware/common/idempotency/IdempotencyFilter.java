@@ -27,7 +27,7 @@ import org.springframework.web.util.ContentCachingResponseWrapper;
  * Makes unsafe requests safe to retry, when the client asks for it (T-3.8).
  *
  * <pre>
- *   POST /api/documents
+ *   POST /api/platform/probe
  *   Idempotency-Key: 9f2c1b...
  * </pre>
  *

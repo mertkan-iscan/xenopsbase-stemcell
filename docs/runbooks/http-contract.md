@@ -15,7 +15,7 @@ Every error response is `application/problem+json`:
   "title": "Forbidden",
   "status": 403,
   "detail": "Authenticated, but not permitted to perform this operation.",
-  "instance": "/api/documents/42"
+  "instance": "/api/platform/probe/42"
 }
 ```
 
@@ -57,7 +57,7 @@ the caller saying so.
 ## Pagination and sorting
 
 ```
-GET /api/documents?page=0&size=20&sort=createdAt,desc
+GET /api/platform/probe?page=0&size=20&sort=createdAt,desc
 
 X-Total-Count: 137
 Link: <...page=1&size=20>; rel="next", <...page=6&size=20>; rel="last"
@@ -68,7 +68,7 @@ envelope, so a client that never paginates does not have to unwrap anything to r
 
 **`@PageableDefault` sets a default size, not a maximum.** A client asking for `size=1000000` still
 gets it — which is a denial of service against the database dressed as a normal request. Endpoints
-cap the value explicitly; see `DocumentResource.capped`.
+cap the value explicitly; see `PlatformProbeResource.capped`.
 
 Sorting is by entity field name. Anything sortable is also indexed, or it is a sequential scan the
 client can trigger at will.
@@ -76,7 +76,7 @@ client can trigger at will.
 ## Idempotency keys
 
 ```
-POST /api/documents
+POST /api/platform/probe
 Idempotency-Key: 9f2c1b7e...
 ```
 
@@ -194,6 +194,24 @@ low-cardinality, because nothing else would notice in time.
 `correlation.id` and the W3C `traceparent` both survive rather than one replacing the other. They
 answer different questions and have different lifetimes, and a sampled-out trace still needs a
 correlation id in its logs.
+
+## Breaking the contract on purpose
+
+`docs/api/*.json` is the published contract, and the `API compatibility` job compares every pull
+request against its base. A removed operation, a removed response, a newly-required parameter — all
+fail the check.
+
+**A deliberate break is labelled, not forced.** Add `breaking-api` to the pull request and the job
+passes with a warning that names what was removed. The label is the record that a person decided it,
+and it is visible on the PR rather than buried in a file the next author copies forward.
+
+That escape hatch was added in T-9.2, when deleting the demo domain became the first legitimate
+breaking change this repository had made. Before it, the gate could not be satisfied at all — which
+is not strictness. A control with no legitimate override is one somebody deletes the first time they
+need it, and a deleted gate governs nothing at all.
+
+Anything consuming a removed operation has to move: `clients/java` regenerates from the committed
+spec, and a fork reads it as its own contract.
 
 ## Rate limiting
 

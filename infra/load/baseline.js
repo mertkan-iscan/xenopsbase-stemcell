@@ -24,7 +24,7 @@
 //   gateway_only   /api/auth-info — permitAll, no downstream call, no database.
 //                  Isolates the gateway: TLS termination, the filter chain, the
 //                  session lookup in Valkey.
-//   through_core   /services/core/api/documents — the real read path. Gateway
+//   through_core   /services/core/api/platform/probe — the real read path. Gateway
 //                  route, bearer validation, core, Hibernate, Postgres.
 //
 // The difference between them is the cost of everything behind the gateway. One
@@ -152,10 +152,10 @@ export function gatewayOnlyPath() {
 }
 
 export function throughCorePath(data) {
-  const res = http.get(`${GATEWAY}/services/core/api/documents?page=0&size=20`, {
+  const res = http.get(`${GATEWAY}/services/core/api/platform/probe?page=0&size=20`, {
     headers: { Authorization: `Bearer ${data.token}` },
     tags: { scenario: 'through_core' },
   });
   throughCore.add(res.timings.duration);
-  check(res, { 'documents is 200': (r) => r.status === 200 });
+  check(res, { 'probe list is 200': (r) => r.status === 200 });
 }

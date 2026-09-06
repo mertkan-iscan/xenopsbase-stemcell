@@ -40,7 +40,7 @@ class ExceptionTranslatorResponseUnitTest {
     }
 
     private static MockServerWebExchange anyRequest() {
-        return MockServerWebExchange.from(MockServerHttpRequest.get("/services/core/api/documents"));
+        return MockServerWebExchange.from(MockServerHttpRequest.get("/services/core/api/platform/probe"));
     }
 
     /**

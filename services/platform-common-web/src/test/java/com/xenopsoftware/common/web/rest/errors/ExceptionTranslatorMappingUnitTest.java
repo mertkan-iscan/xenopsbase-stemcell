@@ -56,7 +56,7 @@ class ExceptionTranslatorMappingUnitTest {
     }
 
     private static NativeWebRequest anyRequest() {
-        return new ServletWebRequest(new MockHttpServletRequest("GET", "/api/documents"));
+        return new ServletWebRequest(new MockHttpServletRequest("GET", "/api/platform/probe"));
     }
 
     private ProblemDetailWithCause problemFor(Throwable error) {
@@ -277,7 +277,7 @@ class ExceptionTranslatorMappingUnitTest {
     /** Every problem carries the path it came from, so an error in a log ties back to a route. */
     @Test
     void theRequestPathIsAlwaysReported() {
-        assertThat(problemFor(new IllegalStateException("x")).getProperties()).containsEntry("path", URI.create("/api/documents"));
+        assertThat(problemFor(new IllegalStateException("x")).getProperties()).containsEntry("path", URI.create("/api/platform/probe"));
     }
 
     /**
@@ -313,7 +313,7 @@ class ExceptionTranslatorMappingUnitTest {
         assertThat(response.getBody()).isInstanceOf(ProblemDetailWithCause.class);
         assertThat(response.getBody())
             .asInstanceOf(InstanceOfAssertFactories.type(ProblemDetailWithCause.class))
-            .satisfies(problem -> assertThat(problem.getProperties()).containsEntry("path", URI.create("/api/documents")));
+            .satisfies(problem -> assertThat(problem.getProperties()).containsEntry("path", URI.create("/api/platform/probe")));
     }
 
     /**

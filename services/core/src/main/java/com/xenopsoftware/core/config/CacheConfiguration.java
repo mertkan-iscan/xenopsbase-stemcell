@@ -1,7 +1,7 @@
 package com.xenopsoftware.core.config;
 
+import com.xenopsoftware.core.platform.CachedProbePage;
 import com.xenopsoftware.core.service.BusinessCaches;
-import com.xenopsoftware.core.service.dto.CachedDocumentPage;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -100,7 +100,7 @@ public class CacheConfiguration implements CachingConfigurer {
      * type here and gets a serializer bound to it --
      * {@code JacksonJsonRedisSerializer}, never {@code GenericJacksonJsonRedisSerializer}.
      */
-    private static final Map<String, Class<?>> CACHED_TYPES = Map.of(BusinessCaches.DOCUMENT_LIST, CachedDocumentPage.class);
+    private static final Map<String, Class<?>> CACHED_TYPES = Map.of(BusinessCaches.PROBE_LIST, CachedProbePage.class);
 
     @Bean
     public RedisCacheManager cacheManager(RedisConnectionFactory connectionFactory) {
@@ -152,7 +152,7 @@ public class CacheConfiguration implements CachingConfigurer {
             .computePrefixWith(BusinessCaches::keyPrefix)
             .serializeKeysWith(RedisSerializationContext.SerializationPair.fromSerializer(RedisSerializer.string()))
             .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(new JacksonJsonRedisSerializer<>(type)))
-            // A cached null would answer "this owner has no documents" from a miss that was really
+            // A cached null would answer "this owner has no probes" from a miss that was really
             // a failure, and it is indistinguishable from a real empty page once stored.
             .disableCachingNullValues()
             .entryTtl(jittered(ttl));
@@ -190,7 +190,7 @@ public class CacheConfiguration implements CachingConfigurer {
      *
      * <p>A bare {@code @Bean CacheErrorHandler} is created, injected nowhere, and silently ignored
      * by the caching infrastructure -- the default rethrowing handler stays in place. The first
-     * version of this class did exactly that, and {@code DocumentCacheDegradationIT} failed with a
+     * version of this class did exactly that, and {@code ProbeCacheDegradationIT} failed with a
      * {@code RedisConnectionFailureException} reaching the caller: the precise bug this class exists
      * to prevent, caught by the test written to catch it.
      */

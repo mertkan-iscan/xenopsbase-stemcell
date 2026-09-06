@@ -431,7 +431,7 @@ spec:
     # default-roles-xenopsbase, before relying on anything that does.
     # EVERY USER CARRIES AN EXPLICIT id, AND THAT id IS THE OWNERSHIP KEY.
     #
-    # Documents are owned by the Keycloak `sub` (DocumentResource#currentOwner),
+    # Rows are owned by the Keycloak `sub` (PlatformProbeResource#currentOwner),
     # which is this id. Declared without one, Keycloak mints a fresh UUID every
     # time it CREATES the realm -- and the documented way to apply a realm
     # change is to delete the realm and let the import recreate it

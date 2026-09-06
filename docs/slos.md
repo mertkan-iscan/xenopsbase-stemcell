@@ -19,7 +19,7 @@ reads.
 | Path | p95 | p99 | Error rate |
 |---|---|---|---|
 | **Gateway only** — `/api/auth-info`, no downstream call | < 50 ms | < 100 ms | < 1% |
-| **Through core** — `/services/core/api/documents`, gateway → core → Postgres | < 200 ms | < 400 ms | < 1% |
+| **Through core** — `/services/core/api/platform/probe`, gateway → core → Postgres | < 200 ms | < 400 ms | < 1% |
 
 Set at roughly **2.5× the measured p95 and 3× the measured p99**. Tight enough that a doubling
 fails; loose enough to survive a noisy afternoon. A threshold set at the measured value fails on a
@@ -689,7 +689,7 @@ laid out:
 +   2.9     32.5ms  gateway  security filterchain before
 +  35.4   2681.0ms  gateway  secured request
 + 725.1   1469.6ms  gateway  HTTP GET                     <- the call to core
-+1977.4     11.6ms  core     http get /api/documents      <- core's entire work
++1977.4     11.6ms  core     http get /api/platform/probe      <- core's entire work
 +2716.5      0.5ms  gateway  security filterchain after
 ```
 
@@ -938,7 +938,7 @@ benchmark would mostly measure Hetzner's latency from a Hetzner node and attribu
 application.
 
 That reasoning holds for a benchmark that performs the PUT, and `infra/load/write.js` (T-5.15,
-`make load-write`) is the scenario it asked for: it stops at `POST /api/documents`, which INSERTs
+`make load-write`) is the scenario it asked for: it stops at `POST /api/platform/probe`, which INSERTs
 one row and presigns a URL **locally** — `S3Presigner` computes a SigV4 signature over a request it
 never sends. No socket is opened to Hetzner and no object is created, so what is measured is the
 row: gateway route, bearer validation, core, Hibernate, INSERT, commit.

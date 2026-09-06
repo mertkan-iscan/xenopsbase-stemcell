@@ -1,5 +1,6 @@
-package com.xenopsoftware.core.service;
+package com.xenopsoftware.core.platform;
 
+import com.xenopsoftware.core.service.BusinessCaches;
 import java.util.ArrayList;
 import java.util.List;
 import org.slf4j.Logger;
@@ -13,7 +14,7 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 /**
- * Invalidates one owner's cached document pages, after the transaction that changed them committed
+ * Invalidates one owner's cached probe pages, after the transaction that changed them committed
  * (T-3.22, #264).
  *
  * <p><b>Why this is not a {@code @CacheEvict}.</b> ADR-0011 forbids the obvious version:
@@ -27,11 +28,11 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * can repopulate the cache from the pre-commit state and that entry then outlives the commit --
  * a stale entry created by the invalidation itself. {@code AFTER_COMMIT} closes that window.
  *
- * <p><b>Why a SCAN and not {@code Cache.evict}.</b> The cached unit is a page, and a document
+ * <p><b>Why a SCAN and not {@code Cache.evict}.</b> The cached unit is a page, and a probe
  * appears on whichever page the sort puts it on, so a single write can invalidate every page an
  * owner has. Spring's {@code Cache} abstraction offers one key or the whole cache; the whole cache
  * would cost every other user their entries for one user's upload. Scanning ADR-0011's owner
- * prefix -- {@code xob:c:v1:document-list:<owner>:*} -- invalidates exactly the right set, and it
+ * prefix -- {@code xob:c:v1:probe-list:<owner>:*} -- invalidates exactly the right set, and it
  * is possible only because the owner is IN the key, which is the same property that stops one
  * user's cached page being served to another.
  *
@@ -43,22 +44,22 @@ import org.springframework.transaction.event.TransactionalEventListener;
  */
 @Component
 @ConditionalOnProperty(name = "application.cache.enabled", havingValue = "true")
-public class DocumentCacheEviction {
+public class ProbeCacheEviction {
 
-    private static final Logger LOG = LoggerFactory.getLogger(DocumentCacheEviction.class);
+    private static final Logger LOG = LoggerFactory.getLogger(ProbeCacheEviction.class);
 
     /** Keys per SCAN round trip. Large enough not to chatter, small enough not to block the server. */
     private static final int SCAN_BATCH = 256;
 
     private final StringRedisTemplate redis;
 
-    public DocumentCacheEviction(StringRedisTemplate redis) {
+    public ProbeCacheEviction(StringRedisTemplate redis) {
         this.redis = redis;
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    public void onDocumentsChanged(DocumentsChanged event) {
-        String pattern = BusinessCaches.ownerKeyPattern(BusinessCaches.DOCUMENT_LIST, event.owner());
+    public void onProbesChanged(ProbesChanged event) {
+        String pattern = BusinessCaches.ownerKeyPattern(BusinessCaches.PROBE_LIST, event.owner());
         try {
             List<String> keys = new ArrayList<>();
             try (Cursor<String> cursor = redis.scan(ScanOptions.scanOptions().match(pattern).count(SCAN_BATCH).build())) {
@@ -67,12 +68,12 @@ public class DocumentCacheEviction {
             if (!keys.isEmpty()) {
                 redis.delete(keys);
             }
-            LOG.debug("Evicted {} cached document pages matching {}", keys.size(), pattern);
+            LOG.debug("Evicted {} cached probe pages matching {}", keys.size(), pattern);
         } catch (RuntimeException e) {
             // Deliberately swallowed. The write is committed; failing here would report an error
             // for data that was saved, which is the failure mode T-3.22 exists to prevent. The
             // stale entries this leaves behind are bounded by their TTL.
-            LOG.warn("Could not evict cached document pages matching {}; entries expire under their TTL instead", pattern, e);
+            LOG.warn("Could not evict cached probe pages matching {}; entries expire under their TTL instead", pattern, e);
         }
     }
 }

@@ -37,13 +37,13 @@ import java.util.TreeSet;
 public final class BusinessCaches {
 
     /**
-     * Documents belonging to one owner, one page at a time.
+     * Probes belonging to one owner, one page at a time.
      *
      * <p>The only genuinely cacheable read path in this service. {@code presignDownload} returns a
      * credential with its own expiry, which ADR-0011 puts on the never-cache list, and the
      * remaining repository reads back write operations.
      */
-    public static final String DOCUMENT_LIST = "document-list";
+    public static final String PROBE_LIST = "probe-list";
 
     /**
      * ADR-0011's key namespace. Cannot collide with {@code spring:session:*}, which belongs to the
@@ -73,7 +73,7 @@ public final class BusinessCaches {
     /**
      * The glob matching every entry of {@code cacheName} owned by {@code owner}.
      *
-     * <p>Owner-scoped rather than whole-cache, so invalidating one user's documents does not cost
+     * <p>Owner-scoped rather than whole-cache, so invalidating one user's probes does not cost
      * every other user their cached pages. The owner is a Keycloak {@code sub} (ADR-0010), a UUID,
      * so it carries no glob metacharacters of its own.
      */
@@ -88,7 +88,7 @@ public final class BusinessCaches {
      */
     private static final Duration DEFAULT_TTL = Duration.ofMinutes(5);
 
-    private static final Map<String, Duration> TTLS = Map.of(DOCUMENT_LIST, DEFAULT_TTL);
+    private static final Map<String, Duration> TTLS = Map.of(PROBE_LIST, DEFAULT_TTL);
 
     private BusinessCaches() {}
 
@@ -108,7 +108,7 @@ public final class BusinessCaches {
      * the key-format strings and a reflective sweep cannot tell a cache name from a namespace
      * without a convention nobody would remember to follow.
      */
-    private static final Set<String> NAMES = Set.of(DOCUMENT_LIST);
+    private static final Set<String> NAMES = Set.of(PROBE_LIST);
 
     /**
      * Fails if a declared cache has no TTL, or a TTL names a cache that does not exist.
