@@ -168,13 +168,22 @@ spec:
         # ignoreDifferences for it.
         volumeMode: Filesystem
 ---
-# DEFAULT DENY, THEN ONE ALLOWANCE.
+# DEFAULT DENY, THEN NAMED ALLOWANCES.
 #
-# The broker is reachable from `apps` and from nowhere else. Not because a
-# NATS server is especially dangerous, but because it has no authorization of
-# its own (see the config above): this policy IS the access control, and an
-# unrestricted broker in a cluster is a subscriber on every subject for anyone
-# who can reach it.
+# The broker is reachable from the namespaces named below and from nowhere
+# else. Not because a NATS server is especially dangerous, but because it has no
+# authorization of its own (see the config above): this policy IS the access
+# control, and an unrestricted broker in a cluster is a subscriber on every
+# subject for anyone who can reach it.
+#
+# That is also why each product gets its own clause rather than a widened
+# selector. `apps` and `learn` are two products sharing one broker, and NATS
+# cannot tell them apart -- a subscriber in either can read every subject the
+# other publishes. What keeps them separate is subject naming
+# (`platform.outbox.subject-prefix`, and learn's per-module `identity.>`,
+# `catalog.>`, `streaming.>`, `reporting.>` streams), which is a convention, not
+# a control. Adding a third product means deciding whether that is still
+# acceptable, and a separate clause is where somebody has to look.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -188,6 +197,17 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels: {kubernetes.io/metadata.name: apps}
+      ports:
+        - {protocol: TCP, port: 4222}
+    # xenopsbase-learn, deployed from its own repository into `learn` by the
+    # `learn` Application. Its outbox has had a full JetStream implementation
+    # since its T-9.8 -- streams declared in code, an idempotent subscriber, a
+    # relay under the same advisory lock this repository copied from it -- and
+    # no broker to reach, so it filled and drained into nothing. This clause is
+    # what makes that code do something.
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: learn}
       ports:
         - {protocol: TCP, port: 4222}
     # Prometheus scrapes the monitoring port. Separated from the clause above
