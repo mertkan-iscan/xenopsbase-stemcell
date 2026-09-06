@@ -2,7 +2,7 @@
 #
 # Runs the k6 write and mixed read/write load inside the cluster (T-5.15).
 #
-# WHY THIS IS NOT load-test.sh WITH A DIFFERENT FILENAME
+# WHY THIS IS NOT load-test.sh WITH A DIFFERENT NAME
 #
 # load-test.sh runs a read benchmark, which leaves nothing behind. This one
 # writes rows, and a load test that leaves state in the database is a load test
@@ -13,16 +13,16 @@
 #     committed rather than what the gateway said it committed;
 #   - it deletes them afterwards, by SQL rather than through the API.
 #
-# WHY CLEANUP IS SQL AND NOT DELETE /api/documents/{id}
+# WHY CLEANUP IS SQL AND NOT DELETE /api/platform/probe/{id}
 #
-# DocumentService.delete() removes the row and then calls storage.delete() on
+# PlatformProbeService.delete() removes the row and then calls storage.delete() on
 # the object key -- one network round trip to Hetzner per row, for objects that
 # were never uploaded and do not exist. Tens of thousands of those to clean up
 # after a test that deliberately excluded object storage is absurd, and slower
 # than the test itself. The rows this writes have no objects, so nothing needs
 # collecting; a DELETE on the table is the complete cleanup.
 #
-# The predicate is narrow on purpose: status = 'PENDING' AND filename LIKE
+# The predicate is narrow on purpose: status = 'PENDING' AND label LIKE
 # 'k6-write-%'. A human's genuinely abandoned upload does not match it.
 #
 # Usage:
@@ -74,14 +74,14 @@ PRIMARY="${PRIMARY##*/}"
 # used by every statement below. Defined once so the count and the delete can
 # never drift apart -- a cleanup that deletes more than it counted is the
 # failure mode worth designing out.
-ROWS="status = 'PENDING' AND filename LIKE 'k6-write-%'"
+ROWS="status = 'PENDING' AND label LIKE 'k6-write-%'"
 
 psql_count() {
   kubectl -n "$DB_NAMESPACE" exec "$PRIMARY" -c postgres -- \
-    psql -U postgres -d "$DB_NAME" -tAc "select count(*) from document where ${ROWS};" 2>/dev/null | tr -d '[:space:]'
+    psql -U postgres -d "$DB_NAME" -tAc "select count(*) from platform_probe where ${ROWS};" 2>/dev/null | tr -d '[:space:]'
 }
 
-# Total pages across the document table's indexes.
+# Total pages across the platform_probe table's indexes.
 #
 # WHY THIS IS MEASURED AT ALL. See the REINDEX below: deleting the rows
 # returns the heap but not the indexes, and an index left bloated by one run
@@ -89,7 +89,7 @@ psql_count() {
 # rather than something the reader has to already suspect.
 index_pages() {
   kubectl -n "$DB_NAMESPACE" exec "$PRIMARY" -c postgres -- \
-    psql -U postgres -d "$DB_NAME" -tAc "select coalesce(sum(pg_relation_size(indexrelid))/8192, 0) from pg_index where indrelid = 'document'::regclass;" 2>/dev/null | tr -d '[:space:]' 
+    psql -U postgres -d "$DB_NAME" -tAc "select coalesce(sum(pg_relation_size(indexrelid))/8192, 0) from pg_index where indrelid = 'platform_probe'::regclass;" 2>/dev/null | tr -d '[:space:]' 
 }
 
 echo "=================================================================="
@@ -100,7 +100,7 @@ echo "=================================================================="
 BEFORE="$(psql_count)"
 IDX_BEFORE="$(index_pages)"
 [ -n "$BEFORE" ] || {
-  echo "error: could not read the document table on ${PRIMARY}" >&2
+  echo "error: could not read the platform_probe table on ${PRIMARY}" >&2
   echo "  refusing to run: without a starting count the cleanup cannot be verified." >&2
   exit 1
 }
@@ -232,7 +232,7 @@ done
 # component reporting success while doing nothing (docs/testing.md), so the two
 # are compared rather than one being trusted. They should match exactly: the
 # route retries GET only, so no write is replayed, and nothing else writes rows
-# with this filename prefix.
+# with this label prefix.
 AFTER="$(psql_count)"
 CLAIMED="$(grep -Eo 'rows_written[^0-9]+[0-9]+' "${JOB}.log" 2>/dev/null | grep -Eo '[0-9]+$' | tail -1)"
 COMMITTED=$(( ${AFTER:-0} - BEFORE ))
@@ -253,10 +253,10 @@ if [ "$KEEP_ROWS" = "true" ]; then
   echo ""
   echo "   KEEP_ROWS=true — ${AFTER} rows left in place. Remove them with:"
   echo "     kubectl -n ${DB_NAMESPACE} exec ${PRIMARY} -c postgres -- \\"
-  echo "       psql -U postgres -d ${DB_NAME} -c \"delete from document where ${ROWS};\""
+  echo "       psql -U postgres -d ${DB_NAME} -c \"delete from platform_probe where ${ROWS};\""
 else
   deleted="$(kubectl -n "$DB_NAMESPACE" exec "$PRIMARY" -c postgres -- \
-    psql -U postgres -d "$DB_NAME" -tAc "with d as (delete from document where ${ROWS} returning 1) select count(*) from d;" 2>/dev/null | tr -d '[:space:]')"
+    psql -U postgres -d "$DB_NAME" -tAc "with d as (delete from platform_probe where ${ROWS} returning 1) select count(*) from d;" 2>/dev/null | tr -d '[:space:]')"
   echo "   cleaned up:                    ${deleted:-0} rows deleted"
 
   # DELETING THE ROWS IS NOT ENOUGH, AND THE 2026-08-27 RUNS ARE WHY.
@@ -276,7 +276,7 @@ else
   # CONCURRENTLY so this never takes an ACCESS EXCLUSIVE lock on a table some
   # other environment might be serving from. It is slower, and nothing is
   # waiting on this script.
-  reindexed="$(kubectl -n "$DB_NAMESPACE" exec "$PRIMARY" -c postgres -- psql -U postgres -d "$DB_NAME" -tAc "reindex table concurrently document;" 2>&1 | tr -d '[:space:]')"
+  reindexed="$(kubectl -n "$DB_NAMESPACE" exec "$PRIMARY" -c postgres -- psql -U postgres -d "$DB_NAME" -tAc "reindex table concurrently platform_probe;" 2>&1 | tr -d '[:space:]')"
   IDX_AFTER="$(index_pages)"
   echo "   index pages:                   ${IDX_BEFORE:-?} at start, ${IDX_AFTER:-?} after REINDEX"
   if [ -n "${IDX_AFTER:-}" ] && [ "${IDX_AFTER:-0}" -gt 100 ]; then
@@ -289,7 +289,7 @@ else
     echo "   CLEANUP FAILED. The rows are still there and the next run's numbers"
     echo "   will include them. Delete them by hand:"
     echo "     kubectl -n ${DB_NAMESPACE} exec ${PRIMARY} -c postgres -- \\"
-    echo "       psql -U postgres -d ${DB_NAME} -c \"delete from document where ${ROWS};\""
+    echo "       psql -U postgres -d ${DB_NAME} -c \"delete from platform_probe where ${ROWS};\""
   fi
 fi
 

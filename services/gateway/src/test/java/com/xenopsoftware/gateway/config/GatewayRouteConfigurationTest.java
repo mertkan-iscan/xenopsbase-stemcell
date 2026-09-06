@@ -164,8 +164,8 @@ class GatewayRouteConfigurationTest {
 
     @Test
     void exactlyTwoSegmentsAreStrippedBeforeCoreSeesTheRequest() {
-        // /services/core/api/documents -> /api/documents. One too few and core receives
-        // /core/api/documents and answers 404; one too many and it receives /documents. Both are
+        // /services/core/api/platform/probe -> /api/platform/probe. One too few and core receives
+        // /core/api/platform/probe and answers 404; one too many and it receives /documents. Both are
         // total outages of every route through this gateway, from a single digit.
         assertThat(shorthand("filters", "StripPrefix")).as("StripPrefix must remove exactly /services/core").isEqualTo("2");
     }

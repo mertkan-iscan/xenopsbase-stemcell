@@ -13,7 +13,7 @@
 //
 // WHAT IS ACTUALLY IN THE WRITE PATH, AND WHAT IS DELIBERATELY NOT
 //
-// POST /api/documents is DocumentService.initiateUpload: validate the declared
+// POST /api/platform/probe is PlatformProbeService.initiateUpload: validate the declared
 // size, generate an object key, INSERT one row, commit, then presign a PUT.
 //
 // The presign is LOCAL. S3Presigner computes a SigV4 signature over a request
@@ -30,21 +30,26 @@
 // Hibernate, INSERT, commit, and a few hundred microseconds of HMAC. Whatever
 // the object store costs stays out, because it is never called.
 //
-// WHY THE document TABLE AND NOT example_item
+// WHY THE platform_probe TABLE, NOW THAT IT IS THE ONLY ONE
 //
-// POST /api/example-items is the purer INSERT -- one table, no service layer,
-// no signing. It is still the wrong choice here, for three reasons:
+// This section used to argue against writing to `example_item` instead -- a
+// second, simpler table with no service layer and no signing. T-9.2 deleted it,
+// so the choice is gone, but the reasoning is kept because it is what a fork
+// will have to repeat the moment it adds a table of its own:
 //
 //   - The mixed scenario is about reads and writes CONTENDING. Writing to a
 //     table nobody reads measures contention for the connection pool and the
-//     JVM and nothing else. The same table means the same indexes, the same
+//     JVM and nothing else. The SAME table means the same indexes, the same
 //     pages, the same autovacuum.
-//   - GET /api/example-items is repository.findAll() with no pagination. A
-//     write test that grows that table turns its own read side into an
-//     unbounded result set, and the read latency that follows would look like
-//     write contention while actually being row count.
-//   - example_item is the throwaway entity the stemcell ships to be deleted. A
-//     load test anchored to it dies with the first real fork.
+//   - A read side with no pagination is not a read side. A write test that
+//     grows a table whose listing is findAll() turns its own read into an
+//     unbounded result set, and the latency that follows looks like write
+//     contention while actually being row count.
+//   - And the third reason is why this one is now correct rather than merely
+//     available: `platform_probe` is the template's self-test, not a domain
+//     table. A load test anchored to a domain entity dies with the first real
+//     fork; anchored here, a fork re-points it at its own hot table
+//     deliberately, which is a decision rather than an accident.
 //
 // WHAT THE PENDING ROWS DO TO THE READ, AND WHAT V6 DID ABOUT IT
 //
@@ -506,7 +511,7 @@ export function setup() {
 // that cannot be compared with the one already on record.
 function read(data, trend, scenario) {
   const warm = trend === null;
-  const res = http.get(GATEWAY + '/services/core/api/documents?page=0&size=20', {
+  const res = http.get(GATEWAY + '/services/core/api/platform/probe?page=0&size=20', {
     headers: { Authorization: 'Bearer ' + currentToken(data) },
     // k6's default is no request timeout at all. A request still open after 30s
     // is not latency data, it is a stuck connection holding a VU.
@@ -532,18 +537,18 @@ function read(data, trend, scenario) {
 // NO Idempotency-Key HEADER, DELIBERATELY. IdempotencyFilter is opt-in --
 // shouldNotFilter() returns true when the header is absent -- so these writes
 // bypass it entirely. Sending one would add a second table's INSERT plus a
-// lookup to every iteration and measure the filter alongside the document
+// lookup to every iteration and measure the filter alongside the probe
 // insert. What the filter costs is a real question and a separate scenario.
 function write(data, trend, scenario) {
   const body = JSON.stringify({
     // Unique per iteration, and prefixed so the wrapper's cleanup can delete
     // exactly the rows this test made and nothing a human uploaded.
-    filename: 'k6-write-' + __VU + '-' + __ITER + '-' + Date.now() + '.bin',
+    label: 'k6-write-' + __VU + '-' + __ITER + '-' + Date.now() + '.bin',
     contentType: 'application/octet-stream',
     sizeBytes: SIZE_BYTES,
   });
 
-  const res = http.post(GATEWAY + '/services/core/api/documents', body, {
+  const res = http.post(GATEWAY + '/services/core/api/platform/probe', body, {
     headers: {
       Authorization: 'Bearer ' + currentToken(data),
       'Content-Type': 'application/json',

@@ -60,10 +60,16 @@ bottom of this page.
 ## Verified behaviour
 
 ```
-                              smoke (app-user)   smoke-admin (app-admin)
-/api/example-items                 200                   200
-/api/admin/example-items           403                   200
+                                   smoke (app-user)   smoke-admin (app-admin)
+/api/whoami                             200                   200
+/api/admin/platform/probe               403                   200
 ```
+
+Both endpoints live on `PlatformIdentityResource`. They were on the demo domain's controller until
+T-9.2 and had to move rather than be deleted with it: `/api/admin/**` is the only place the ADMIN
+rule in core's `SecurityConfiguration` is exercised at all, and removing the endpoint would have
+removed the assertion along with it — silently, because a rule nothing reaches passes every test
+there is. `SecurityRulesSliceTest` asserts both rows of the table above.
 
 Both directions matter. A 403 for an unprivileged user only shows the check fires; a check that
 denies everyone looks identical to one that works.

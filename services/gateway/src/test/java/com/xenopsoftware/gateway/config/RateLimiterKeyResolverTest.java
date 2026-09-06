@@ -27,7 +27,7 @@ class RateLimiterKeyResolverTest {
     private final KeyResolver resolver = new RateLimiterConfiguration("").clientKeyResolver();
 
     private static MockServerWebExchange exchangeFrom(String address, String forwardedFor) {
-        MockServerHttpRequest.BaseBuilder<?> builder = MockServerHttpRequest.get("/services/core/api/documents").remoteAddress(
+        MockServerHttpRequest.BaseBuilder<?> builder = MockServerHttpRequest.get("/services/core/api/platform/probe").remoteAddress(
             new InetSocketAddress(address, 44444)
         );
         if (forwardedFor != null) {

@@ -188,7 +188,7 @@ because that is the part a database check misses:
 
 ```bash
 # sign in as the owning user and confirm the documents are reachable
-curl ... /services/core/api/documents      # expect X-Total-Count to match what it was
+curl ... /services/core/api/platform/probe      # expect X-Total-Count to match what it was
 ```
 
 ### The site is up but every login fails

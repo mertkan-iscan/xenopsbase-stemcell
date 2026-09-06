@@ -10,7 +10,7 @@ import com.xenopsoftware.common.idempotency.IdempotencyFilter;
 import com.xenopsoftware.common.idempotency.IdempotencyRecordRepository;
 import com.xenopsoftware.core.IntegrationTest;
 import com.xenopsoftware.core.config.ObjectStorageTestcontainer;
-import com.xenopsoftware.core.repository.DocumentRepository;
+import com.xenopsoftware.core.platform.PlatformProbeRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -49,7 +49,7 @@ class IdempotencyFilterIT {
     private IdempotencyRecordRepository idempotencyRepository;
 
     @Autowired
-    private DocumentRepository documentRepository;
+    private PlatformProbeRepository probeRepository;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -57,7 +57,7 @@ class IdempotencyFilterIT {
     @BeforeEach
     void clean() {
         idempotencyRepository.deleteAll();
-        documentRepository.deleteAll();
+        probeRepository.deleteAll();
     }
 
     private static SecurityMockMvcRequestPostProcessors.JwtRequestPostProcessor asUser(String sub) {
@@ -66,11 +66,11 @@ class IdempotencyFilterIT {
             .authorities(new SimpleGrantedAuthority("app-user"));
     }
 
-    private MvcResult createDocument(String sub, String key, String filename) throws Exception {
-        var request = post("/api/documents")
+    private MvcResult createProbe(String sub, String key, String label) throws Exception {
+        var request = post("/api/platform/probe")
             .with(asUser(sub))
             .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"filename\":\"" + filename + "\",\"contentType\":\"text/plain\",\"sizeBytes\":10}");
+            .content("{\"label\":\"" + label + "\",\"contentType\":\"text/plain\",\"sizeBytes\":10}");
         if (key != null) {
             request = request.header(IdempotencyFilter.HEADER, key);
         }
@@ -79,11 +79,11 @@ class IdempotencyFilterIT {
 
     @Test
     void aRetryWithTheSameKeyReplaysTheOriginalResponseAndCreatesNothingNew() throws Exception {
-        MvcResult first = createDocument(USER, "key-alpha", "one.txt");
+        MvcResult first = createProbe(USER, "key-alpha", "one.txt");
         assertThat(first.getResponse().getStatus()).isEqualTo(201);
         assertThat(first.getResponse().getHeader(IdempotencyFilter.REPLAYED_HEADER)).isNull();
 
-        MvcResult retry = createDocument(USER, "key-alpha", "one.txt");
+        MvcResult retry = createProbe(USER, "key-alpha", "one.txt");
 
         assertThat(retry.getResponse().getStatus()).as("the stored status, not a fresh one").isEqualTo(201);
         assertThat(retry.getResponse().getHeader(IdempotencyFilter.REPLAYED_HEADER)).isEqualTo("true");
@@ -94,24 +94,24 @@ class IdempotencyFilterIT {
             .as("the retry must learn the id created the FIRST time, not a new one")
             .isEqualTo(firstBody.get("id").asLong());
 
-        assertThat(documentRepository.findAll()).as("the work happened exactly once").hasSize(1);
+        assertThat(probeRepository.findAll()).as("the work happened exactly once").hasSize(1);
     }
 
     @Test
     void theSameKeyOnADifferentRequestIsRejectedRatherThanQuietlyReplayed() throws Exception {
-        createDocument(USER, "key-beta", "one.txt");
+        createProbe(USER, "key-beta", "one.txt");
 
-        MvcResult reused = createDocument(USER, "key-beta", "COMPLETELY-DIFFERENT.txt");
+        MvcResult reused = createProbe(USER, "key-beta", "COMPLETELY-DIFFERENT.txt");
 
         assertThat(reused.getResponse().getStatus()).isEqualTo(422);
         assertThat(reused.getResponse().getContentType()).startsWith(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
-        assertThat(documentRepository.findAll()).as("the second request was not performed").hasSize(1);
+        assertThat(probeRepository.findAll()).as("the second request was not performed").hasSize(1);
     }
 
     @Test
     void keysAreScopedToTheCallerSoOneUserCannotReadAnothersResponse() throws Exception {
-        MvcResult mine = createDocument(USER, "shared-key", "mine.txt");
-        MvcResult theirs = createDocument(OTHER, "shared-key", "theirs.txt");
+        MvcResult mine = createProbe(USER, "shared-key", "mine.txt");
+        MvcResult theirs = createProbe(OTHER, "shared-key", "theirs.txt");
 
         assertThat(theirs.getResponse().getStatus()).as("not a 409 or a replay — an unrelated request").isEqualTo(201);
         assertThat(theirs.getResponse().getHeader(IdempotencyFilter.REPLAYED_HEADER)).isNull();
@@ -120,16 +120,16 @@ class IdempotencyFilterIT {
         JsonNode theirsBody = objectMapper.readTree(theirs.getResponse().getContentAsString());
         assertThat(theirsBody.get("id").asLong()).isNotEqualTo(mineBody.get("id").asLong());
 
-        assertThat(documentRepository.findAll()).hasSize(2);
+        assertThat(probeRepository.findAll()).hasSize(2);
     }
 
     @Test
     void withoutAKeyNothingIsRecordedAndEveryRequestActs() throws Exception {
-        createDocument(USER, null, "a.txt");
-        createDocument(USER, null, "a.txt");
+        createProbe(USER, null, "a.txt");
+        createProbe(USER, null, "a.txt");
 
         assertThat(idempotencyRepository.findAll()).as("opt-in: no key, no record").isEmpty();
-        assertThat(documentRepository.findAll()).as("both requests acted").hasSize(2);
+        assertThat(probeRepository.findAll()).as("both requests acted").hasSize(2);
     }
 
     @Test
@@ -137,22 +137,22 @@ class IdempotencyFilterIT {
         // Regression guard. Hashing the body consumes the request stream, so without a wrapper
         // that can serve it again the controller sees an empty body and fails validation — a
         // failure that points nowhere near this filter.
-        MvcResult result = createDocument(USER, "key-body", "readable.txt");
+        MvcResult result = createProbe(USER, "key-body", "readable.txt");
 
         assertThat(result.getResponse().getStatus()).isEqualTo(201);
-        assertThat(documentRepository.findAll())
+        assertThat(probeRepository.findAll())
             .singleElement()
-            .satisfies(d -> assertThat(d.getFilename()).isEqualTo("readable.txt"));
+            .satisfies(d -> assertThat(d.getLabel()).isEqualTo("readable.txt"));
     }
 
     @Test
     void aFailedRequestDoesNotLeaveAClaimThatBlocksEveryLaterRetry() throws Exception {
-        // sizeBytes over the configured maximum is rejected with 413 by DocumentResource.
-        var oversized = post("/api/documents")
+        // sizeBytes over the configured maximum is rejected with 413 by PlatformProbeResource.
+        var oversized = post("/api/platform/probe")
             .with(asUser(USER))
             .header(IdempotencyFilter.HEADER, "key-fail")
             .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"filename\":\"huge.bin\",\"contentType\":\"application/octet-stream\",\"sizeBytes\":52428801}");
+            .content("{\"label\":\"huge.bin\",\"contentType\":\"application/octet-stream\",\"sizeBytes\":52428801}");
         mockMvc.perform(oversized).andExpect(status().isPayloadTooLarge());
 
         assertThat(idempotencyRepository.findAll())
@@ -160,7 +160,7 @@ class IdempotencyFilterIT {
             .isEmpty();
 
         // The same key must still work once the client sends something valid.
-        MvcResult retry = createDocument(USER, "key-fail", "now-valid.txt");
+        MvcResult retry = createProbe(USER, "key-fail", "now-valid.txt");
         assertThat(retry.getResponse().getStatus()).isEqualTo(201);
     }
 }

@@ -1,26 +1,32 @@
-# Runbook: document storage
+# Runbook: object storage (the application side)
 
 Metadata in Postgres, bytes in a bucket, and **no byte ever passes through the JVM**.
+
+**Object storage is a platform capability here, not a feature.** It used to be the `document`
+feature; T-9.2 deleted that domain and kept the capability, renamed for what it is. `ObjectStore`
+and `S3ObjectStore` live in `platform-common`, so any service in a fork gets them by depending on
+the shared module, and the endpoints below belong to the platform probe — the template's self-test,
+which exists to keep this path exercised until a fork's own endpoints do it.
 
 ## The shape of it
 
 ```
-client ──POST /api/documents {size}───────▶ core      row written PENDING
+client ──POST /api/platform/probe {size}──▶ core      row written PENDING
        ◀─────────── { id, uploadUrl } ─────
        ──PUT uploadUrl───────────────────▶ bucket     bytes go here, not through core
-       ──POST /api/documents/{id}/complete▶ core      HEAD the object, promote to AVAILABLE
+       ──POST /api/platform/probe/{id}/complete▶ core  HEAD the object, promote to AVAILABLE
        ◀────────────────────── 200 ────────
 
-       ──GET  /api/documents/{id}/download▶ core      302 to a presigned GET
+       ──GET  /api/platform/probe/{id}/download▶ core  302 to a presigned GET
        ──GET  <presigned>────────────────▶ bucket
 ```
 
 | | |
 |---|---|
-| Bucket | `<prefix>-<env>-documents`, created by `infra/terraform/storage` |
-| Metadata | `document` table, `V3__document.sql` |
-| Seam | `service/storage/DocumentStorage` — S3 API only |
-| Implementation | `S3DocumentStorage`, AWS SDK v2 used purely as an S3 client |
+| Bucket | `<prefix>-<env>-documents`, created by `infra/terraform/storage` (the bucket keeps its name; renaming it is a fork-time decision, not a code one) |
+| Metadata | `platform_probe` table, `V8__platform_probe.sql` |
+| Seam | `platform-common`'s `storage/ObjectStore` — S3 API only |
+| Implementation | `S3ObjectStore`, AWS SDK v2 used purely as an S3 client |
 | Local and test | MinIO via Testcontainers |
 | Deployed | Hetzner Object Storage |
 
@@ -84,7 +90,7 @@ nothing; that is what a client would report either way.
 
 ### Cleaning up abandoned uploads
 
-`DocumentService.reapAbandonedUploads(Instant)` deletes `PENDING` rows older than a cutoff, and
+`PlatformProbeService.reapAbandonedUploads(Instant)` deletes `PENDING` rows older than a cutoff, and
 their objects — an upload can complete after the client gave up, leaving bytes behind a row nobody
 will promote.
 
@@ -178,10 +184,10 @@ The integration tests need none of this — Testcontainers starts and configures
 ## Verifying
 
 ```bash
-cd services/core && ./mvnw verify -DskipITs=false -Dit.test=DocumentResourceIT
+cd services && ./mvnw verify -pl core -am -DskipITs=false -Dit.test=PlatformProbeResourceIT
 ```
 
-`DocumentResourceIT` runs against real MinIO and genuinely PUTs and GETs the bytes over the
+`PlatformProbeResourceIT` runs against real MinIO and genuinely PUTs and GETs the bytes over the
 presigned URLs with an `HttpClient`, outside the application. That matters: a mocked
 `DocumentStorage` cannot have an opinion about whether a signature validates, whether path-style
 addressing is required, or whether the length condition is enforced — so it would pass while the

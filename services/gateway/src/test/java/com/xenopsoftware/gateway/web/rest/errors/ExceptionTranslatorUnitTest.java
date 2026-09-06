@@ -39,7 +39,7 @@ class ExceptionTranslatorUnitTest {
     }
 
     private ServerWebExchange anyRequest() {
-        return MockServerWebExchange.from(MockServerHttpRequest.get("/services/core/api/documents"));
+        return MockServerWebExchange.from(MockServerHttpRequest.get("/services/core/api/platform/probe"));
     }
 
     private ProblemDetailWithCause blankProblem() {

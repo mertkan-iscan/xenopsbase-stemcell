@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>XenOpsBase — Documents</title>
+    <title>XenOpsBase</title>
 
     <!--
       Stylesheet and script are separate files rather than inline blocks.
@@ -21,56 +21,51 @@
     <link rel="stylesheet" href="/app.css" />
   </head>
 
+  <!--
+    WHAT THIS PAGE IS FOR, NOW THAT THE DEMO DOMAIN IS GONE (T-9.2).
+
+    It used to be a document manager: an upload panel, a table and a pager, which
+    were business UI in a template that claims to have no business logic. Those
+    are deleted along with the endpoints behind them.
+
+    What is left is the minimum that has a REASON to exist:
+
+      - the session identity and a log-out button, because they are what proves
+        the OIDC login flow reached the browser and can be ended;
+      - the infrastructure panel, which is a platform capability rather than a
+        feature (T-3.16);
+      - a page at `/` at all, because SecurityConfiguration's
+        anyExchange().authenticated() and smoke.sh both depend on this route
+        serving something to an authenticated caller. Deleting the page would
+        have left both of them passing against a 404.
+
+    A fork replaces this with its own UI. Nothing here is a component library and
+    nothing here is meant to be extended.
+  -->
   <body>
     <header class="bar">
-      <h1>Documents</h1>
+      <h1>XenOpsBase</h1>
       <div class="identity">
         <span id="identity" class="muted">checking session…</span>
         <button id="logout" type="button" class="secondary" disabled>Log out</button>
       </div>
     </header>
 
-    <!-- Assertive rather than polite: this is where a failed upload or an expired
-         session is reported, and both need to interrupt. -->
+    <!-- Assertive rather than polite: this is where an expired session is
+         reported, and that needs to interrupt. -->
     <div id="banner" class="banner" role="alert" hidden></div>
 
     <main>
       <section class="panel">
-        <h2>Upload</h2>
-        <div class="row">
-          <input type="file" id="file" />
-          <button id="upload" type="button" disabled>Upload</button>
-        </div>
-        <!-- role="status" so a screen reader hears each stage. The three-step
-             upload is slow enough that silence reads as a hang. -->
-        <p id="upload-status" class="muted" role="status"></p>
-      </section>
+        <h2>Session</h2>
+        <!-- What CORE sees in the relayed token, not what the gateway saw. The
+             two differ whenever the relay is misconfigured, and the difference
+             is otherwise invisible: requests still succeed, they are just
+             anonymous by the time they land downstream.
 
-      <section class="panel">
-        <h2>Your documents <span id="total" class="muted"></span></h2>
-
-        <div class="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Type</th>
-                <th class="num">Size</th>
-                <th>Uploaded</th>
-                <th><span class="sr-only">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody id="rows"></tbody>
-          </table>
-        </div>
-
-        <p id="empty" class="muted" hidden>Nothing uploaded yet.</p>
-
-        <nav class="pager" aria-label="Pagination">
-          <button id="prev" type="button" class="secondary" disabled>Previous</button>
-          <span id="page-label" class="muted"></span>
-          <button id="next" type="button" class="secondary" disabled>Next</button>
-        </nav>
+             role="status" so a screen reader hears the result rather than
+             having to go looking for it. -->
+        <p id="session-detail" class="muted" role="status">…</p>
       </section>
 
       <!--

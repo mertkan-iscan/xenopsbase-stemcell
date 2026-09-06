@@ -1,13 +1,14 @@
-package com.xenopsoftware.core.service;
+package com.xenopsoftware.core.platform;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.xenopsoftware.core.IntegrationTest;
 import com.xenopsoftware.core.config.CacheTestcontainer;
 import com.xenopsoftware.core.config.ObjectStorageTestcontainer;
-import com.xenopsoftware.core.domain.Document;
-import com.xenopsoftware.core.repository.DocumentRepository;
-import com.xenopsoftware.core.service.dto.CachedDocumentPage;
+import com.xenopsoftware.core.platform.CachedProbePage;
+import com.xenopsoftware.core.platform.PlatformProbe;
+import com.xenopsoftware.core.platform.PlatformProbeRepository;
+import com.xenopsoftware.core.service.BusinessCaches;
 import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,11 +28,11 @@ import org.springframework.test.context.DynamicPropertySource;
  * a second read is actually served from the cache, that a write invalidates, and that the keys have
  * the shape ADR-0011 specified -- namespaced, versioned, and owner-scoped.
  *
- * <p>The "cache is gone" half lives in {@link DocumentCacheDegradationIT}, because it needs a
+ * <p>The "cache is gone" half lives in {@link ProbeCacheDegradationIT}, because it needs a
  * different context.
  */
 @IntegrationTest
-class DocumentCacheIT {
+class ProbeCacheIT {
 
     @DynamicPropertySource
     static void containers(DynamicPropertyRegistry registry) {
@@ -53,17 +54,17 @@ class DocumentCacheIT {
     private static final Pageable FIRST_PAGE = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
 
     @Autowired
-    private DocumentService documentService;
+    private PlatformProbeService probeService;
 
     @Autowired
-    private DocumentRepository documentRepository;
+    private PlatformProbeRepository probeRepository;
 
     @Autowired
     private StringRedisTemplate redis;
 
     @BeforeEach
     void clean() {
-        documentRepository.deleteAll();
+        probeRepository.deleteAll();
         owner = UUID.randomUUID().toString();
         other = UUID.randomUUID().toString();
     }
@@ -79,7 +80,7 @@ class DocumentCacheIT {
      * number of entries.
      */
     private String keyFor(String forOwner) {
-        return BusinessCaches.keyPrefix(BusinessCaches.DOCUMENT_LIST) + forOwner + ":0-20-" + FIRST_PAGE.getSort();
+        return BusinessCaches.keyPrefix(BusinessCaches.PROBE_LIST) + forOwner + ":0-20-" + FIRST_PAGE.getSort();
     }
 
     /**
@@ -109,16 +110,16 @@ class DocumentCacheIT {
         return false;
     }
 
-    private Document available(String owner, String filename) {
-        Document document = new Document();
+    private PlatformProbe available(String owner, String filename) {
+        PlatformProbe document = new PlatformProbe();
         document.setOwner(owner);
-        document.setFilename(filename);
+        document.setLabel(filename);
         document.setContentType("text/plain");
         document.setObjectKey("2026/09/" + owner + "/" + filename);
         document.setSizeBytes(11L);
-        document.setStatus(Document.Status.AVAILABLE);
+        document.setStatus(PlatformProbe.Status.AVAILABLE);
         document.setCreatedAt(Instant.now());
-        return documentRepository.saveAndFlush(document);
+        return probeRepository.saveAndFlush(document);
     }
 
     /**
@@ -131,16 +132,16 @@ class DocumentCacheIT {
      */
     @Test
     void secondReadIsServedFromTheCache() {
-        Document document = available(owner, "cached.txt");
+        PlatformProbe document = available(owner, "cached.txt");
 
-        CachedDocumentPage first = documentService.listAvailableCached(owner, FIRST_PAGE);
+        CachedProbePage first = probeService.listAvailableCached(owner, FIRST_PAGE);
         assertThat(first.content()).hasSize(1);
-        assertThat(first.content().getFirst().filename()).isEqualTo("cached.txt");
+        assertThat(first.content().getFirst().label()).isEqualTo("cached.txt");
 
-        documentRepository.deleteById(document.getId());
-        documentRepository.flush();
+        probeRepository.deleteById(document.getId());
+        probeRepository.flush();
 
-        CachedDocumentPage second = documentService.listAvailableCached(owner, FIRST_PAGE);
+        CachedProbePage second = probeService.listAvailableCached(owner, FIRST_PAGE);
         assertThat(second.content()).as("second read should come from Valkey, not from the now-empty table").hasSize(1);
     }
 
@@ -148,12 +149,12 @@ class DocumentCacheIT {
     @Test
     void keysAreNamespacedVersionedAndOwnerScoped() {
         available(owner, "keys.txt");
-        documentService.listAvailableCached(owner, FIRST_PAGE);
+        probeService.listAvailableCached(owner, FIRST_PAGE);
 
         String key = keyFor(owner);
         assertThat(key)
             .as("xob:c:v<schema>:<cache>:<owner>:<discriminator>")
-            .startsWith("xob:c:v1:document-list:" + owner + ":");
+            .startsWith("xob:c:v1:probe-list:" + owner + ":");
         assertThat(visible(key, true)).as("the entry is written under exactly ADR-0011's key").isTrue();
 
         // And it expires. An entry with no TTL is what ADR-0011 refuses, because under allkeys-lru
@@ -171,8 +172,8 @@ class DocumentCacheIT {
 
         // Identity, not size. If the second owner's read were served from the first owner's entry a
         // size assertion would pass and hide exactly the leak this test exists to catch.
-        assertThat(documentService.listAvailableCached(owner, FIRST_PAGE).content().getFirst().filename()).isEqualTo("mine.txt");
-        assertThat(documentService.listAvailableCached(other, FIRST_PAGE).content().getFirst().filename())
+        assertThat(probeService.listAvailableCached(owner, FIRST_PAGE).content().getFirst().label()).isEqualTo("mine.txt");
+        assertThat(probeService.listAvailableCached(other, FIRST_PAGE).content().getFirst().label())
             .as("a second owner must never be served the first owner's cached page")
             .isEqualTo("theirs.txt");
 
@@ -185,21 +186,21 @@ class DocumentCacheIT {
     /**
      * A write invalidates the owner's cached pages, and only that owner's.
      *
-     * <p>Goes through {@code DocumentService.delete}, so this exercises the real path: publish
+     * <p>Goes through {@code PlatformProbeService.delete}, so this exercises the real path: publish
      * inside the transaction, evict after commit. A test that published the event by hand would
      * pass while the service forgot to.
      */
     @Test
     void aWriteEvictsThatOwnerOnly() {
-        Document mine = available(owner, "doomed.txt");
+        PlatformProbe mine = available(owner, "doomed.txt");
         available(other, "theirs.txt");
 
-        documentService.listAvailableCached(owner, FIRST_PAGE);
-        documentService.listAvailableCached(other, FIRST_PAGE);
+        probeService.listAvailableCached(owner, FIRST_PAGE);
+        probeService.listAvailableCached(other, FIRST_PAGE);
         assertThat(visible(keyFor(owner), true)).isTrue();
         assertThat(visible(keyFor(other), true)).isTrue();
 
-        boolean deleted = documentService.delete(mine.getId(), owner);
+        boolean deleted = probeService.delete(mine.getId(), owner);
         assertThat(deleted).isTrue();
 
         assertThat(visible(keyFor(owner), false))
@@ -209,6 +210,6 @@ class DocumentCacheIT {
             .as("and nobody else paid for it")
             .isTrue();
 
-        assertThat(documentService.listAvailableCached(owner, FIRST_PAGE).content()).isEmpty();
+        assertThat(probeService.listAvailableCached(owner, FIRST_PAGE).content()).isEmpty();
     }
 }

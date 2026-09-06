@@ -116,7 +116,7 @@ public class SecurityConfiguration {
      *   request                      pod A (logged in here)   pod B
      *   GET /            text/html   200                      302 -> Keycloak
      *   GET /app.css     text/css    200                      302 -> Keycloak
-     *   GET /services/core/api/documents  json  200            302 -> Keycloak
+     *   GET /services/core/api/platform/probe  json  200            302 -> Keycloak
      * </pre>
      *
      * <p>With no cookie at all both pods answered identically and correctly, which is why this

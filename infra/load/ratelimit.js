@@ -50,7 +50,7 @@ const DURATION = __ENV.DURATION || '20s';
 
 // A path the gateway ROUTES rather than serves. The response body is irrelevant
 // -- this counts status codes.
-const PATH = __ENV.RATE_LIMIT_PATH || '/services/core/api/documents?page=0&size=1';
+const PATH = __ENV.RATE_LIMIT_PATH || '/services/core/api/platform/probe?page=0&size=1';
 
 const flooded = new Counter('rate_limited_flood');
 const bystanderLimited = new Counter('rate_limited_bystander');

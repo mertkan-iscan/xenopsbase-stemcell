@@ -12,7 +12,7 @@ import software.amazon.awssdk.services.s3.model.BucketAlreadyOwnedByYouException
 import software.amazon.awssdk.services.s3.model.CreateBucketRequest;
 
 /**
- * MinIO for document-storage tests (T-3.7).
+ * MinIO for object-storage tests (T-3.7).
  *
  * <p>A real S3 implementation rather than a mock, on purpose. The parts of this feature that break
  * in practice are the parts a mock cannot have opinions about: whether a presigned signature

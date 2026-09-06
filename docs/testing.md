@@ -56,7 +56,7 @@ rather than theoretical.
 
 | Slice | Test | Asserts |
 |---|---|---|
-| Web | `ExampleItemResourceWebSliceTest` | serialization, status, binding — security filters **off** |
+| Web | `PlatformProbeRepositorySliceTest` | mapping, the tenant discriminator, the listing query — no web layer |
 | Security | `SecurityRulesSliceTest` | the authorization rules — filters **on**, real `SecurityConfiguration` |
 | Data | `DocumentRepositorySliceTest` | the owner-scoped queries against a real schema |
 
@@ -76,7 +76,7 @@ test is a faster unit test, not a cheaper integration test.
 ### Integration
 
 **Covers** the service against real dependencies in containers: Postgres 18.4, Valkey
-8.1.4-alpine, MinIO `RELEASE.2025-04-22T22-12-26Z`. `DocumentResourceIT` PUTs and GETs against
+8.1.4-alpine, MinIO `RELEASE.2025-04-22T22-12-26Z`. `PlatformProbeResourceIT` PUTs and GETs against
 presigned URLs with a bare `HttpClient`, outside the application, so "bytes do not transit the JVM"
 is what the test actually exercises rather than what it asserts. `ExtensionSeamsIT` has 13 tests
 each aimed at how a seam fails *silently*. `DeadDownstreamIT` asserts behaviour against a refused

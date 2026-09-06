@@ -93,7 +93,7 @@ would cost a lock that is absent in the case it was bought for.
 ```
 xob:c:v<schema>:<cache>:<owner>:<discriminator>
 
-xob:c:v1:document-list:6b0c1f2e-9d34-4a71-b8c5-2f7e1a4d3c88:0-20-createdAt: DESC
+xob:c:v1:probe-list:6b0c1f2e-9d34-4a71-b8c5-2f7e1a4d3c88:0-20-createdAt: DESC
 ```
 
 - `xob:c:` cannot collide with `spring:session:*`, which is the gateway's.
@@ -102,7 +102,7 @@ xob:c:v1:document-list:6b0c1f2e-9d34-4a71-b8c5-2f7e1a4d3c88:0-20-createdAt: DESC
   under their TTL. Expect one hit-ratio collapse per bump — do not treat it as an incident.
 - The **owner** is always present. `findByOwnerAndStatus` enforces authorisation by not returning
   the row, so a key without the owner would answer a request the database itself would refuse, with
-  another user's documents. That is a leak, not a stale read.
+  another user's rows. That is a leak, not a stale read.
 
 ## What is never cached
 
@@ -224,7 +224,7 @@ shipped, this is that, and it is not an incident.
 Otherwise, in order of likelihood:
 
 1. **Invalidation firing too broadly.** Check whether writes are evicting more than one owner's
-   keys — the eviction pattern is `xob:c:v1:document-list:<owner>:*` and the owner segment is what
+   keys — the eviction pattern is `xob:c:v1:probe-list:<owner>:*` and the owner segment is what
    keeps it narrow.
 2. **A TTL that is too short**, so entries expire before they are re-read.
 3. **Keys that stopped matching** after a deploy: the writer and the reader disagreeing about the

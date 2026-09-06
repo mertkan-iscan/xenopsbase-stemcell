@@ -9,7 +9,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 /**
  * Present only when a documents bucket is configured (T-3.7).
  *
- * <p>Applied to <em>every</em> bean in the document-storage feature, not just the configuration
+ * <p>Applied to <em>every</em> bean in the object-storage capability, not just the configuration
  * that builds the S3 client. Guarding only the client is not enough: {@code DocumentService} and
  * {@code S3ObjectStore} are component-scanned, so they would still be created, fail to find an
  * {@code S3Client}, and take the entire application context down with them.
