@@ -32,18 +32,18 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # Read from the pom rather than passed in or hardcoded, so this check cannot
-# disagree with what the build actually targets. A duplicated version constant
+# disagree with what the build actually targets. The parent pom is where the version lives now; a duplicated version constant
 # is a version constant that will eventually be wrong in one of its two homes.
 REQUIRED="${1:-}"
 FROM_POM=0
 if [ -z "$REQUIRED" ]; then
-  REQUIRED="$(grep -oE '<java\.version>[0-9]+</java\.version>' "$ROOT/services/core/pom.xml" \
+  REQUIRED="$(grep -oE '<java\.version>[0-9]+</java\.version>' "$ROOT/services/pom.xml" \
     | head -1 | grep -oE '[0-9]+')"
   FROM_POM=1
 fi
 
 if [ -z "$REQUIRED" ]; then
-  echo "java-home.sh: could not read <java.version> from services/core/pom.xml" >&2
+  echo "java-home.sh: could not read <java.version> from services/pom.xml" >&2
   exit 1
 fi
 
@@ -110,7 +110,7 @@ fi
   echo
   echo "No JDK $REQUIRED found, and this project cannot be built without one."
   if [ "$FROM_POM" = "1" ]; then
-    echo "  services/core/pom.xml sets <java.version>$REQUIRED</java.version>."
+    echo "  services/pom.xml sets <java.version>$REQUIRED</java.version>."
   else
     echo "  Version $REQUIRED was requested on the command line."
   fi

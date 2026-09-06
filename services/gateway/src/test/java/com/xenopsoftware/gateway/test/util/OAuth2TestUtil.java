@@ -1,6 +1,6 @@
 package com.xenopsoftware.gateway.test.util;
 
-import com.xenopsoftware.gateway.security.AuthoritiesConstants;
+import com.xenopsoftware.common.security.AuthoritiesConstants;
 import com.xenopsoftware.gateway.security.SecurityUtils;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;

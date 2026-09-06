@@ -2,9 +2,9 @@ package com.xenopsoftware.core.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.xenopsoftware.common.tenancy.DefaultTenantResolver;
 import com.xenopsoftware.core.config.DatabaseTestcontainer;
 import com.xenopsoftware.core.domain.Document;
-import com.xenopsoftware.core.tenancy.DefaultTenantResolver;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

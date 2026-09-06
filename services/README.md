@@ -1,7 +1,44 @@
 # services
 
-The gateway and the core service. **This code is ours.** It was scaffolded by
-JHipster ([T-3.1 spike](../docs/spikes/t-3.1-jhipster.md)) and detached in T-3.4.
+A Maven reactor: two shared libraries and two deployable services. **This code is ours.** It was
+scaffolded by JHipster ([T-3.1 spike](../docs/spikes/t-3.1-jhipster.md)) and detached in T-3.4.
+
+## Layout
+
+```
+services/
+  pom.xml               the parent. Every version, plugin and floor is stated here, once
+  platform-common/      web-stack-neutral: the correlation contract, authorities, the
+                        audience validator, logging, the outbox, object storage
+  platform-common-web/  the servlet half: filters, error handling, auditing, tenancy,
+                        idempotency
+  gateway/              the reactive edge. Depends on platform-common only
+  core/                 the servlet service. Depends on platform-common-web
+```
+
+**The line between the two libraries is the web stack, not the topic** — the gateway is Spring
+Cloud Gateway, which runs on WebFlux and nothing else, so a shared library that pulled
+`spring-boot-starter-web` could not be shared with it. The full reasoning, the two enforcer rules
+that keep it true, and the two artifacts that read as servlet and must NOT be banned, are in
+[ADR-0017](../docs/adr/0017-shared-service-modules.md).
+
+## Building
+
+**From here, not from a module directory.** A module cannot resolve `platform-common` until the
+reactor has built it, so `cd core && ./mvnw verify` fails with a dependency-resolution error. There
+is one Maven wrapper, at this level.
+
+```bash
+make java-home                       # which JDK the build will use, and why
+cd services && ./mvnw verify         # everything
+cd services && ./mvnw verify -pl core -am    # one service and what it depends on
+make format                          # the only command that rewrites source
+make format-check                    # what CI runs
+```
+
+`services/pom.xml`'s `<modules>` is the service registry: every other list of services in this
+repository — two GitHub Actions matrices, CodeQL, the security scan, four Makefile loops — is
+derived from it by `infra/scripts/service-modules.sh`. Adding a service is adding a module.
 
 ## The generator is gone, and cannot come back
 

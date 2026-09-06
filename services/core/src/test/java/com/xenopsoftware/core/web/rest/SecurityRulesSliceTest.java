@@ -4,9 +4,9 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.xenopsoftware.common.idempotency.IdempotencyRecordRepository;
 import com.xenopsoftware.core.config.SecurityConfiguration;
 import com.xenopsoftware.core.repository.ExampleItemRepository;
-import com.xenopsoftware.core.repository.IdempotencyRecordRepository;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -49,7 +49,7 @@ import org.springframework.test.web.servlet.MockMvc;
 @Import({
     SecurityConfiguration.class,
     tech.jhipster.config.JHipsterProperties.class,
-    com.xenopsoftware.core.web.rest.errors.SecurityProblemSupport.class,
+    com.xenopsoftware.common.web.rest.errors.SecurityProblemSupport.class,
 })
 @TestPropertySource(properties = "spring.security.oauth2.client.provider.oidc.issuer-uri=http://localhost/realms/test")
 @WebMvcTest(controllers = ExampleItemResource.class)

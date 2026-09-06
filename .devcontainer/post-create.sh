@@ -67,8 +67,10 @@ install_kubectl || exit 1
 # the first download of half of Maven Central. Best-effort: a container that
 # cannot warm a cache is still a usable container, so this does not fail it.
 echo "==> warming the Maven cache (best effort)"
-(cd services/core && ./mvnw -q -ntp dependency:go-offline) >/dev/null 2>&1 || true
-(cd services/gateway && ./mvnw -q -ntp dependency:go-offline) >/dev/null 2>&1 || true
+# One reactor, one wrapper (ADR-0017). Per-module wrappers were removed: a
+# module cannot resolve platform-common until the reactor has built it, so
+# `cd services/core && ./mvnw` no longer works and should not look like it might.
+(cd services && ./mvnw -q -ntp dependency:go-offline) >/dev/null 2>&1 || true
 
 # ---------------------------------------------------------------------------
 # The pre-commit hook, which is otherwise a step everyone is told about in

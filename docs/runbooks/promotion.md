@@ -196,7 +196,7 @@ worst-case RPO 301s.
 Check what shipped before assuming:
 
 ```bash
-git diff <rollback-target>..HEAD -- services/core/src/main/resources/db/migration
+git diff <rollback-target>..HEAD -- services/core/src/main/resources/db/migration/core
 ```
 
 Empty output means the rollback is a pure image change. Anything else, read it before merging.

@@ -6,10 +6,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.xenopsoftware.common.idempotency.IdempotencyFilter;
+import com.xenopsoftware.common.idempotency.IdempotencyRecordRepository;
 import com.xenopsoftware.core.IntegrationTest;
 import com.xenopsoftware.core.config.ObjectStorageTestcontainer;
 import com.xenopsoftware.core.repository.DocumentRepository;
-import com.xenopsoftware.core.repository.IdempotencyRecordRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

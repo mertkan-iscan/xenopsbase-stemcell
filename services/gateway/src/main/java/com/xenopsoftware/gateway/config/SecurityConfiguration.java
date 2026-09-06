@@ -6,9 +6,9 @@ import static org.springframework.security.web.server.util.matcher.ServerWebExch
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import com.xenopsoftware.gateway.security.AuthoritiesConstants;
+import com.xenopsoftware.common.security.AuthoritiesConstants;
+import com.xenopsoftware.common.security.oauth2.AudienceValidator;
 import com.xenopsoftware.gateway.security.SecurityUtils;
-import com.xenopsoftware.gateway.security.oauth2.AudienceValidator;
 import com.xenopsoftware.gateway.web.filter.OidcAuthenticationFailureHandler;
 import com.xenopsoftware.gateway.web.filter.ProblemDetailAuthenticationEntryPoint;
 import java.time.Duration;

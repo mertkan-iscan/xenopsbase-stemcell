@@ -122,18 +122,30 @@ below.
 One request gets one id at the edge, and every log line it causes in any service carries it.
 
 ```
-X-Request-Id: 3f9a2c...      request and response, both services
-%X{requestId}                the log pattern in logback-spring.xml
+X-Correlation-Id: 3f9a2c...  request and response, every service
+%X{correlationId}            the log pattern in logback-spring.xml
 ```
 
+Both spellings, and the length and character rules for an acceptable inbound value, are constants
+on `com.xenopsoftware.common.correlation.CorrelationId` in `platform-common` — one class both web
+stacks read, because two services that disagree about the spelling break the chain silently at the
+hop (ADR-0017).
+
+**It was `X-Request-Id` / `requestId` until ADR-0017.** The name changed to match
+xenopsbase-learn, the product forked from this template, so a request crossing the two carries one
+id instead of two. The trade is that proxies and Cloudflare understand `X-Request-Id` and not this,
+so an id set further out by infrastructure is no longer adopted; the gateway is the edge here and
+mints its own. A deployment that terminates somewhere else should map the header at that hop.
+
 The gateway generates one if the caller did not supply it, echoes it on the response, and writes it
-onto the proxied request so core adopts the same value. Core generates a `direct-` prefixed id if
-none arrived — which is a signal, not a fallback: everything routed through the gateway has an id,
+onto the proxied request so the downstream service adopts the same value. A servlet service
+generates a `direct-` prefixed id if none arrived — which is a signal, not a fallback: everything routed through the gateway has an id,
 so a `direct-` id means something bypassed it.
 
-### Why the two services do this so differently
+### Why the two stacks do this so differently
 
-Core is servlet-based: one request, one thread, and MDC works exactly as it appears to.
+Every service but the gateway is servlet-based: one request, one thread, and MDC works exactly as
+it appears to. `CorrelationIdFilter` in `platform-common-web` is all it takes.
 
 The gateway is reactive, and MDC is a thread-local while WebFlux moves a request between threads
 whenever it pleases. Setting MDC there gives the id on *some* log lines depending on which
@@ -146,20 +158,20 @@ is what applies that without every operator opting in.
 
 This asymmetry is the clearest argument for keeping the reactive footprint in the gateway alone.
 
-**Both services validate the inbound header.** It is attacker-controlled and lands in every log
+**Both stacks validate the inbound header, through the same method.** It is attacker-controlled and lands in every log
 line, so an unvalidated value is a log-forging vector — a newline in it writes fabricated entries.
 
-**`%X{requestId}` renders empty rather than failing when the MDC key is missing.** The key is a
+**`%X{correlationId}` renders empty rather than failing when the MDC key is missing.** The key is a
 string in XML and a constant in Java; renaming one without the other produces logs that look
 completely normal and are missing the id. That is the failure to watch for.
 
 ### Reaching traces as well as logs
 
-A log line carries `requestId`, `traceId` and `spanId` together, so getting from a log line to its
+A log line carries `correlationId`, `traceId` and `spanId` together, so getting from a log line to its
 trace is one hop. The other direction needs the id on the span itself, and it is there:
 
 ```
-request.id                   a high-cardinality span attribute, both services
+correlation.id               a high-cardinality span attribute, every service
 ```
 
 `CorrelationIdObservationFilter` tags the server observation. It does not call
@@ -179,7 +191,7 @@ every request the system serves — not a degradation but an outage of the metri
 hours later and looking like a Prometheus fault. A test asserts the key value is not
 low-cardinality, because nothing else would notice in time.
 
-`request.id` and the W3C `traceparent` both survive rather than one replacing the other. They
+`correlation.id` and the W3C `traceparent` both survive rather than one replacing the other. They
 answer different questions and have different lifetimes, and a sampled-out trace still needs a
 correlation id in its logs.
 

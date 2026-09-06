@@ -1,8 +1,8 @@
 package com.xenopsoftware.gateway;
 
+import com.xenopsoftware.common.config.JacksonConfiguration;
 import com.xenopsoftware.gateway.config.AsyncSyncConfiguration;
 import com.xenopsoftware.gateway.config.EmbeddedSQL;
-import com.xenopsoftware.gateway.config.JacksonConfiguration;
 import com.xenopsoftware.gateway.config.TestSecurityConfiguration;
 import com.xenopsoftware.gateway.config.ValkeyTestcontainer;
 import java.lang.annotation.ElementType;

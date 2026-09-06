@@ -1,0 +1,300 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    What every PROCESS shares, whatever web stack it runs (ADR-0017).
+
+    NOT a place for domain code — nothing in here may know what this template's
+    fork sells. And not a place for a servlet either: this module compiles
+    without jakarta.servlet on the classpath, and two independent guards below
+    keep it that way.
+
+    THE REASON THE LINE IS DRAWN HERE, because it is not obvious and it is the
+    whole justification for a second module rather than one shared library.
+    `core` — and every service a fork adds after it — is Spring MVC. `gateway`
+    is Spring Cloud Gateway, which exists only on WebFlux and cannot be
+    anything else. A library that pulls spring-boot-starter-web brings Tomcat,
+    Boot then resolves the application type as SERVLET, and the gateway does
+    not start.
+
+    So a single shared library had exactly two possible endings: the gateway
+    depends on nothing of ours and re-declares the correlation header, the
+    authority names and the audience validator itself, or the gateway does not
+    start. Both are worse than a second module. The second is a build failure
+    somebody fixes in an hour; the first is `X-Correlation-Id` written down in
+    two places, drifting apart silently — which is the exact failure
+    CorrelationId's own javadoc exists to describe.
+
+    The test for whether something belongs here: would every process otherwise
+    write it identically, AND can it be written without naming a servlet
+    request or a reactive exchange?
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.xenopsoftware</groupId>
+        <artifactId>services</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>platform-common</artifactId>
+    <name>Platform common</name>
+    <description>Web-stack-neutral shared code: the contract every process agrees on</description>
+
+    <properties>
+        <!--
+            MEASURED, NOT COPIED. The service floors are 0.80/0.70; this module
+            is a fraction of their size, so one untested branch here moves the
+            ratio by whole points and a service's floor would fail the first
+            build after the move.
+
+            These are this module's own merged figure from the first green run
+            of the restructure, one point below, on the same convention every
+            other floor in this repository uses: the build fails on a
+            REGRESSION today, and the number is raised deliberately as tests
+            are added. Re-read it from CI's job summary before raising it — a
+            floor set from a developer machine is how the last ratchet failed.
+        -->
+        <jacoco.minimum.instruction>0.26</jacoco.minimum.instruction>
+        <jacoco.minimum.branch>0.34</jacoco.minimum.branch>
+    </properties>
+
+    <dependencies>
+        <!--
+            `starter`, deliberately NOT `starter-web`. This single line is what
+            makes the gateway able to depend on this module, and changing it
+            back is how the split silently stops working: adding starter-web
+            here would fail no test in this module, it would fail the gateway's
+            startup in a cluster.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+
+        <!--
+            spring-web, NOT spring-boot-starter-web. The artifact carries
+            ProblemDetail, the @RestController annotation the logging aspect
+            matches on, and the HTTP value types — and it is what WebFlux is
+            built on too, so both stacks already have it. Its jakarta.servlet
+            dependency is optional and therefore not transitive, which is why
+            the enforcer rule below can allow this and still ban a servlet
+            container.
+        -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-web</artifactId>
+        </dependency>
+
+        <!-- The logging aspect. Carries no web stack. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aspectj</artifactId>
+        </dependency>
+
+        <!--
+            Jackson 3 (tools.jackson) for the logging configuration's custom
+            fields, and Jackson 2 for the two datatype modules JacksonConfiguration
+            registers as beans. Both were already on both services' classpaths;
+            stating them here is what lets the shared classes compile.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jackson</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-jackson2</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+        </dependency>
+
+        <!-- JHipster's logging utilities, async wrapper and profile constants. -->
+        <dependency>
+            <groupId>tech.jhipster</groupId>
+            <artifactId>jhipster-framework</artifactId>
+        </dependency>
+
+        <!--
+            The audience validator is an OAuth2TokenValidator<Jwt>: a resource
+            server contract, not a servlet one. spring-security-oauth2-jose is
+            what both stacks validate tokens with.
+        -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-oauth2-jose</artifactId>
+        </dependency>
+
+        <!-- Configuration metadata for ObjectStoreProperties. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-configuration-processor</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <!--
+            OPTIONAL, DELIBERATELY, AND THIS IS THE PART THAT IS EASY TO GET
+            WRONG.
+
+            The outbox is JPA and Spring Data. platform-common is what the
+            GATEWAY depends on, so declaring these normally would hand the
+            gateway a persistence stack it cannot use and does not want —
+            Hibernate on the classpath, a DataSource auto-configuration looking
+            for a URL, and a startup failure in the one process that has no
+            database.
+
+            Optional means each including service brings its own starter and
+            these classes simply resolve. A service with no database gets the
+            correlation contract and the authority names and no outbox, and
+            OutboxAutoConfiguration's @ConditionalOnBean(EntityManagerFactory)
+            is what makes that a decision rather than an accident.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!--
+            Object storage, optional on the same rule: a fork that stores no
+            objects must not inherit an S3 client by depending on this library.
+            The S3 SDK needs no web stack, so the capability can live down here
+            rather than in the servlet half.
+        -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <optional>true</optional>
+            <exclusions>
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>netty-nio-client</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>apache5-client</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5-engine</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+                NOT AN IMAGE, NOT AN EXECUTABLE ARCHIVE. This module is a library
+                every service depends on; it has no main class and nothing to run.
+
+                Skipped explicitly rather than simply left out of the parent's
+                <plugins> list, because `mvn ... jib:build` names the goal on the
+                command line and Maven then runs it against every module in the
+                reactor — including this one, where it fails on a missing
+                mainClass and reads as "the plugin is misconfigured" rather than
+                "this module is a library".
+            -->
+            <plugin>
+                <groupId>com.google.cloud.tools</groupId>
+                <artifactId>jib-maven-plugin</artifactId>
+                <configuration>
+                    <skip>true</skip>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <skip>true</skip>
+                </configuration>
+            </plugin>
+            <!--
+                THE RULE THE SPLIT RESTS ON, ENFORCED WHERE IT CAN ACTUALLY BE
+                BROKEN.
+
+                PlatformCommonIsStackNeutralTest catches servlet code WRITTEN in
+                this module. It does not catch the thing that actually breaks
+                the gateway, which is a servlet JAR arriving on this module's
+                classpath with no line of code referencing it: Boot resolves the
+                application type by looking for classes, so Tomcat's mere
+                PRESENCE flips the gateway from reactive to servlet and Spring
+                Cloud Gateway refuses to start. Nothing would have failed here;
+                a deployment would have.
+
+                So one guard is on the source and one is on the dependency tree,
+                and neither is redundant — they fail at different times, and
+                only one of them can fail during the change that caused it.
+
+                TWO ARTIFACTS THAT READ AS SERVLET AND ARE DELIBERATELY NOT
+                BANNED. Both were found by writing this rule and watching it
+                fail the build:
+
+                  org.apache.tomcat.embed:tomcat-embed-el
+                      Tomcat by name, Jakarta EXPRESSION LANGUAGE by content,
+                      pulled in by bean validation. No servlet class in it. A
+                      `tomcat-embed:*` glob bans it and takes @Valid with it.
+
+                  org.springframework.security:spring-security-web
+                      "web" by name, but org.springframework.security.web.server
+                      is where REACTIVE security lives. Banning it bans the
+                      gateway's own SecurityWebFilterChain.
+
+                The list below is the one that both stops a servlet container
+                and leaves those two alone. Narrowing to tomcat-embed-core
+                rather than the glob is the whole point of the first, and
+                omitting spring-security-web entirely is the point of the
+                second.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>enforce-no-web-stack</id>
+                        <goals><goal>enforce</goal></goals>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <searchTransitive>true</searchTransitive>
+                                    <excludes>
+                                        <exclude>org.springframework.boot:spring-boot-starter-web</exclude>
+                                        <exclude>org.springframework.boot:spring-boot-starter-webmvc</exclude>
+                                        <exclude>org.springframework.boot:spring-boot-starter-webflux</exclude>
+                                        <exclude>org.springframework.boot:spring-boot-starter-tomcat</exclude>
+                                        <exclude>org.springframework:spring-webmvc</exclude>
+                                        <exclude>org.springframework:spring-webflux</exclude>
+                                        <exclude>org.apache.tomcat.embed:tomcat-embed-core</exclude>
+                                        <exclude>jakarta.servlet:*</exclude>
+                                    </excludes>
+                                    <message>
+                                        platform-common must stay free of any web stack: the gateway
+                                        depends on it, and Spring Cloud Gateway does not start once a
+                                        servlet container is on the classpath (ADR-0017). Whatever
+                                        needed this belongs in platform-common-web, which every
+                                        servlet service already depends on.
+                                    </message>
+                                </bannedDependencies>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

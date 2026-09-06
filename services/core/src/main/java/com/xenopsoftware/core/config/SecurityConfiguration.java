@@ -3,9 +3,10 @@ package com.xenopsoftware.core.config;
 import static org.springframework.security.config.Customizer.withDefaults;
 import static org.springframework.security.oauth2.core.oidc.StandardClaimNames.PREFERRED_USERNAME;
 
-import com.xenopsoftware.core.security.*;
-import com.xenopsoftware.core.security.oauth2.AudienceValidator;
-import com.xenopsoftware.core.web.rest.errors.SecurityProblemSupport;
+import com.xenopsoftware.common.security.AuthoritiesConstants;
+import com.xenopsoftware.common.security.SecurityUtils;
+import com.xenopsoftware.common.security.oauth2.AudienceValidator;
+import com.xenopsoftware.common.web.rest.errors.SecurityProblemSupport;
 import java.util.*;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;

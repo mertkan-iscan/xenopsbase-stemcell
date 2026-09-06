@@ -385,7 +385,7 @@ mail-dns-verify: ## Resolve every mail record and report what is actually publis
 
 .PHONY: java-home
 java-home: ## Report which JDK the build will use, and why
-	@echo "required:  Java $$(grep -oE '<java\.version>[0-9]+' services/core/pom.xml | head -1 | grep -oE '[0-9]+')  (services/*/pom.xml)"
+	@echo "required:  Java $$(grep -oE '<java\.version>[0-9]+' services/pom.xml | head -1 | grep -oE '[0-9]+')  (services/pom.xml)"
 	@echo "JAVA_HOME: $${JAVA_HOME:-<unset>}"
 	@printf "selected:  "; bash $(SCRIPTS)/java-home.sh
 
@@ -420,8 +420,10 @@ verify-node-provenance: ## Did each node boot its image, or build itself? Asks t
 
 .PHONY: api-spec
 api-spec: ## Regenerate docs/api/*.json from the services
-	@JH="$$(bash $(SCRIPTS)/java-home.sh)" && cd services/core && JAVA_HOME="$$JH" ./mvnw --batch-mode verify -DskipITs=false -Dit.test=OpenApiSpecIT -DfailIfNoTests=false -Dtest=SchemaOwnershipTest
-	@JH="$$(bash $(SCRIPTS)/java-home.sh)" && cd services/gateway && JAVA_HOME="$$JH" ./mvnw --batch-mode verify -DskipITs=false -Dit.test=OpenApiSpecIT -DfailIfNoTests=false -Dtest=SecurityUtilsUnitTest
+	@# From services/, not services/<module>: a module cannot resolve platform-common
+	@# until the reactor has built it. `-am` builds what this module depends on.
+	@JH="$$(bash $(SCRIPTS)/java-home.sh)" && cd services && JAVA_HOME="$$JH" ./mvnw --batch-mode verify -pl core -am -DskipITs=false -Dit.test=OpenApiSpecIT -DfailIfNoTests=false -Dtest=SchemaOwnershipTest
+	@JH="$$(bash $(SCRIPTS)/java-home.sh)" && cd services && JAVA_HOME="$$JH" ./mvnw --batch-mode verify -pl gateway -am -DskipITs=false -Dit.test=OpenApiSpecIT -DfailIfNoTests=false -Dtest=SecurityUtilsUnitTest
 	@mkdir -p docs/api
 	@cp services/core/target/openapi/core.json docs/api/core.json
 	@cp services/gateway/target/openapi/gateway.json docs/api/gateway.json
@@ -429,11 +431,11 @@ api-spec: ## Regenerate docs/api/*.json from the services
 
 .PHONY: api-spec-check
 api-spec-check: ## Fail if docs/api/*.json no longer describes what the services serve
-	@set -e; for m in core gateway; do 		bash $(SCRIPTS)/check-api-drift.sh "services/$$m/target/openapi/$$m.json" "docs/api/$$m.json"; 	done
+	@set -e; for m in $$(bash $(SCRIPTS)/service-modules.sh); do 		bash $(SCRIPTS)/check-api-drift.sh "services/$$m/target/openapi/$$m.json" "docs/api/$$m.json"; 	done
 
 .PHONY: api-compat
 api-compat: ## Classify this branch's API changes against main as breaking or not
-	@set -e; 	base=$$(git merge-base HEAD origin/main 2>/dev/null || git rev-parse origin/main); 	for m in core gateway; do 		echo "==> $$m"; 		if git cat-file -e "$$base:docs/api/$$m.json" 2>/dev/null; then 			git show "$$base:docs/api/$$m.json" > "$${TMPDIR:-/tmp}/$$m-base.json"; 			$(PYTHON) $(SCRIPTS)/check-api-breaking.py "$${TMPDIR:-/tmp}/$$m-base.json" "docs/api/$$m.json"; 		else 			echo "  no docs/api/$$m.json on the base — nothing to compare"; 		fi; 	done
+	@set -e; 	base=$$(git merge-base HEAD origin/main 2>/dev/null || git rev-parse origin/main); 	for m in $$(bash $(SCRIPTS)/service-modules.sh); do 		echo "==> $$m"; 		if git cat-file -e "$$base:docs/api/$$m.json" 2>/dev/null; then 			git show "$$base:docs/api/$$m.json" > "$${TMPDIR:-/tmp}/$$m-base.json"; 			$(PYTHON) $(SCRIPTS)/check-api-breaking.py "$${TMPDIR:-/tmp}/$$m-base.json" "docs/api/$$m.json"; 		else 			echo "  no docs/api/$$m.json on the base — nothing to compare"; 		fi; 	done
 
 .PHONY: api-client
 api-client: ## Generate the typed Java client from the committed spec and compile it
@@ -782,11 +784,15 @@ secrets-rekey: ## Re-encrypt every secret to the CURRENT recipient list in .sops
 
 .PHONY: format
 format: ## Reformat every Java source file in the repository
-	@set -e; for m in core gateway; do 		echo "==> services/$$m"; 		( cd services/$$m && ./mvnw -q --batch-mode spotless:apply ); 	done; 	echo "formatted. `git diff --stat -- services/*/src | tail -1`"
+	@# One reactor pass, so the shared modules are formatted too. Per-module loops
+	@# missed them the day they were added, which is the failure this avoids.
+	@JH="$$(bash $(SCRIPTS)/java-home.sh)" && cd services && JAVA_HOME="$$JH" ./mvnw -q --batch-mode spotless:apply
+	@echo "formatted. `git diff --stat -- services/*/src | tail -1`"
 
 .PHONY: format-check
 format-check: ## Fail if any Java source file is not formatted (what CI runs)
-	@set -e; for m in core gateway; do 		echo "==> services/$$m"; 		( cd services/$$m && ./mvnw -q --batch-mode spotless:check ); 	done; 	echo "every Java file is formatted."
+	@JH="$$(bash $(SCRIPTS)/java-home.sh)" && cd services && JAVA_HOME="$$JH" ./mvnw -q --batch-mode spotless:check
+	@echo "every Java file is formatted."
 
 .PHONY: hooks
 hooks: ## Install the git pre-commit hook (formatting + secret scanning)

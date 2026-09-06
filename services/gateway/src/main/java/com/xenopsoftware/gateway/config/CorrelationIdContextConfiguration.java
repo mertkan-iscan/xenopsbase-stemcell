@@ -1,6 +1,6 @@
 package com.xenopsoftware.gateway.config;
 
-import com.xenopsoftware.gateway.web.filter.CorrelationId;
+import com.xenopsoftware.common.correlation.CorrelationId;
 import io.micrometer.context.ContextRegistry;
 import io.micrometer.context.ThreadLocalAccessor;
 import jakarta.annotation.PostConstruct;

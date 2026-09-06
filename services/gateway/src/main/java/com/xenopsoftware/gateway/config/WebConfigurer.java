@@ -1,6 +1,5 @@
 package com.xenopsoftware.gateway.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xenopsoftware.gateway.web.rest.errors.ExceptionTranslator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,6 +17,7 @@ import org.springframework.web.reactive.result.method.HandlerMethodArgumentResol
 import org.springframework.web.server.WebExceptionHandler;
 import tech.jhipster.config.JHipsterProperties;
 import tech.jhipster.web.rest.errors.ReactiveWebExceptionHandler;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Configuration of web application with Servlet 3.0 APIs.
@@ -62,6 +62,13 @@ public class WebConfigurer implements WebFluxConfigurer {
         return new ReactiveSortHandlerMethodArgumentResolver();
     }
 
+    /**
+     * {@code tools.jackson}, not {@code com.fasterxml.jackson}. Boot 4 ships both Jacksons and
+     * this repository has beans of both types, so the wrong import compiles right up until it does
+     * not: jhipster-framework 9.1.0's {@code ReactiveWebExceptionHandler} takes the Jackson 3
+     * mapper, 8.12.0 took the Jackson 2 one, and the two poms had drifted onto different versions
+     * of that library. Consolidating them in the parent is what surfaced this.
+     */
     @Bean
     @Order(-2) // The handler must have precedence over WebFluxResponseStatusExceptionHandler and Spring Boot's ErrorWebExceptionHandler
     public WebExceptionHandler problemExceptionHandler(ObjectMapper mapper, ExceptionTranslator problemHandling) {

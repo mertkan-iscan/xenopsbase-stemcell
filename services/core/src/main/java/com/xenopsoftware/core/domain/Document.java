@@ -1,5 +1,6 @@
 package com.xenopsoftware.core.domain;
 
+import com.xenopsoftware.common.domain.AbstractAuditingEntity;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;

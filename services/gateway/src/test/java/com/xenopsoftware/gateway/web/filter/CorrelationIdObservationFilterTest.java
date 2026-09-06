@@ -2,6 +2,7 @@ package com.xenopsoftware.gateway.web.filter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.xenopsoftware.common.correlation.CorrelationId;
 import io.micrometer.common.KeyValue;
 import io.micrometer.observation.Observation;
 import java.util.HashMap;
@@ -36,8 +37,8 @@ class CorrelationIdObservationFilterTest {
     void tagsTheSpanWithTheResponseHeader() {
         Observation.Context mapped = filter.map(context("a1b2c3d4"));
 
-        assertThat(mapped.getHighCardinalityKeyValue(CorrelationIdObservationFilter.SPAN_ATTRIBUTE)).isEqualTo(
-            KeyValue.of(CorrelationIdObservationFilter.SPAN_ATTRIBUTE, "a1b2c3d4")
+        assertThat(mapped.getHighCardinalityKeyValue(CorrelationId.SPAN_ATTRIBUTE)).isEqualTo(
+            KeyValue.of(CorrelationId.SPAN_ATTRIBUTE, "a1b2c3d4")
         );
     }
 
@@ -46,9 +47,7 @@ class CorrelationIdObservationFilterTest {
     void doesNotAddTheIdAsALowCardinalityKeyValue() {
         Observation.Context mapped = filter.map(context("a1b2c3d4"));
 
-        assertThat(mapped.getLowCardinalityKeyValues().stream().map(KeyValue::getKey)).doesNotContain(
-            CorrelationIdObservationFilter.SPAN_ATTRIBUTE
-        );
+        assertThat(mapped.getLowCardinalityKeyValues().stream().map(KeyValue::getKey)).doesNotContain(CorrelationId.SPAN_ATTRIBUTE);
     }
 
     @Test
@@ -56,9 +55,7 @@ class CorrelationIdObservationFilterTest {
     void addsNothingWhenTheHeaderIsAbsent() {
         Observation.Context mapped = filter.map(context(null));
 
-        assertThat(mapped.getHighCardinalityKeyValues().stream().map(KeyValue::getKey)).doesNotContain(
-            CorrelationIdObservationFilter.SPAN_ATTRIBUTE
-        );
+        assertThat(mapped.getHighCardinalityKeyValues().stream().map(KeyValue::getKey)).doesNotContain(CorrelationId.SPAN_ATTRIBUTE);
     }
 
     @Test

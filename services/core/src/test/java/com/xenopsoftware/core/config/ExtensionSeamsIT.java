@@ -3,13 +3,13 @@ package com.xenopsoftware.core.config;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.xenopsoftware.common.outbox.OutboxMessage;
+import com.xenopsoftware.common.outbox.OutboxMessageRepository;
+import com.xenopsoftware.common.outbox.OutboxService;
+import com.xenopsoftware.common.tenancy.TenantContext;
 import com.xenopsoftware.core.IntegrationTest;
 import com.xenopsoftware.core.domain.ExampleItem;
-import com.xenopsoftware.core.domain.OutboxMessage;
 import com.xenopsoftware.core.repository.ExampleItemRepository;
-import com.xenopsoftware.core.repository.OutboxMessageRepository;
-import com.xenopsoftware.core.service.outbox.OutboxService;
-import com.xenopsoftware.core.tenancy.TenantContext;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;

@@ -38,11 +38,11 @@ echo " Local stack"
 echo "=================================================================="
 echo
 
-echo "1/4  realm"
+echo "1/5  realm"
 bash "$ROOT/infra/scripts/dev-realm.sh" | sed 's/^/     /'
 
 echo
-echo "2/4  dependencies"
+echo "2/5  dependencies"
 # --wait blocks on the healthchecks in compose.yml rather than on the container
 # merely existing. Keycloak in particular accepts connections long before the
 # realm import finishes, and starting the services against a half-imported realm
@@ -64,7 +64,7 @@ start_service() {
     return 0
   fi
   # shellcheck disable=SC2086
-  ( cd "$ROOT/services/$dir" && \
+  ( cd "$ROOT/services" && \
     OIDC_ISSUER_URI=http://localhost:9080/realms/xenopsbase \
     OIDC_CLIENT_SECRET=local-dev-gateway-secret \
     CORE_URI=http://localhost:8081 \
@@ -76,13 +76,26 @@ start_service() {
     AWS_SECRET_ACCESS_KEY=localdevsecret \
     AWS_REGION=us-east-1 \
     JAVA_HOME="$JH" \
-    nohup ./mvnw -o spring-boot:run -Dspring-boot.run.profiles=dev > "$LOGS/$name.log" 2>&1 & \
+    nohup ./mvnw -o -pl "$dir" spring-boot:run -Dspring-boot.run.profiles=dev > "$LOGS/$name.log" 2>&1 & \
     echo $! > "$LOGS/$name.pid" )
   echo "     $name starting (pid $(cat "$LOGS/$name.pid"), log $LOGS/$name.log)"
 }
 
+# The shared libraries first, ONCE, and installed rather than built in place
+# (ADR-0017). The two services start in parallel, so `-am` on each would have
+# two reactors writing platform-common/target at the same time -- which fails
+# intermittently and looks like a flaky service rather than a build race.
 echo
-echo "3/4  services"
+echo "3/5  shared modules"
+if ! ( cd "$ROOT/services" && JAVA_HOME="$JH" ./mvnw -q -o --batch-mode -DskipTests        install -pl platform-common,platform-common-web ); then
+  echo "     FAILED to build the shared modules. The services cannot resolve them."
+  echo "     Try: cd services && ./mvnw install -pl platform-common,platform-common-web"
+  exit 1
+fi
+echo "     platform-common, platform-common-web installed"
+
+echo
+echo "4/5  services"
 start_service core core 8081
 start_service gateway gateway 8080
 
@@ -107,7 +120,7 @@ wait_for() {
 }
 
 echo
-echo "4/4  waiting"
+echo "5/5  waiting"
 FAIL=0
 wait_for core 8081 || FAIL=1
 wait_for gateway 8080 || FAIL=1

@@ -364,6 +364,18 @@ the measured baseline, one point below:
 | gateway `jacoco.minimum.*` | 0.53 | 0.40 |
 | core `jacoco.minimum.*` | 0.58 | 0.44 |
 
+**These are the numbers this section was written with, not today's.** The floors have been ratcheted
+several times since, and the poms are the source of truth — `services/pom.xml` carries the service
+floors and the whole history of how they moved, and each shared module carries its own. Read them
+there rather than here.
+
+**There are four modules now, not two** (ADR-0017). `platform-common` and `platform-common-web`
+have their own floors, deliberately lower and separately measured: a library bundle is small enough
+that one untested branch moves the ratio by whole points, so a floor copied from a service would
+fail the first build after the split and be deleted the same day. Moving well-tested classes out of
+`core` also moved its number — `CorrelationIdFilter` alone was 26 branches of 26 — which is a
+consequence of the split rather than a regression, and the floors were re-measured accordingly.
+
 That fails the build on a **regression** today, which is the job a gate can actually do now. Getting
 from there to 80/70 means writing tests, which is a separate body of work with its own card
 (T-5.9, #172). Raise the floors deliberately as it lands, with the reason in the commit — the same
@@ -411,7 +423,7 @@ and T-4.2 (#36) are the cards that close this.
 
 Recorded because it is the honest measure of where the strategy is weak, not as an aside:
 
-- **The correlation-id contract had no test at all** until T-3.8's trace work on #31. `X-Request-Id`
+- **The correlation-id contract had no test at all** until T-3.8's trace work on #31. `X-Correlation-Id`
   appeared nowhere in any test source, in either service, while the runbook described the contract
   in detail.
 - **The OIDC failure path had no test** until #156. A stale authorization request produced a 404 on

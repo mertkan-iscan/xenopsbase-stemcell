@@ -99,7 +99,17 @@ spring:
       auto-commit: false
   flyway:
     enabled: true
-    locations: classpath:db/migration
+    # NAMESPACED PER MODULE (T-3.10 follow-up). `classpath:db/migration` resolves
+    # across EVERY jar on the classpath, and every module numbers from V1, so the
+    # moment two modules share a process -- or one service depends on another's jar
+    # -- Flyway finds two different V1__ files and refuses to start with "Found more
+    # than one migration with version 1". Nothing collides today, which is exactly
+    # why the move is cheap today.
+    #
+    # Safe on a live database: flyway_schema_history keys on version and description,
+    # not on where the file was read from, so a relocated file with the same name is
+    # the same migration and nothing re-runs.
+    locations: classpath:db/migration/core
     # Fail rather than guess. Without this, Flyway will happily
     # "baseline" a database that already has tables it did not create,
     # silently adopting an unknown schema as version 1.

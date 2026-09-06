@@ -17,7 +17,7 @@ import software.amazon.awssdk.services.s3.model.CreateBucketRequest;
  * <p>A real S3 implementation rather than a mock, on purpose. The parts of this feature that break
  * in practice are the parts a mock cannot have opinions about: whether a presigned signature
  * actually validates, whether path-style addressing is required, whether the content-length
- * condition is enforced by the server. A mocked {@code DocumentStorage} would pass while the
+ * condition is enforced by the server. A mocked {@code ObjectStore} would pass while the
  * deployed service returned 403 on every upload.
  *
  * <p><b>Why this is a singleton holder and not an {@code @ImportTestcontainers} interface, unlike

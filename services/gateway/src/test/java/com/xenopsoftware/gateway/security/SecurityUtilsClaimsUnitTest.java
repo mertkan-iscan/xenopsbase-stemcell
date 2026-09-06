@@ -2,6 +2,7 @@ package com.xenopsoftware.gateway.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.xenopsoftware.common.security.AuthoritiesConstants;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
