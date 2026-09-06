@@ -1,4 +1,4 @@
-package com.xenopsoftware.core.service;
+package com.xenopsoftware.core.platform;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -6,9 +6,9 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import com.xenopsoftware.core.IntegrationTest;
 import com.xenopsoftware.core.config.CacheTestcontainer;
 import com.xenopsoftware.core.config.ObjectStorageTestcontainer;
-import com.xenopsoftware.core.domain.Document;
-import com.xenopsoftware.core.repository.DocumentRepository;
-import com.xenopsoftware.core.service.dto.CachedDocumentPage;
+import com.xenopsoftware.core.platform.CachedProbePage;
+import com.xenopsoftware.core.platform.PlatformProbe;
+import com.xenopsoftware.core.platform.PlatformProbeRepository;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -43,7 +43,7 @@ import org.springframework.test.context.DynamicPropertySource;
  * than by a method: if the context cannot refresh without Valkey, nothing here runs.
  */
 @IntegrationTest
-class DocumentCacheDegradationIT {
+class ProbeCacheDegradationIT {
 
     @DynamicPropertySource
     static void containers(DynamicPropertyRegistry registry) {
@@ -56,26 +56,26 @@ class DocumentCacheDegradationIT {
     private static final Pageable FIRST_PAGE = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
 
     @Autowired
-    private DocumentService documentService;
+    private PlatformProbeService probeService;
 
     @Autowired
-    private DocumentRepository documentRepository;
+    private PlatformProbeRepository probeRepository;
 
     @BeforeEach
     void clean() {
-        documentRepository.deleteAll();
+        probeRepository.deleteAll();
     }
 
-    private Document available(String filename) {
-        Document document = new Document();
+    private PlatformProbe available(String filename) {
+        PlatformProbe document = new PlatformProbe();
         document.setOwner(OWNER);
-        document.setFilename(filename);
+        document.setLabel(filename);
         document.setContentType("text/plain");
         document.setObjectKey("2026/09/" + OWNER + "/" + filename);
         document.setSizeBytes(11L);
-        document.setStatus(Document.Status.AVAILABLE);
+        document.setStatus(PlatformProbe.Status.AVAILABLE);
         document.setCreatedAt(Instant.now());
-        return documentRepository.saveAndFlush(document);
+        return probeRepository.saveAndFlush(document);
     }
 
     /** A read with no cache returns the right answer from Postgres rather than a 500. */
@@ -83,10 +83,10 @@ class DocumentCacheDegradationIT {
     void readsFallThroughToTheDatabase() {
         available("still-here.txt");
 
-        CachedDocumentPage page = documentService.listAvailableCached(OWNER, FIRST_PAGE);
+        CachedProbePage page = probeService.listAvailableCached(OWNER, FIRST_PAGE);
 
         assertThat(page.content()).hasSize(1);
-        assertThat(page.content().getFirst().filename()).isEqualTo("still-here.txt");
+        assertThat(page.content().getFirst().label()).isEqualTo("still-here.txt");
         assertThat(page.totalElements()).isEqualTo(1);
     }
 
@@ -94,10 +94,10 @@ class DocumentCacheDegradationIT {
     @Test
     void repeatedReadsStayCorrectAsTheDataChanges() {
         available("one.txt");
-        assertThat(documentService.listAvailableCached(OWNER, FIRST_PAGE).content()).hasSize(1);
+        assertThat(probeService.listAvailableCached(OWNER, FIRST_PAGE).content()).hasSize(1);
 
         available("two.txt");
-        assertThat(documentService.listAvailableCached(OWNER, FIRST_PAGE).content())
+        assertThat(probeService.listAvailableCached(OWNER, FIRST_PAGE).content())
             .as("with no cache, every read must see the current table")
             .hasSize(2);
     }
@@ -111,16 +111,16 @@ class DocumentCacheDegradationIT {
      */
     @Test
     void aFailedEvictionDoesNotFailACommittedWrite() {
-        Document document = available("doomed.txt");
+        PlatformProbe document = available("doomed.txt");
 
         assertThatCode(() -> {
-            boolean deleted = documentService.delete(document.getId(), OWNER);
+            boolean deleted = probeService.delete(document.getId(), OWNER);
             assertThat(deleted).isTrue();
         })
             .as("the eviction cannot reach Valkey, and that must not surface to the caller")
             .doesNotThrowAnyException();
 
-        assertThat(documentRepository.findById(document.getId())).isEmpty();
-        assertThat(documentService.listAvailableCached(OWNER, FIRST_PAGE).content()).isEmpty();
+        assertThat(probeRepository.findById(document.getId())).isEmpty();
+        assertThat(probeService.listAvailableCached(OWNER, FIRST_PAGE).content()).isEmpty();
     }
 }

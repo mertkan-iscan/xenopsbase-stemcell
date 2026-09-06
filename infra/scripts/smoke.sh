@@ -106,9 +106,9 @@ START="$(date +%s)"
 # Cloudflare answers every subsequent request with a redirect to a login page,
 # so all six later checks fail with an HTML body that says nothing about the
 # actual cause -- six confusing failures instead of one clear one.
-probe="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "${ACCESS[@]}" "${APP}/management/health")"
-if [ "$probe" = "302" ] || [ "$probe" = "000" ]; then
-  echo "  error: the Cloudflare Access service token was rejected (probe returned ${probe})." >&2
+access_check="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "${ACCESS[@]}" "${APP}/management/health")"
+if [ "$access_check" = "302" ] || [ "$access_check" = "000" ]; then
+  echo "  error: the Cloudflare Access service token was rejected (the health check returned ${access_check})." >&2
   echo "  Everything below would fail with a login page rather than a result." >&2
   echo "" >&2
   echo "  Check CF_ACCESS_CLIENT_ID / CF_ACCESS_CLIENT_SECRET, or re-read them:" >&2
@@ -129,7 +129,7 @@ fi
 # Without the service token the application must not be reachable at all. If
 # this ever returns the application, Access has stopped protecting it and T-8.6
 # is undone -- which nothing else would notice.
-noauth="$(curl -s -o /dev/null -w '%{redirect_url}' --max-time 20 "${APP}/services/core/api/documents")"
+noauth="$(curl -s -o /dev/null -w '%{redirect_url}' --max-time 20 "${APP}/services/core/api/platform/probe")"
 case "$noauth" in
   *cloudflareaccess.com*) ok "Access refuses a request with no service token" ;;
   *) bad "Access refuses a request with no service token" "redirect was '${noauth:-<none>}'" ;;
@@ -165,7 +165,7 @@ AUTHED=("${ACCESS[@]}" -H "Authorization: Bearer ${TOKEN}")
 # follow and read as success (T-3.8). Asserted here because the deployed edge
 # is the one place the entry point, the ingress and Access all interact.
 code="$(curl -s -o "$WORK/unauth.json" -w '%{http_code}' --max-time 20 \
-  "${ACCESS[@]}" -H 'Accept: application/json' "${APP}/services/core/api/documents")"
+  "${ACCESS[@]}" -H 'Accept: application/json' "${APP}/services/core/api/platform/probe")"
 if [ "$code" = "401" ]; then
   ok "an unauthenticated API call is 401, not a redirect"
 else
@@ -176,7 +176,7 @@ fi
 # 4. An authenticated call reaches core through the gateway
 # ---------------------------------------------------------------------------
 code="$(curl -s -o "$WORK/list.json" -w '%{http_code}' --max-time 30 \
-  "${AUTHED[@]}" "${APP}/services/core/api/documents")"
+  "${AUTHED[@]}" "${APP}/services/core/api/platform/probe")"
 if [ "$code" = "200" ]; then
   ok "an authenticated call reaches core through the gateway"
 else
@@ -190,7 +190,7 @@ fi
 # `trusted-proxies`, the gateway stopped forwarding X-Forwarded-* to core, and
 # core built its pagination Link header from its own in-cluster address:
 #
-#   <http://core:8081/api/documents?page=1&size=2>; rel="next"
+#   <http://core:8081/api/platform/probe?page=1&size=2>; rel="next"
 #
 # The whole suite passed. Every check above still passes with the forwarded
 # headers stripped entirely -- verified deliberately on 2026-08-24 -- because
@@ -203,12 +203,12 @@ fi
 #
 # Paged deliberately: RFC 8288 Link headers only appear when there is another
 # page, so `size=1` is what makes the header exist at all.
-links="$(curl -s -D - -o /dev/null --max-time 30   "${AUTHED[@]}" "${APP}/services/core/api/documents?page=0&size=1"   | tr -d '' | sed -n 's/^[Ll]ink: //p')"
+links="$(curl -s -D - -o /dev/null --max-time 30   "${AUTHED[@]}" "${APP}/services/core/api/platform/probe?page=0&size=1"   | tr -d '' | sed -n 's/^[Ll]ink: //p')"
 
 if [ -z "$links" ]; then
-  # Not a failure: with fewer than two documents there is no next page and no
+  # Not a failure: with fewer than two probes there is no next page and no
   # header. Saying so is better than a pass that inspected nothing.
-  ok "pagination Link header absent (fewer than 2 documents to page over)"
+  ok "pagination Link header absent (fewer than 2 probes to page over)"
 elif printf '%s' "$links" | grep -q "http://"; then
   bad "core builds absolute https URLs" "Link contains a plaintext URL: ${links}"
 elif printf '%s' "$links" | grep -q "${APP#https://}"; then
@@ -223,18 +223,18 @@ fi
 CONTENT="smoke ${ENVIRONMENT} $(date -u +%Y-%m-%dT%H:%M:%SZ) $RANDOM"
 echo -n "$CONTENT" > "$WORK/upload.txt"
 SIZE="$(wc -c < "$WORK/upload.txt" | tr -d ' ')"
-FILENAME="smoke-$(date -u +%Y%m%dT%H%M%SZ).txt"
+LABEL="smoke-$(date -u +%Y%m%dT%H%M%SZ).txt"
 
 ticket="$(
   curl -s --max-time 30 -X POST "${AUTHED[@]}" -H 'Content-Type: application/json' \
-    -d "{\"filename\":\"${FILENAME}\",\"contentType\":\"text/plain\",\"sizeBytes\":${SIZE}}" \
-    "${APP}/services/core/api/documents"
+    -d "{\"label\":\"${LABEL}\",\"contentType\":\"text/plain\",\"sizeBytes\":${SIZE}}" \
+    "${APP}/services/core/api/platform/probe"
 )"
-DOC_ID="$(echo "$ticket" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')"
+PROBE_ID="$(echo "$ticket" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')"
 UPLOAD_URL="$(echo "$ticket" | sed -n 's/.*"uploadUrl":"\([^"]*\)".*/\1/p')"
 
-if [ -n "$DOC_ID" ] && [ -n "$UPLOAD_URL" ]; then
-  ok "upload ticket issued (document ${DOC_ID})"
+if [ -n "$PROBE_ID" ] && [ -n "$UPLOAD_URL" ]; then
+  ok "upload ticket issued (probe ${PROBE_ID})"
 else
   bad "upload ticket issued" "$(echo "$ticket" | head -c 200)"
   echo ""
@@ -255,7 +255,7 @@ else
 fi
 
 code="$(curl -s -o "$WORK/complete.json" -w '%{http_code}' --max-time 30 -X POST \
-  "${AUTHED[@]}" "${APP}/services/core/api/documents/${DOC_ID}/complete")"
+  "${AUTHED[@]}" "${APP}/services/core/api/platform/probe/${PROBE_ID}/complete")"
 if [ "$code" = "200" ]; then
   ok "upload completed and recorded"
 else
@@ -264,7 +264,7 @@ fi
 
 # -L, because download answers 302 to a presigned GET. Following it is the test.
 curl -s -L --max-time 60 -o "$WORK/download.txt" \
-  "${AUTHED[@]}" "${APP}/services/core/api/documents/${DOC_ID}/download"
+  "${AUTHED[@]}" "${APP}/services/core/api/platform/probe/${PROBE_ID}/download"
 
 if cmp -s "$WORK/upload.txt" "$WORK/download.txt"; then
   ok "downloaded bytes are identical to what was uploaded"
@@ -276,14 +276,14 @@ fi
 # 6. Clean up after itself
 # ---------------------------------------------------------------------------
 # A smoke suite that leaves rows and objects behind turns a health check into a
-# slow storage leak, and makes the next run's "list documents" less meaningful
+# slow storage leak, and makes the next run's "list probes" less meaningful
 # every time.
 code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -X DELETE \
-  "${AUTHED[@]}" "${APP}/services/core/api/documents/${DOC_ID}")"
+  "${AUTHED[@]}" "${APP}/services/core/api/platform/probe/${PROBE_ID}")"
 if [ "$code" = "204" ] || [ "$code" = "200" ]; then
-  ok "the document is deleted again"
+  ok "the probe is deleted again"
 else
-  bad "the document is deleted again" "got ${code} — document ${DOC_ID} was left behind"
+  bad "the probe is deleted again" "got ${code} — probe ${PROBE_ID} was left behind"
 fi
 
 ELAPSED=$(( $(date +%s) - START ))

@@ -44,12 +44,12 @@ class SecurityProblemSupportTest {
     @Test
     @DisplayName("an ordinary path produces a well-formed problem document")
     void ordinaryPath() throws Exception {
-        JsonNode body = bodyFor403("/api/documents/42");
+        JsonNode body = bodyFor403("/api/platform/probe/42");
 
         assertThat(body.get("type").asText()).isEqualTo("about:blank");
         assertThat(body.get("title").asText()).isEqualTo("Forbidden");
         assertThat(body.get("status").asInt()).isEqualTo(403);
-        assertThat(body.get("instance").asText()).isEqualTo("/api/documents/42");
+        assertThat(body.get("instance").asText()).isEqualTo("/api/platform/probe/42");
     }
 
     @Test
@@ -58,7 +58,7 @@ class SecurityProblemSupportTest {
         // The old escaper stripped \n and \r and passed everything else through, so a tab landed
         // raw inside a JSON string literal and the document became unparseable. This is the case
         // that motivated the change.
-        String uri = "/api/documents/	tab";
+        String uri = "/api/platform/probe/	tab";
 
         JsonNode body = bodyFor403(uri);
 
@@ -81,7 +81,7 @@ class SecurityProblemSupportTest {
     @DisplayName("a 401 carries WWW-Authenticate and a well-formed body")
     void unauthorizedCarriesChallenge() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        request.setRequestURI("/api/documents");
+        request.setRequestURI("/api/platform/probe");
         MockHttpServletResponse response = new MockHttpServletResponse();
 
         support.commence(request, response, new BadCredentialsException("nope"));

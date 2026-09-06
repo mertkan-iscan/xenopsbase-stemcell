@@ -6,7 +6,7 @@
 
 ## Context
 
-Documents are owned by the Keycloak `sub` — `DocumentResource#currentOwner` — and that is
+Rows are owned by the Keycloak `sub` — `PlatformProbeResource#currentOwner` — and that is
 deliberate. A username can be changed in Keycloak, and ownership keyed to `preferred_username`
 would strand every document the moment somebody renamed an account.
 

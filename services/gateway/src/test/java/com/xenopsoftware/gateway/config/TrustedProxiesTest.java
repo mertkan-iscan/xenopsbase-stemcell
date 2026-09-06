@@ -131,7 +131,7 @@ class TrustedProxiesTest {
         incoming.add("X-Forwarded-Proto", "https");
         incoming.add("Accept", "application/json");
 
-        MockServerHttpRequest request = MockServerHttpRequest.get("/services/core/api/documents")
+        MockServerHttpRequest request = MockServerHttpRequest.get("/services/core/api/platform/probe")
             .remoteAddress(new InetSocketAddress("192.0.2.10", 44444))
             .headers(incoming)
             .build();
@@ -151,7 +151,7 @@ class TrustedProxiesTest {
         incoming.add("X-Forwarded-Host", "app-dev.xenopsoftware.com");
         incoming.add("X-Forwarded-Proto", "https");
 
-        MockServerHttpRequest request = MockServerHttpRequest.get("/services/core/api/documents")
+        MockServerHttpRequest request = MockServerHttpRequest.get("/services/core/api/platform/probe")
             .remoteAddress(new InetSocketAddress("10.42.3.26", 44444))
             .headers(incoming)
             .build();

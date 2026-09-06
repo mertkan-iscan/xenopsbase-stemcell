@@ -12,9 +12,9 @@
 #
 # WHAT IT PROVES THAT THE SMOKE SUITE CANNOT
 #
-# `smoke.sh` creates a document and deletes it inside one run, so it would pass
-# perfectly against an environment that had just lost every document it ever
-# held. This seeds a document BEFORE the destroy and reads it back AFTER the
+# `smoke.sh` creates a probe and deletes it inside one run, so it would pass
+# perfectly against an environment that had just lost every probe it ever
+# held. This seeds a probe BEFORE the destroy and reads it back AFTER the
 # rebuild, byte for byte, through a login as the same user.
 #
 # That last part is the subtle one. Documents are owned by the Keycloak `sub`.
@@ -84,7 +84,7 @@ banner() {
 DRILL_START="$(date +%s)"
 
 # ---------------------------------------------------------------------------
-banner "Phase 0 — seed a document that must survive"
+banner "Phase 0 — seed a probe that must survive"
 # ---------------------------------------------------------------------------
 # THE DRILL CANNOT START ON A HALF-TORN-DOWN ENVIRONMENT, and it has to say so
 # (T-7.10, #291).
@@ -125,21 +125,21 @@ CONTENT="cold-rebuild drill $(date -u +%Y-%m-%dT%H:%M:%SZ) $RANDOM"
 echo -n "$CONTENT" > "$WORK/seed.txt"
 SIZE="$(wc -c < "$WORK/seed.txt" | tr -d ' ')"
 SEED_SHA="$(sha256sum "$WORK/seed.txt" | cut -d' ' -f1)"
-FILENAME="cold-rebuild-$(date -u +%Y%m%dT%H%M%SZ).txt"
+LABEL="cold-rebuild-$(date -u +%Y%m%dT%H%M%SZ).txt"
 
 ticket="$(curl -s --max-time 30 -X POST "${ACCESS[@]}" -H "Authorization: Bearer ${TOKEN}" \
   -H 'Content-Type: application/json' \
-  -d "{\"filename\":\"${FILENAME}\",\"contentType\":\"text/plain\",\"sizeBytes\":${SIZE}}" \
-  "${APP}/services/core/api/documents")"
+  -d "{\"label\":\"${LABEL}\",\"contentType\":\"text/plain\",\"sizeBytes\":${SIZE}}" \
+  "${APP}/services/core/api/platform/probe")"
 SEED_ID="$(echo "$ticket" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')"
 UPLOAD_URL="$(echo "$ticket" | sed -n 's/.*"uploadUrl":"\([^"]*\)".*/\1/p')"
 [ -n "$SEED_ID" ] || { echo "  error: no upload ticket: $(echo "$ticket" | head -c 200)" >&2; exit 1; }
 
 curl -s --max-time 60 -X PUT -H 'Content-Type: text/plain' --data-binary "@$WORK/seed.txt" "$UPLOAD_URL" >/dev/null
 curl -s --max-time 30 -X POST "${ACCESS[@]}" -H "Authorization: Bearer ${TOKEN}" \
-  "${APP}/services/core/api/documents/${SEED_ID}/complete" >/dev/null
+  "${APP}/services/core/api/platform/probe/${SEED_ID}/complete" >/dev/null
 
-echo "  document ${SEED_ID}  ${FILENAME}"
+echo "  probe ${SEED_ID}  ${LABEL}"
 echo "  sha256    ${SEED_SHA}"
 echo ""
 echo "  This is the whole point. It must come back byte for byte, owned by the"
@@ -198,29 +198,29 @@ TOKEN="$(token)"
 
 curl -s -L --max-time 60 -o "$WORK/restored.txt" \
   "${ACCESS[@]}" -H "Authorization: Bearer ${TOKEN}" \
-  "${APP}/services/core/api/documents/${SEED_ID}/download"
+  "${APP}/services/core/api/platform/probe/${SEED_ID}/download"
 
 RESTORED_SHA="$(sha256sum "$WORK/restored.txt" 2>/dev/null | cut -d' ' -f1)"
 
 SURVIVED=1
 if [ "$RESTORED_SHA" = "$SEED_SHA" ]; then
-  echo "  PASS  document ${SEED_ID} came back byte for byte"
+  echo "  PASS  probe ${SEED_ID} came back byte for byte"
   echo "        ${RESTORED_SHA}"
   SURVIVED=0
 else
-  echo "  FAIL  document ${SEED_ID} did not survive"
+  echo "  FAIL  probe ${SEED_ID} did not survive"
   echo "        expected ${SEED_SHA}"
   echo "        got      ${RESTORED_SHA:-<nothing>}"
   echo ""
   echo "  If the download 404s rather than returning wrong bytes, the row may"
-  echo "  have survived while its OWNER did not: documents are owned by the"
+  echo "  have survived while its OWNER did not: probes are owned by the"
   echo "  Keycloak sub, and a realm that mints new user ids on rebuild orphans"
   echo "  every row it ever owned. See ADR-0010."
 fi
 
 # Tidy up so repeated drills do not accumulate.
 curl -s -o /dev/null --max-time 30 -X DELETE "${ACCESS[@]}" -H "Authorization: Bearer ${TOKEN}" \
-  "${APP}/services/core/api/documents/${SEED_ID}"
+  "${APP}/services/core/api/platform/probe/${SEED_ID}"
 
 TOTAL=$(( $(date +%s) - DRILL_START ))
 REBUILD_ONLY=$(( DOWN + SNAP + UP + SMOKE ))

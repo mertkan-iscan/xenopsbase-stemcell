@@ -50,7 +50,7 @@ class ExceptionTranslatorMappingUnitTest {
     }
 
     private static ServerWebExchange anyRequest() {
-        return MockServerWebExchange.from(MockServerHttpRequest.get("/services/core/api/documents"));
+        return MockServerWebExchange.from(MockServerHttpRequest.get("/services/core/api/platform/probe"));
     }
 
     private ProblemDetailWithCause problemFor(Throwable error) {
@@ -222,7 +222,7 @@ class ExceptionTranslatorMappingUnitTest {
     void theRequestPathIsAlwaysReported() {
         assertThat(problemFor(new IllegalStateException("x")).getProperties()).containsEntry(
             "path",
-            java.net.URI.create("/services/core/api/documents")
+            java.net.URI.create("/services/core/api/platform/probe")
         );
     }
 }

@@ -29,13 +29,20 @@ class TechnicalStructureTest {
         .optionalLayer("Security").definedBy("..security..")
         .optionalLayer("Persistence").definedBy("..repository..")
         .layer("Domain").definedBy("..domain..")
+        // The probe is a VERTICAL slice -- entity, repository, service and resource in one package
+        // -- because it is the template's self-test rather than a domain, and splitting it across
+        // four horizontal layers would make it look like the business logic this template does not
+        // have (ADR-0017, T-9.2). Declared as its own layer so the rules below still apply TO it
+        // rather than leaving it unassigned, which under consideringAllDependencies() would fail
+        // every rule it touches for reasons that say nothing about the architecture.
+        .optionalLayer("Platform").definedBy("..platform..")
 
         .whereLayer("Config").mayNotBeAccessedByAnyLayer()
-        .whereLayer("Web").mayOnlyBeAccessedByLayers("Config")
-        .whereLayer("Service").mayOnlyBeAccessedByLayers("Web", "Config")
-        .whereLayer("Security").mayOnlyBeAccessedByLayers("Config", "Service", "Web")
-        .whereLayer("Persistence").mayOnlyBeAccessedByLayers("Service", "Security", "Web", "Config")
-        .whereLayer("Domain").mayOnlyBeAccessedByLayers("Persistence", "Service", "Security", "Web", "Config")
+        .whereLayer("Web").mayOnlyBeAccessedByLayers("Config", "Platform")
+        .whereLayer("Service").mayOnlyBeAccessedByLayers("Web", "Config", "Platform")
+        .whereLayer("Security").mayOnlyBeAccessedByLayers("Config", "Service", "Web", "Platform")
+        .whereLayer("Persistence").mayOnlyBeAccessedByLayers("Service", "Security", "Web", "Config", "Platform")
+        .whereLayer("Domain").mayOnlyBeAccessedByLayers("Persistence", "Service", "Security", "Web", "Config", "Platform")
 
         .ignoreDependency(belongToAnyOf(CoreApp.class), alwaysTrue())
         // Types in `config` that every layer is allowed to reference. The rule says the Config

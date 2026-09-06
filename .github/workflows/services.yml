@@ -219,6 +219,9 @@ jobs:
         run: python3 infra/scripts/check-api-breaking.py --self-test
 
       - name: Compare the contract against the base branch
+        env:
+          # For the `gh pr view` that reads the breaking-api label below.
+          GH_TOKEN: ${{ github.token }}
         run: |
           base="${{ github.event.pull_request.base.sha }}"
           failed=0
@@ -237,10 +240,47 @@ jobs:
             fi
             echo ""
           done
-          if [ "$failed" -ne 0 ]; then
-            echo "::error::This pull request breaks the published API contract."
-            exit 1
+          if [ "$failed" -eq 0 ]; then
+            exit 0
           fi
+
+          # THE ESCAPE HATCH, AND WHY IT EXISTS (T-9.2).
+          #
+          # Until now this gate had none: a deliberate breaking change could not
+          # pass it, at all. That sounds like strictness and is the opposite --
+          # a control with no legitimate override is a control somebody disables
+          # the first time they genuinely need it, and this repository has
+          # already found four checks that reported success while governing
+          # nothing (#2, #113, #155, #211). A deleted gate is the fifth shape of
+          # the same failure.
+          #
+          # So the break is still DETECTED, still PRINTED in full above, and
+          # still fails by default. The `breaking-api` label is a person saying
+          # "yes, on purpose" -- an act that is visible on the pull request, in
+          # its timeline, and to whoever reviews it. What it is not is a flag in
+          # a file that gets copied forward by the next author.
+          # READ LIVE, not from the event payload. `github.event.pull_request.labels`
+          # is a snapshot taken when the run was TRIGGERED, so a label added after
+          # the push -- which is the normal order, because you label a break once
+          # the check has told you about it -- is not in it. Worse, re-running the
+          # job replays the same stale payload, so the obvious fix does not work
+          # either and the label looks broken.
+          labels="$(gh pr view "${{ github.event.pull_request.number }}" --json labels --jq '.labels[].name')"
+          if echo "${labels}" | grep -qx 'breaking-api'; then
+            echo "::warning::This pull request breaks the published API contract, and carries the 'breaking-api' label."
+            echo ""
+            echo "  ACCEPTED. The removals above were reviewed and labelled as deliberate."
+            echo "  Anything consuming those operations -- clients/java, a fork, an external caller"
+            echo "  -- has to move. docs/api/*.json is the contract they read."
+            exit 0
+          fi
+
+          echo "::error::This pull request breaks the published API contract."
+          echo ""
+          echo "  If the break is DELIBERATE, add the 'breaking-api' label to this pull request"
+          echo "  and re-run. The label is the record that somebody decided it, and the diff above"
+          echo "  is what they decided."
+          exit 1
 
   publish:
     name: publish ${{ matrix.service }} image

@@ -372,12 +372,12 @@ export function throughCorePath(data) {
   // Saturation means slow responses, and k6's default is no request timeout at
   // all. A request still open after 30s is not latency data, it is a stuck
   // connection holding a VU the arrival rate needs back.
-  const res = http.get(GATEWAY + '/services/core/api/documents?page=0&size=20', {
+  const res = http.get(GATEWAY + '/services/core/api/platform/probe?page=0&size=20', {
     headers: { Authorization: 'Bearer ' + currentToken(data) },
     timeout: '30s',
     tags: { scenario: 'through_core', step: label || 'ramp' },
   });
-  const ok = check(res, { 'documents is 200': (r) => r.status === 200 });
+  const ok = check(res, { 'probe list is 200': (r) => r.status === 200 });
   record(label, res, ok);
 }
 

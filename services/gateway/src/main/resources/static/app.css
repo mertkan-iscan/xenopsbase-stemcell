@@ -125,12 +125,6 @@ button:disabled {
   cursor: not-allowed;
 }
 
-input[type="file"] {
-  font: inherit;
-  color: var(--fg);
-  max-width: 100%;
-}
-
 /* Wide content scrolls inside its own container so the page body never does. */
 .table-scroll {
   overflow-x: auto;
@@ -164,14 +158,6 @@ th.num {
   font-variant-numeric: tabular-nums;
 }
 
-/* The filename is the one column allowed to be long, so it is the one that
-   truncates rather than pushing the actions off the side. */
-td.name {
-  white-space: normal;
-  word-break: break-word;
-  max-width: 320px;
-}
-
 tbody tr:last-child td {
   border-bottom: none;
 }
@@ -183,13 +169,6 @@ a {
 .muted {
   color: var(--muted);
   font-size: 13px;
-}
-
-.pager {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  margin-top: 12px;
 }
 
 .banner {

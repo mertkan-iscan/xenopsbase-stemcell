@@ -82,9 +82,12 @@ class OpenApiSpecIT {
         assertThat(paths.fieldNames())
             .toIterable()
             .as("springdoc must see the actual controllers, not just whatever else is mapped")
-            .contains("/api/documents", "/api/documents/{id}");
+            .contains("/api/platform/probe", "/api/platform/probe/{id}");
 
-        assertThat(paths.path("/api/documents").fieldNames()).toIterable().as("both operations on the collection").contains("get", "post");
+        assertThat(paths.path("/api/platform/probe").fieldNames())
+            .toIterable()
+            .as("both operations on the collection")
+            .contains("get", "post");
 
         // The spec is captured from a TEST context, so anything mapped in the test source set is
         // a candidate for leaking into the published contract. It did: eight
@@ -112,7 +115,7 @@ class OpenApiSpecIT {
 
         // A generated client that only knows about 200s forces every consumer to rediscover the
         // error shape by hand, which is what T-3.8 standardised in order to avoid.
-        JsonNode responses = spec.path("paths").path("/api/documents").path("post").path("responses");
+        JsonNode responses = spec.path("paths").path("/api/platform/probe").path("post").path("responses");
 
         assertThat(responses.isMissingNode()).as("operations must declare their responses").isFalse();
         assertThat(responses.fieldNames()).toIterable().isNotEmpty();

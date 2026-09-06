@@ -86,7 +86,7 @@ public class ApplicationProperties {
          * How long to wait for a query before giving up.
          *
          * <p>Short on purpose. This endpoint is a convenience view; a Prometheus that has become
-         * slow must not be able to occupy request threads in the service that serves documents.
+         * slow must not be able to occupy request threads in the service that serves the API.
          */
         private Duration timeout = Duration.ofSeconds(5);
 

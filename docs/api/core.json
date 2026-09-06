@@ -34,70 +34,6 @@
         },
         "type" : "object"
       },
-      "DocumentView" : {
-        "properties" : {
-          "contentType" : {
-            "type" : "string"
-          },
-          "createdAt" : {
-            "format" : "date-time",
-            "type" : "string"
-          },
-          "filename" : {
-            "type" : "string"
-          },
-          "id" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "sizeBytes" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "status" : {
-            "type" : "string"
-          }
-        },
-        "type" : "object"
-      },
-      "ExampleItem" : {
-        "properties" : {
-          "createdAt" : {
-            "format" : "date-time",
-            "type" : "string"
-          },
-          "createdBy" : {
-            "type" : "string"
-          },
-          "createdDate" : {
-            "format" : "date-time",
-            "type" : "string"
-          },
-          "id" : {
-            "format" : "int64",
-            "type" : "integer"
-          },
-          "lastModifiedBy" : {
-            "type" : "string"
-          },
-          "lastModifiedDate" : {
-            "format" : "date-time",
-            "type" : "string"
-          },
-          "name" : {
-            "maxLength" : 200,
-            "minLength" : 0,
-            "type" : "string"
-          },
-          "tenantId" : {
-            "type" : "string"
-          }
-        },
-        "required" : [
-          "name"
-        ],
-        "type" : "object"
-      },
       "InitiateRequest" : {
         "properties" : {
           "contentType" : {
@@ -105,7 +41,7 @@
             "minLength" : 0,
             "type" : "string"
           },
-          "filename" : {
+          "label" : {
             "maxLength" : 255,
             "minLength" : 0,
             "type" : "string"
@@ -117,7 +53,7 @@
         },
         "required" : [
           "contentType",
-          "filename"
+          "label"
         ],
         "type" : "object"
       },
@@ -162,6 +98,103 @@
               "type" : "string"
             },
             "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "PlatformProbe" : {
+        "properties" : {
+          "completedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "contentType" : {
+            "maxLength" : 255,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "createdBy" : {
+            "type" : "string"
+          },
+          "createdDate" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "label" : {
+            "maxLength" : 255,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "lastModifiedBy" : {
+            "type" : "string"
+          },
+          "lastModifiedDate" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "objectKey" : {
+            "maxLength" : 512,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "owner" : {
+            "maxLength" : 255,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "sizeBytes" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "status" : {
+            "enum" : [
+              "PENDING",
+              "AVAILABLE"
+            ],
+            "type" : "string"
+          },
+          "tenantId" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "contentType",
+          "label",
+          "objectKey",
+          "owner"
+        ],
+        "type" : "object"
+      },
+      "ProbeView" : {
+        "properties" : {
+          "contentType" : {
+            "type" : "string"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "label" : {
+            "type" : "string"
+          },
+          "sizeBytes" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "status" : {
+            "type" : "string"
           }
         },
         "type" : "object"
@@ -250,29 +283,6 @@
   },
   "openapi" : "3.0.1",
   "paths" : {
-    "/api/admin/example-items" : {
-      "get" : {
-        "operationId" : "listAsAdmin",
-        "responses" : {
-          "200" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "items" : {
-                    "$ref" : "#/components/schemas/ExampleItem"
-                  },
-                  "type" : "array"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "tags" : [
-          "example-item-resource"
-        ]
-      }
-    },
     "/api/admin/infra/usage" : {
       "get" : {
         "operationId" : "usage",
@@ -293,9 +303,32 @@
         ]
       }
     },
-    "/api/documents" : {
+    "/api/admin/platform/probe" : {
       "get" : {
-        "operationId" : "list_1",
+        "operationId" : "listAsAdmin",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/PlatformProbe"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "platform-identity-resource"
+        ]
+      }
+    },
+    "/api/platform/probe" : {
+      "get" : {
+        "operationId" : "list",
         "parameters" : [
           {
             "in" : "query",
@@ -312,7 +345,7 @@
               "*/*" : {
                 "schema" : {
                   "items" : {
-                    "$ref" : "#/components/schemas/DocumentView"
+                    "$ref" : "#/components/schemas/ProbeView"
                   },
                   "type" : "array"
                 }
@@ -322,7 +355,7 @@
           }
         },
         "tags" : [
-          "document-resource"
+          "platform-probe-resource"
         ]
       },
       "post" : {
@@ -350,11 +383,11 @@
           }
         },
         "tags" : [
-          "document-resource"
+          "platform-probe-resource"
         ]
       }
     },
-    "/api/documents/{id}" : {
+    "/api/platform/probe/{id}" : {
       "delete" : {
         "operationId" : "delete",
         "parameters" : [
@@ -374,11 +407,11 @@
           }
         },
         "tags" : [
-          "document-resource"
+          "platform-probe-resource"
         ]
       }
     },
-    "/api/documents/{id}/complete" : {
+    "/api/platform/probe/{id}/complete" : {
       "post" : {
         "operationId" : "complete",
         "parameters" : [
@@ -397,7 +430,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/DocumentView"
+                  "$ref" : "#/components/schemas/ProbeView"
                 }
               }
             },
@@ -405,11 +438,11 @@
           }
         },
         "tags" : [
-          "document-resource"
+          "platform-probe-resource"
         ]
       }
     },
-    "/api/documents/{id}/download" : {
+    "/api/platform/probe/{id}/download" : {
       "get" : {
         "operationId" : "download",
         "parameters" : [
@@ -429,58 +462,7 @@
           }
         },
         "tags" : [
-          "document-resource"
-        ]
-      }
-    },
-    "/api/example-items" : {
-      "get" : {
-        "operationId" : "list",
-        "responses" : {
-          "200" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "items" : {
-                    "$ref" : "#/components/schemas/ExampleItem"
-                  },
-                  "type" : "array"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "tags" : [
-          "example-item-resource"
-        ]
-      },
-      "post" : {
-        "operationId" : "create",
-        "requestBody" : {
-          "content" : {
-            "application/json" : {
-              "schema" : {
-                "$ref" : "#/components/schemas/ExampleItem"
-              }
-            }
-          },
-          "required" : true
-        },
-        "responses" : {
-          "200" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ExampleItem"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "tags" : [
-          "example-item-resource"
+          "platform-probe-resource"
         ]
       }
     },
@@ -503,7 +485,7 @@
           }
         },
         "tags" : [
-          "example-item-resource"
+          "platform-identity-resource"
         ]
       }
     }

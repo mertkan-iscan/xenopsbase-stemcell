@@ -6,8 +6,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.xenopsoftware.common.idempotency.IdempotencyRecordRepository;
 import com.xenopsoftware.core.config.SecurityConfiguration;
-import com.xenopsoftware.core.repository.ExampleItemRepository;
-import java.util.List;
+import com.xenopsoftware.core.platform.PlatformIdentityResource;
+import com.xenopsoftware.core.platform.PlatformProbeRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -33,9 +33,14 @@ import org.springframework.test.web.servlet.MockMvc;
  * does not show a privileged caller gets through, and a rule that denies everybody looks identical
  * to one that works — the same reasoning that put a second `smoke-admin` account in the dev realm.
  *
- * <p>Filters are ON here, unlike {@link ExampleItemResourceWebSliceTest}. That is the difference
- * between the two slices, and it is why splitting them is worth the extra file: this one fails only
- * for authorization reasons.
+ * <p>Filters are ON here. That is what makes this a security slice rather than a web slice, and it
+ * is why the file exists separately: this one fails only for authorization reasons.
+ *
+ * <p>The subject moved from {@code ExampleItemResource} to {@link PlatformIdentityResource} when the
+ * demo domain was deleted (T-9.2). It had to move rather than go with it: {@code /api/admin/**} is
+ * the only place the ADMIN rule in {@code SecurityConfiguration} is asserted at all, and deleting
+ * the endpoint would have deleted the assertion along with it — silently, since a rule nothing
+ * reaches passes every test there is.
  */
 // IMPORTING THE REAL SecurityConfiguration IS THE POINT, AND IT IS EASY TO MISS.
 //
@@ -52,7 +57,7 @@ import org.springframework.test.web.servlet.MockMvc;
     com.xenopsoftware.common.web.rest.errors.SecurityProblemSupport.class,
 })
 @TestPropertySource(properties = "spring.security.oauth2.client.provider.oidc.issuer-uri=http://localhost/realms/test")
-@WebMvcTest(controllers = ExampleItemResource.class)
+@WebMvcTest(controllers = PlatformIdentityResource.class)
 class SecurityRulesSliceTest {
 
     private static final String ADMIN = "app-admin";
@@ -62,7 +67,7 @@ class SecurityRulesSliceTest {
     private MockMvc mvc;
 
     @MockitoBean
-    private ExampleItemRepository repository;
+    private PlatformProbeRepository repository;
 
     // @WebMvcTest includes Filter beans, and IdempotencyFilter (T-3.8) needs its repository. Not
     // part of what this slice asserts -- it is here so the slice can start at all.
@@ -77,41 +82,43 @@ class SecurityRulesSliceTest {
 
     @BeforeEach
     void repositoryReturnsSomething() {
-        when(repository.findAll()).thenReturn(List.of());
+        when(repository.findAll(org.mockito.ArgumentMatchers.any(org.springframework.data.domain.Pageable.class))).thenReturn(
+            org.springframework.data.domain.Page.empty()
+        );
     }
 
     @Test
     @WithAnonymousUser
     @DisplayName("anonymous is refused an authenticated endpoint")
     void anonymousIsRefused() throws Exception {
-        mvc.perform(get("/api/example-items")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/whoami")).andExpect(status().isUnauthorized());
     }
 
     @Test
     @WithMockUser(authorities = USER)
     @DisplayName("a plain user reaches the ordinary endpoint")
     void userReachesOrdinaryEndpoint() throws Exception {
-        mvc.perform(get("/api/example-items")).andExpect(status().isOk());
+        mvc.perform(get("/api/whoami")).andExpect(status().isOk());
     }
 
     @Test
     @WithMockUser(authorities = USER)
     @DisplayName("a plain user is REFUSED the admin endpoint — the check that had no test")
     void userIsRefusedAdminEndpoint() throws Exception {
-        mvc.perform(get("/api/admin/example-items")).andExpect(status().isForbidden());
+        mvc.perform(get("/api/admin/platform/probe")).andExpect(status().isForbidden());
     }
 
     @Test
     @WithMockUser(authorities = ADMIN)
     @DisplayName("an admin reaches the admin endpoint, so the rule is not simply denying everyone")
     void adminReachesAdminEndpoint() throws Exception {
-        mvc.perform(get("/api/admin/example-items")).andExpect(status().isOk());
+        mvc.perform(get("/api/admin/platform/probe")).andExpect(status().isOk());
     }
 
     @Test
     @WithAnonymousUser
     @DisplayName("anonymous is refused the admin endpoint as 401, not 403")
     void anonymousIsRefusedAdminEndpointAsUnauthorized() throws Exception {
-        mvc.perform(get("/api/admin/example-items")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/admin/platform/probe")).andExpect(status().isUnauthorized());
     }
 }

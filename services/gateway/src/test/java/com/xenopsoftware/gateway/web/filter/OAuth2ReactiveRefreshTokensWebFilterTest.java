@@ -49,7 +49,7 @@ class OAuth2ReactiveRefreshTokensWebFilterTest {
     private static final WebFilterChain UNREACHED = exchange -> Mono.error(new AssertionError("the chain must not be reached"));
 
     private MockServerWebExchange run(RuntimeException refreshFailure, MediaType accept) {
-        return run(refreshFailure, accept, "/services/core/api/documents", UNREACHED);
+        return run(refreshFailure, accept, "/services/core/api/platform/probe", UNREACHED);
     }
 
     private MockServerWebExchange run(RuntimeException refreshFailure, MediaType accept, String path, WebFilterChain chain) {
@@ -116,7 +116,7 @@ class OAuth2ReactiveRefreshTokensWebFilterTest {
     @DisplayName("ending the session is what removes the spent credentials, so it has to happen")
     void theSessionIsInvalidatedAndNotJustAnsweredOver() {
         MockServerWebExchange exchange = MockServerWebExchange.from(
-            MockServerHttpRequest.get("/services/core/api/documents").accept(MediaType.APPLICATION_JSON).build()
+            MockServerHttpRequest.get("/services/core/api/platform/probe").accept(MediaType.APPLICATION_JSON).build()
         );
         // The authorized client lives in the WebSession, so a 401 that leaves the session
         // standing hands the next request the same refused refresh token. That is the loop
@@ -155,7 +155,7 @@ class OAuth2ReactiveRefreshTokensWebFilterTest {
         // UnsupportedOperationException from setting a status on a committed response --
         // a second failure that replaces and hides the first.
         MockServerWebExchange exchange = MockServerWebExchange.from(
-            MockServerHttpRequest.get("/services/core/api/documents").accept(MediaType.APPLICATION_JSON).build()
+            MockServerHttpRequest.get("/services/core/api/platform/probe").accept(MediaType.APPLICATION_JSON).build()
         );
         exchange.getResponse().setComplete().block();
 

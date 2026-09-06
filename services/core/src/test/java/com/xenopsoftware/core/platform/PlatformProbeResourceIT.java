@@ -1,4 +1,4 @@
-package com.xenopsoftware.core.web.rest;
+package com.xenopsoftware.core.platform;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -8,8 +8,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xenopsoftware.core.IntegrationTest;
 import com.xenopsoftware.core.config.ObjectStorageTestcontainer;
-import com.xenopsoftware.core.domain.Document;
-import com.xenopsoftware.core.repository.DocumentRepository;
+import com.xenopsoftware.core.platform.PlatformProbe;
+import com.xenopsoftware.core.platform.PlatformProbeRepository;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -60,14 +60,14 @@ class DocumentResourceIT {
     private MockMvc mockMvc;
 
     @Autowired
-    private DocumentRepository documentRepository;
+    private PlatformProbeRepository probeRepository;
 
     @Autowired
     private ObjectMapper objectMapper;
 
     @BeforeEach
     void clean() {
-        documentRepository.deleteAll();
+        probeRepository.deleteAll();
     }
 
     /** Authenticates as a given {@code sub}, which is what the service keys ownership on. */
@@ -77,13 +77,13 @@ class DocumentResourceIT {
             .authorities(new SimpleGrantedAuthority("app-user"));
     }
 
-    private JsonNode initiate(String sub, String filename, String contentType, long sizeBytes) throws Exception {
+    private JsonNode initiate(String sub, String label, String contentType, long sizeBytes) throws Exception {
         MvcResult result = mockMvc
             .perform(
-                post("/api/documents")
+                post("/api/platform/probe")
                     .with(asUser(sub))
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"filename\":\"" + filename + "\",\"contentType\":\"" + contentType + "\",\"sizeBytes\":" + sizeBytes + "}")
+                    .content("{\"label\":\"" + label + "\",\"contentType\":\"" + contentType + "\",\"sizeBytes\":" + sizeBytes + "}")
             )
             .andExpect(status().isCreated())
             .andReturn();
@@ -114,17 +114,17 @@ class DocumentResourceIT {
             .isEqualTo(200);
 
         // Not downloadable until completion, because nothing has verified any bytes exist.
-        mockMvc.perform(get("/api/documents/{id}/download", id).with(asUser(OWNER_SUB))).andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/platform/probe/{id}/download", id).with(asUser(OWNER_SUB))).andExpect(status().isNotFound());
 
         mockMvc
-            .perform(post("/api/documents/{id}/complete", id).with(asUser(OWNER_SUB)))
+            .perform(post("/api/platform/probe/{id}/complete", id).with(asUser(OWNER_SUB)))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value("AVAILABLE"))
             // The size comes from the store, not from anything the client sent.
             .andExpect(jsonPath("$.sizeBytes").value(content.length));
 
         MvcResult redirect = mockMvc
-            .perform(get("/api/documents/{id}/download", id).with(asUser(OWNER_SUB)))
+            .perform(get("/api/platform/probe/{id}/download", id).with(asUser(OWNER_SUB)))
             .andExpect(status().isFound())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andReturn();
@@ -140,7 +140,7 @@ class DocumentResourceIT {
         assertThat(fetched.statusCode()).isEqualTo(200);
         assertThat(fetched.body()).isEqualTo(content);
         assertThat(fetched.headers().firstValue("content-disposition"))
-            .as("the stored key carries no filename; it is applied per request")
+            .as("the stored key carries no label; it is applied per request")
             .hasValueSatisfying(v -> assertThat(v).contains("notes.txt"));
     }
 
@@ -150,12 +150,12 @@ class DocumentResourceIT {
 
         // The client claims success without ever having uploaded. The service checks the store.
         mockMvc
-            .perform(post("/api/documents/{id}/complete", ticket.get("id").asLong()).with(asUser(OWNER_SUB)))
+            .perform(post("/api/platform/probe/{id}/complete", ticket.get("id").asLong()).with(asUser(OWNER_SUB)))
             .andExpect(status().isNotFound());
 
-        assertThat(documentRepository.findAll())
+        assertThat(probeRepository.findAll())
             .singleElement()
-            .satisfies(d -> assertThat(d.getStatus()).isEqualTo(Document.Status.PENDING));
+            .satisfies(d -> assertThat(d.getStatus()).isEqualTo(PlatformProbe.Status.PENDING));
     }
 
     @Test
@@ -164,10 +164,10 @@ class DocumentResourceIT {
         long id = ticket.get("id").asLong();
         putBytes(ticket.get("uploadUrl").asText(), "text/plain", "x".getBytes(StandardCharsets.UTF_8));
 
-        mockMvc.perform(post("/api/documents/{id}/complete", id).with(asUser(OWNER_SUB))).andExpect(status().isOk());
+        mockMvc.perform(post("/api/platform/probe/{id}/complete", id).with(asUser(OWNER_SUB))).andExpect(status().isOk());
         // A client that retries after a lost response must not be punished for succeeding twice.
         mockMvc
-            .perform(post("/api/documents/{id}/complete", id).with(asUser(OWNER_SUB)))
+            .perform(post("/api/platform/probe/{id}/complete", id).with(asUser(OWNER_SUB)))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value("AVAILABLE"));
     }
@@ -177,14 +177,14 @@ class DocumentResourceIT {
         JsonNode ticket = initiate(OWNER_SUB, "private.txt", "text/plain", "secret".getBytes(StandardCharsets.UTF_8).length);
         long id = ticket.get("id").asLong();
         putBytes(ticket.get("uploadUrl").asText(), "text/plain", "secret".getBytes(StandardCharsets.UTF_8));
-        mockMvc.perform(post("/api/documents/{id}/complete", id).with(asUser(OWNER_SUB))).andExpect(status().isOk());
+        mockMvc.perform(post("/api/platform/probe/{id}/complete", id).with(asUser(OWNER_SUB))).andExpect(status().isOk());
 
-        mockMvc.perform(get("/api/documents/{id}/download", id).with(asUser(OTHER_SUB))).andExpect(status().isNotFound());
-        mockMvc.perform(delete("/api/documents/{id}", id).with(asUser(OTHER_SUB))).andExpect(status().isNotFound());
-        mockMvc.perform(get("/api/documents").with(asUser(OTHER_SUB))).andExpect(jsonPath("$.length()").value(0));
+        mockMvc.perform(get("/api/platform/probe/{id}/download", id).with(asUser(OTHER_SUB))).andExpect(status().isNotFound());
+        mockMvc.perform(delete("/api/platform/probe/{id}", id).with(asUser(OTHER_SUB))).andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/platform/probe").with(asUser(OTHER_SUB))).andExpect(jsonPath("$.length()").value(0));
 
         // Still there for its owner: the other user's request was refused, not destructive.
-        mockMvc.perform(get("/api/documents").with(asUser(OWNER_SUB))).andExpect(jsonPath("$.length()").value(1));
+        mockMvc.perform(get("/api/platform/probe").with(asUser(OWNER_SUB))).andExpect(jsonPath("$.length()").value(1));
     }
 
     @Test
@@ -193,13 +193,15 @@ class DocumentResourceIT {
 
         JsonNode done = initiate(OWNER_SUB, "done.txt", "text/plain", 1);
         putBytes(done.get("uploadUrl").asText(), "text/plain", "y".getBytes(StandardCharsets.UTF_8));
-        mockMvc.perform(post("/api/documents/{id}/complete", done.get("id").asLong()).with(asUser(OWNER_SUB))).andExpect(status().isOk());
+        mockMvc
+            .perform(post("/api/platform/probe/{id}/complete", done.get("id").asLong()).with(asUser(OWNER_SUB)))
+            .andExpect(status().isOk());
 
         mockMvc
-            .perform(get("/api/documents").with(asUser(OWNER_SUB)))
+            .perform(get("/api/platform/probe").with(asUser(OWNER_SUB)))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.length()").value(1))
-            .andExpect(jsonPath("$[0].filename").value("done.txt"));
+            .andExpect(jsonPath("$[0].label").value("done.txt"));
     }
 
     @Test
@@ -208,26 +210,26 @@ class DocumentResourceIT {
         long id = ticket.get("id").asLong();
         String downloadable = ticket.get("uploadUrl").asText();
         putBytes(downloadable, "text/plain", "bye".getBytes(StandardCharsets.UTF_8));
-        mockMvc.perform(post("/api/documents/{id}/complete", id).with(asUser(OWNER_SUB))).andExpect(status().isOk());
+        mockMvc.perform(post("/api/platform/probe/{id}/complete", id).with(asUser(OWNER_SUB))).andExpect(status().isOk());
 
-        mockMvc.perform(delete("/api/documents/{id}", id).with(asUser(OWNER_SUB))).andExpect(status().isNoContent());
+        mockMvc.perform(delete("/api/platform/probe/{id}", id).with(asUser(OWNER_SUB))).andExpect(status().isNoContent());
 
-        assertThat(documentRepository.findById(id)).isEmpty();
-        mockMvc.perform(get("/api/documents/{id}/download", id).with(asUser(OWNER_SUB))).andExpect(status().isNotFound());
+        assertThat(probeRepository.findById(id)).isEmpty();
+        mockMvc.perform(get("/api/platform/probe/{id}/download", id).with(asUser(OWNER_SUB))).andExpect(status().isNotFound());
     }
 
     @Test
     void anUploadLargerThanTheLimitIsRefusedBeforeAnythingIsSigned() throws Exception {
         mockMvc
             .perform(
-                post("/api/documents")
+                post("/api/platform/probe")
                     .with(asUser(OWNER_SUB))
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"filename\":\"huge.bin\",\"contentType\":\"application/octet-stream\",\"sizeBytes\":52428801}")
+                    .content("{\"label\":\"huge.bin\",\"contentType\":\"application/octet-stream\",\"sizeBytes\":52428801}")
             )
             .andExpect(status().isPayloadTooLarge());
 
-        assertThat(documentRepository.findAll()).as("nothing is recorded for an upload that was never permitted").isEmpty();
+        assertThat(probeRepository.findAll()).as("nothing is recorded for an upload that was never permitted").isEmpty();
     }
 
     @Test
@@ -242,6 +244,6 @@ class DocumentResourceIT {
 
     @Test
     void anonymousCallersAreRejected() throws Exception {
-        mockMvc.perform(get("/api/documents")).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/platform/probe")).andExpect(status().isUnauthorized());
     }
 }

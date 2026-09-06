@@ -1,18 +1,19 @@
-package com.xenopsoftware.core.service;
+package com.xenopsoftware.core.platform;
 
+import com.xenopsoftware.common.outbox.OutboxService;
 import com.xenopsoftware.common.storage.ConditionalOnObjectStore;
 import com.xenopsoftware.common.storage.ObjectStore;
 import com.xenopsoftware.common.storage.ObjectStoreProperties;
 import com.xenopsoftware.core.config.ApplicationProperties;
-import com.xenopsoftware.core.domain.Document;
-import com.xenopsoftware.core.repository.DocumentRepository;
-import com.xenopsoftware.core.service.dto.CachedDocumentPage;
+import com.xenopsoftware.core.service.BusinessCaches;
+import com.xenopsoftware.core.service.SingleFlight;
 import java.net.URI;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -25,7 +26,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Document lifecycle across two systems that cannot share a transaction (T-3.7).
+ * The probe's lifecycle, across two systems that cannot share a transaction (T-9.2).
+ *
+ * <p>This is the template's self-test path, not a business service. Every seam the stemcell ships
+ * is on it, deliberately, so that {@code smoke.sh}, the k6 suites and the restore drill exercise
+ * something real rather than passing because there is nothing left to check.
  *
  * <h2>The consistency story</h2>
  *
@@ -49,31 +54,34 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 @ConditionalOnObjectStore
-public class DocumentService {
+public class PlatformProbeService {
 
-    private static final Logger LOG = LoggerFactory.getLogger(DocumentService.class);
+    private static final Logger LOG = LoggerFactory.getLogger(PlatformProbeService.class);
 
     /** Date-partitioned so a bucket listing stays navigable once there are millions of keys. */
     private static final DateTimeFormatter KEY_PREFIX = DateTimeFormatter.ofPattern("yyyy/MM").withZone(ZoneOffset.UTC);
 
-    private final DocumentRepository repository;
+    private final PlatformProbeRepository repository;
     private final ObjectStore storage;
     private final ObjectStoreProperties settings;
     private final ApplicationEventPublisher events;
     private final SingleFlight singleFlight;
+    private final OutboxService outbox;
 
-    public DocumentService(
-        DocumentRepository repository,
+    public PlatformProbeService(
+        PlatformProbeRepository repository,
         ObjectStore storage,
         ApplicationProperties properties,
         ApplicationEventPublisher events,
-        SingleFlight singleFlight
+        SingleFlight singleFlight,
+        OutboxService outbox
     ) {
         this.repository = repository;
         this.storage = storage;
         this.settings = properties.getStorage();
         this.events = events;
         this.singleFlight = singleFlight;
+        this.outbox = outbox;
     }
 
     /**
@@ -83,20 +91,31 @@ public class DocumentService {
      * object this service has no record of.
      */
     @Transactional
-    public Upload initiateUpload(String filename, String contentType, long sizeBytes, String owner) {
+    public Upload initiateUpload(String label, String contentType, long sizeBytes, String owner) {
         if (sizeBytes <= 0 || sizeBytes > settings.getMaxUploadBytes()) {
             throw new UploadTooLargeException(sizeBytes, settings.getMaxUploadBytes());
         }
 
-        Document document = new Document();
-        document.setObjectKey(generateObjectKey());
-        document.setFilename(filename);
-        document.setContentType(contentType);
-        document.setOwner(owner);
-        document.setStatus(Document.Status.PENDING);
-        document.setCreatedAt(Instant.now());
+        PlatformProbe probe = new PlatformProbe();
+        probe.setObjectKey(generateObjectKey());
+        probe.setLabel(label);
+        probe.setContentType(contentType);
+        probe.setOwner(owner);
+        probe.setStatus(PlatformProbe.Status.PENDING);
+        probe.setCreatedAt(Instant.now());
 
-        Document saved = repository.saveAndFlush(document);
+        PlatformProbe saved = repository.saveAndFlush(probe);
+
+        // THE OUTBOX SEAM, EXERCISED RATHER THAN DOCUMENTED. Recorded in the SAME transaction as
+        // the row, which is the entire guarantee OutboxService exists to provide: the message and
+        // the change it announces commit together or not at all. Publishing to a broker from here
+        // instead could not offer that -- the commit and the publish are two systems, and every
+        // ordering of them leaves a window where one happened and the other did not.
+        //
+        // Nothing consumes this yet; LoggingMessagePublisher writes a log line. That is the point
+        // of the seam being here: the mechanism is observable end to end without the template
+        // having chosen a broker on a fork's behalf.
+        outbox.record("platform.probe.initiated", "PlatformProbe", String.valueOf(saved.getId()), Map.of("label", label));
 
         // Signing the DECLARED size makes the object store enforce it: the client must send
         // exactly this many bytes or the PUT is refused with a 403. The cap is checked above,
@@ -110,36 +129,36 @@ public class DocumentService {
     /**
      * Promotes a {@code PENDING} row once the object is confirmed present.
      *
-     * <p>Idempotent: completing an already-complete document returns it unchanged, because a
+     * <p>Idempotent: completing an already-complete probe returns it unchanged, because a
      * client that retries after a lost response must not get an error for succeeding twice.
      */
     @Transactional
-    public Optional<Document> completeUpload(Long id, String owner) {
-        Document document = repository.findByIdAndOwner(id, owner).orElse(null);
-        if (document == null) {
+    public Optional<PlatformProbe> completeUpload(Long id, String owner) {
+        PlatformProbe probe = repository.findByIdAndOwner(id, owner).orElse(null);
+        if (probe == null) {
             return Optional.empty();
         }
 
-        if (document.getStatus() == Document.Status.AVAILABLE) {
-            return Optional.of(document);
+        if (probe.getStatus() == PlatformProbe.Status.AVAILABLE) {
+            return Optional.of(probe);
         }
 
         // The only source of truth about whether bytes exist is the store. A client saying it is
         // done proves nothing, because that is what a client would say either way.
-        ObjectStore.StoredObject stored = storage.stat(document.getObjectKey()).orElse(null);
+        ObjectStore.StoredObject stored = storage.stat(probe.getObjectKey()).orElse(null);
         if (stored == null) {
-            LOG.warn("Completion requested for document {} but object {} is absent", id, document.getObjectKey());
+            LOG.warn("Completion requested for probe {} but object {} is absent", id, probe.getObjectKey());
             return Optional.empty();
         }
 
-        document.setSizeBytes(stored.sizeBytes());
-        document.setStatus(Document.Status.AVAILABLE);
-        document.setCompletedAt(Instant.now());
-        Document saved = repository.save(document);
+        probe.setSizeBytes(stored.sizeBytes());
+        probe.setStatus(PlatformProbe.Status.AVAILABLE);
+        probe.setCompletedAt(Instant.now());
+        PlatformProbe saved = repository.save(probe);
 
         // PENDING -> AVAILABLE, so this row now belongs in the owner's list. Consumed after commit;
-        // see DocumentCacheEviction for why it cannot be a @CacheEvict here.
-        events.publishEvent(new DocumentsChanged(owner));
+        // see ProbeCacheEviction for why it cannot be a @CacheEvict here.
+        events.publishEvent(new ProbesChanged(owner));
         return Optional.of(saved);
     }
 
@@ -148,13 +167,13 @@ public class DocumentService {
     public Optional<URI> presignDownload(Long id, String owner) {
         return repository
             .findByIdAndOwner(id, owner)
-            .filter(d -> d.getStatus() == Document.Status.AVAILABLE)
-            .map(d -> storage.presignDownload(d.getObjectKey(), d.getFilename(), settings.getPresignTtl()));
+            .filter(d -> d.getStatus() == PlatformProbe.Status.AVAILABLE)
+            .map(d -> storage.presignDownload(d.getObjectKey(), d.getLabel(), settings.getPresignTtl()));
     }
 
     @Transactional(readOnly = true)
-    public Page<Document> listAvailable(String owner, Pageable pageable) {
-        return repository.findByOwnerAndStatus(owner, Document.Status.AVAILABLE, pageable);
+    public Page<PlatformProbe> listAvailable(String owner, Pageable pageable) {
+        return repository.findByOwnerAndStatus(owner, PlatformProbe.Status.AVAILABLE, pageable);
     }
 
     /**
@@ -167,7 +186,7 @@ public class DocumentService {
      * <p><b>The key carries the owner, and that is a correctness property rather than a naming
      * convention.</b> {@code findByOwnerAndStatus} enforces authorisation by not returning the row;
      * a cache keyed on the page alone would answer a request the database itself would have refused,
-     * with another user's documents. ADR-0011 is explicit that this is a different severity class
+     * with another user's probes. ADR-0011 is explicit that this is a different severity class
      * from a stale read, which is why the owner is first in the key and why the DTO does not repeat
      * it in the value -- a second copy of the field that decides who may read the entry is a second
      * chance to get it wrong.
@@ -183,10 +202,10 @@ public class DocumentService {
      * {@code CacheConfiguration}'s error handler is what makes it true.
      */
     @Cacheable(
-        cacheNames = BusinessCaches.DOCUMENT_LIST,
+        cacheNames = BusinessCaches.PROBE_LIST,
         key = "#owner + ':' + #pageable.pageNumber + '-' + #pageable.pageSize + '-' + #pageable.sort"
     )
-    public CachedDocumentPage listAvailableCached(String owner, Pageable pageable) {
+    public CachedProbePage listAvailableCached(String owner, Pageable pageable) {
         // Concurrent misses on one key rebuild it ONCE per replica (T-3.23, #265). Waiters hold no
         // transaction and therefore no connection, which is the whole point: a cold cache must not
         // put one Postgres primary under one request's worth of load per in-flight request.
@@ -199,7 +218,7 @@ public class DocumentService {
         // would coalesce two callers asking for different orderings into one load and hand one of
         // them the other's answer -- a correctness bug, not a tuning detail.
         String key =
-            BusinessCaches.keyPrefix(BusinessCaches.DOCUMENT_LIST) +
+            BusinessCaches.keyPrefix(BusinessCaches.PROBE_LIST) +
             owner +
             ":" +
             pageable.getPageNumber() +
@@ -210,44 +229,63 @@ public class DocumentService {
         return singleFlight.call(key, () -> loadAvailable(owner, pageable));
     }
 
-    private CachedDocumentPage loadAvailable(String owner, Pageable pageable) {
-        Page<Document> page = repository.findByOwnerAndStatus(owner, Document.Status.AVAILABLE, pageable);
-        List<CachedDocumentPage.CachedDocument> content = page
+    private CachedProbePage loadAvailable(String owner, Pageable pageable) {
+        Page<PlatformProbe> page = repository.findByOwnerAndStatus(owner, PlatformProbe.Status.AVAILABLE, pageable);
+        List<CachedProbePage.CachedProbe> content = page
             .getContent()
             .stream()
-            .map(document ->
-                new CachedDocumentPage.CachedDocument(
-                    document.getId(),
-                    document.getFilename(),
-                    document.getContentType(),
-                    document.getSizeBytes(),
-                    document.getStatus().name(),
-                    document.getCreatedAt()
+            .map(probe ->
+                new CachedProbePage.CachedProbe(
+                    probe.getId(),
+                    probe.getLabel(),
+                    probe.getContentType(),
+                    probe.getSizeBytes(),
+                    probe.getStatus().name(),
+                    probe.getCreatedAt()
                 )
             )
             .toList();
-        return new CachedDocumentPage(content, page.getTotalElements());
+        return new CachedProbePage(content, page.getTotalElements());
     }
 
     /**
-     * Removes the row, then the object.
+     * Tombstones the row, and deletes the object for real.
      *
-     * <p>The object delete runs after the row is gone rather than before it. The other order
-     * would leave a row pointing at bytes that no longer exist if the transaction rolled back,
+     * <h2>The two halves are deliberately different, and that is the whole soft-delete story</h2>
+     *
+     * {@code repository.delete} on a {@code @SoftDelete} entity is an {@code UPDATE ... SET deleted
+     * = true}: the row stops being visible to every query and its history survives. The object is
+     * NOT soft-deleted, because there is no such thing — it is removed from the bucket, now.
+     *
+     * <p>That asymmetry is the answer to the objection the entity this replaced raised against
+     * soft delete: a tombstoned row whose bytes still exist is a leak wearing a tombstone. It
+     * still costs storage, and it is still readable by anyone holding a presigned URL that has not
+     * yet expired. Deleting the object eagerly removes both, and leaves only the row, which costs
+     * nothing and is the part worth keeping.
+     *
+     * <p>The object delete runs after the row update rather than before it. The other order would
+     * leave a visible row pointing at bytes that no longer exist if the transaction rolled back,
      * which is the failure this ordering exists to prevent.
      */
     @Transactional
     public boolean delete(Long id, String owner) {
-        Document document = repository.findByIdAndOwner(id, owner).orElse(null);
-        if (document == null) {
+        PlatformProbe probe = repository.findByIdAndOwner(id, owner).orElse(null);
+        if (probe == null) {
             return false;
         }
-        String objectKey = document.getObjectKey();
-        repository.delete(document);
+        String objectKey = probe.getObjectKey();
+
+        // Recorded before the delete, in the same transaction: the message describes a change that
+        // is about to commit with it. Recording it afterwards would be the same thing, but
+        // recording it OUTSIDE the transaction would not -- see OutboxService for why the
+        // propagation is MANDATORY.
+        outbox.record("platform.probe.deleted", "PlatformProbe", String.valueOf(id), Map.of("objectKey", objectKey));
+
+        repository.delete(probe);
         repository.flush();
 
         storage.delete(objectKey);
-        events.publishEvent(new DocumentsChanged(owner));
+        events.publishEvent(new ProbesChanged(owner));
         return true;
     }
 
@@ -263,11 +301,11 @@ public class DocumentService {
      */
     @Transactional
     public int reapAbandonedUploads(Instant olderThan) {
-        List<Document> abandoned = repository.findByStatusAndCreatedAtBefore(Document.Status.PENDING, olderThan);
-        for (Document document : abandoned) {
+        List<PlatformProbe> abandoned = repository.findByStatusAndCreatedAtBefore(PlatformProbe.Status.PENDING, olderThan);
+        for (PlatformProbe probe : abandoned) {
             // Delete the object too: an upload can complete after the client gave up, leaving
             // bytes behind a row nobody will ever promote.
-            storage.delete(document.getObjectKey());
+            storage.delete(probe.getObjectKey());
         }
         repository.deleteAll(abandoned);
         if (!abandoned.isEmpty()) {
@@ -277,7 +315,7 @@ public class DocumentService {
     }
 
     /**
-     * Keys are generated, never derived from the uploaded filename.
+     * Keys are generated, never derived from the caller-supplied label.
      *
      * <p>A key built from user input is a collision and traversal surface, and an object store
      * has no directory to escape from, so the usual path defences do not apply. A UUID also means
@@ -288,7 +326,7 @@ public class DocumentService {
     }
 
     /** What the caller needs to perform the upload. */
-    public record Upload(Document document, URI uploadUrl, long expiresInSeconds, long contentLength) {}
+    public record Upload(PlatformProbe probe, URI uploadUrl, long expiresInSeconds, long contentLength) {}
 
     /** The declared size is missing, non-positive, or above {@code application.storage.max-upload-bytes}. */
     public static class UploadTooLargeException extends IllegalArgumentException {

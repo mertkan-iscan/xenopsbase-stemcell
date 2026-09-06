@@ -91,7 +91,7 @@ with entries about messages describing changes that already have their own entri
 
 ## 2. Soft delete
 
-`@SoftDelete(columnName = "deleted")` on `ExampleItem`. Hibernate rewrites `DELETE` into
+`@SoftDelete(columnName = "deleted")` on `PlatformProbe`. Hibernate rewrites `DELETE` into
 `UPDATE ... SET deleted = true` and adds the predicate to every query, so ordinary repository code
 needs no changes and **cannot forget it** — the reason to use the mapping rather than hand-written
 `@SQLDelete` plus `@Where`.
@@ -99,14 +99,20 @@ needs no changes and **cannot forget it** — the reason to use the mapping rath
 The cost is real: deleted rows become invisible to JPA entirely. There is no "include deleted"
 switch. Reading them back is a native query.
 
-### `Document` is deliberately not soft-deleted
+### The row is tombstoned; the object is deleted for real
 
-Its bytes live in object storage. A row marked deleted while the object still exists is a leak
-wearing a tombstone — it still costs storage and is still readable by anyone holding a presigned
-URL. Deletion there has to be real.
+This used to read "`Document` is deliberately not soft-deleted", and the objection behind it still
+stands: an entity whose bytes live in object storage cannot simply be tombstoned, because a row
+marked deleted while the object still exists is a leak wearing a tombstone — it still costs storage
+and is still readable by anyone holding an unexpired presigned URL.
 
-That asymmetry is the point. Soft delete is not a default to apply everywhere; it is a per-entity
-decision, and the seam exists so the decision is cheap either way.
+`PlatformProbe` answers that rather than avoiding it. `PlatformProbeService.delete` tombstones the
+row and deletes the OBJECT immediately, in the same operation. The bytes are what leaks; the row is
+what has history worth keeping, and it costs nothing.
+
+That asymmetry is the point, and it is still a per-entity decision rather than a default to apply
+everywhere. An entity with no external resource can be tombstoned outright; one with an external
+resource has to say what happens to that resource, and "nothing" is not an answer.
 
 ## 3. Multi-tenancy
 

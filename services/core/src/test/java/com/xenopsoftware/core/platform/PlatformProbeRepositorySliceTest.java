@@ -1,10 +1,10 @@
-package com.xenopsoftware.core.repository;
+package com.xenopsoftware.core.platform;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.xenopsoftware.common.tenancy.DefaultTenantResolver;
 import com.xenopsoftware.core.config.DatabaseTestcontainer;
-import com.xenopsoftware.core.domain.Document;
+import com.xenopsoftware.core.platform.PlatformProbe;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -25,7 +25,7 @@ import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
  *
  * <p>The queries under test are the ownership boundary. {@code owner} holds the Keycloak
  * {@code sub}, and these derived queries are the only thing standing between one user's documents
- * and another's — {@code DocumentResource} passes {@code currentOwner()} into every one of them. A
+ * and another's — {@code PlatformProbeResource} passes {@code currentOwner()} into every one of them. A
  * mistake here is not a wrong result, it is one user reading another user's files.
  *
  * <p>{@code replace = NONE} keeps the Testcontainers Postgres rather than swapping in an embedded
@@ -39,9 +39,9 @@ import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
 // SessionFactory refuses every query with "no tenant identifier specified". A full-context test gets
 // this by component scan; a slice has to ask for it, and the error names Hibernate rather than the
 // seam that caused it.
-@Import({ DefaultTenantResolver.class, DocumentRepositorySliceTest.AuditingForTheSlice.class })
+@Import({ DefaultTenantResolver.class, PlatformProbeRepositorySliceTest.AuditingForTheSlice.class })
 @ImportTestcontainers(DatabaseTestcontainer.class)
-class DocumentRepositorySliceTest {
+class PlatformProbeRepositorySliceTest {
 
     private static final String OWNER = "af70f9df-8441-4259-9d56-ebb6d1868ac4";
     private static final String OTHER_OWNER = "3b64215b-9126-418f-9460-7ceaf45919d2";
@@ -60,34 +60,34 @@ class DocumentRepositorySliceTest {
     }
 
     @Autowired
-    private DocumentRepository repository;
+    private PlatformProbeRepository repository;
 
-    private Document saved(String owner, Document.Status status, String filename) {
-        Document d = new Document();
+    private PlatformProbe saved(String owner, PlatformProbe.Status status, String label) {
+        PlatformProbe d = new PlatformProbe();
         d.setOwner(owner);
         d.setStatus(status);
-        d.setFilename(filename);
+        d.setLabel(label);
         d.setContentType("text/plain");
         d.setSizeBytes(26L);
-        d.setObjectKey("2026/08/" + filename);
+        d.setObjectKey("2026/08/" + label);
         return repository.save(d);
     }
 
     @Test
     @DisplayName("findByIdAndOwner returns the document to its owner")
     void ownerFindsOwnDocument() {
-        Document mine = saved(OWNER, Document.Status.AVAILABLE, "mine.txt");
+        PlatformProbe mine = saved(OWNER, PlatformProbe.Status.AVAILABLE, "mine.txt");
 
-        Optional<Document> found = repository.findByIdAndOwner(mine.getId(), OWNER);
+        Optional<PlatformProbe> found = repository.findByIdAndOwner(mine.getId(), OWNER);
 
         assertThat(found).isPresent();
-        assertThat(found.orElseThrow().getFilename()).isEqualTo("mine.txt");
+        assertThat(found.orElseThrow().getLabel()).isEqualTo("mine.txt");
     }
 
     @Test
     @DisplayName("findByIdAndOwner refuses it to anyone else - the boundary that matters")
     void otherOwnerCannotFindIt() {
-        Document mine = saved(OWNER, Document.Status.AVAILABLE, "mine.txt");
+        PlatformProbe mine = saved(OWNER, PlatformProbe.Status.AVAILABLE, "mine.txt");
 
         assertThat(repository.findByIdAndOwner(mine.getId(), OTHER_OWNER)).isEmpty();
     }
@@ -95,24 +95,24 @@ class DocumentRepositorySliceTest {
     @Test
     @DisplayName("the paged listing returns only the caller's documents")
     void listingIsScopedToTheOwner() {
-        saved(OWNER, Document.Status.AVAILABLE, "a.txt");
-        saved(OWNER, Document.Status.AVAILABLE, "b.txt");
-        saved(OTHER_OWNER, Document.Status.AVAILABLE, "theirs.txt");
+        saved(OWNER, PlatformProbe.Status.AVAILABLE, "a.txt");
+        saved(OWNER, PlatformProbe.Status.AVAILABLE, "b.txt");
+        saved(OTHER_OWNER, PlatformProbe.Status.AVAILABLE, "theirs.txt");
 
-        var page = repository.findByOwnerAndStatus(OWNER, Document.Status.AVAILABLE, PageRequest.of(0, 10));
+        var page = repository.findByOwnerAndStatus(OWNER, PlatformProbe.Status.AVAILABLE, PageRequest.of(0, 10));
 
         assertThat(page.getTotalElements()).isEqualTo(2);
-        assertThat(page.getContent()).extracting(Document::getFilename).containsExactlyInAnyOrder("a.txt", "b.txt");
+        assertThat(page.getContent()).extracting(PlatformProbe::getLabel).containsExactlyInAnyOrder("a.txt", "b.txt");
     }
 
     @Test
     @DisplayName("a PENDING upload is not listed - an incomplete upload is not a document yet")
     void pendingDocumentsAreNotListed() {
-        saved(OWNER, Document.Status.AVAILABLE, "done.txt");
-        saved(OWNER, Document.Status.PENDING, "half-uploaded.txt");
+        saved(OWNER, PlatformProbe.Status.AVAILABLE, "done.txt");
+        saved(OWNER, PlatformProbe.Status.PENDING, "half-uploaded.txt");
 
-        var page = repository.findByOwnerAndStatus(OWNER, Document.Status.AVAILABLE, PageRequest.of(0, 10));
+        var page = repository.findByOwnerAndStatus(OWNER, PlatformProbe.Status.AVAILABLE, PageRequest.of(0, 10));
 
-        assertThat(page.getContent()).extracting(Document::getFilename).containsExactly("done.txt");
+        assertThat(page.getContent()).extracting(PlatformProbe::getLabel).containsExactly("done.txt");
     }
 }

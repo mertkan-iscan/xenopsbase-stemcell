@@ -112,14 +112,15 @@ Rules that are not obvious from the tree:
   consistent API stops being one.
 - **Audit, soft delete, tenancy and the outbox already have seams.** Do not invent a second way to
   do any of them. See [docs/runbooks/extension-seams.md](../docs/runbooks/extension-seams.md) --
-  it also explains why `Document` is audited but deliberately NOT soft-deleted, which is the kind
-  of per-entity decision the seams exist to make cheap.
+  it also explains why `PlatformProbe` is tombstoned while its OBJECT is deleted outright, which
+  is the kind of per-entity decision the seams exist to make cheap.
 - **No outbound call may wait forever.** Timeouts, circuit breakers, retries and bulkheads are a
   default posture rather than a per-call decision. See
   [docs/runbooks/resilience.md](../docs/runbooks/resilience.md) -- particularly before adding a
   call to anything over the network, and before assuming an unset timeout means a sensible one.
 - **File bytes never pass through a service.** Uploads and downloads go straight between the client
-  and object storage over presigned URLs; the API only issues them and tracks metadata. See
+  and object storage over presigned URLs; the API only issues them and tracks metadata. Object
+  storage is a platform capability in `platform-common`, not a feature of one service. See
   [docs/runbooks/document-storage.md](../docs/runbooks/document-storage.md), which also covers why
   ownership is keyed on the OIDC `sub` and never on `preferred_username`.
 

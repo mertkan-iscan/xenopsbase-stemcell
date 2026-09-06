@@ -64,9 +64,16 @@
             build fails on a REGRESSION today. Take the next ratchet from CI's
             job summary, not from a developer machine — services.yml prints the
             merged figure precisely so the number does not have to be guessed.
+
+            RAISED THE SAME DAY, 0.77/0.56 to 0.80/0.59, after T-9.2. The move
+            was not new tests either: deleting the demo domain took
+            ExampleItemResource and its repository with it, and the probe that
+            replaced Document is exercised by more of its own suite than Document
+            was — the outbox write on both the create and delete paths is now on
+            a path PlatformProbeResourceIT drives. Measured 0.8131 / 0.6019.
         -->
-        <jacoco.minimum.instruction>0.77</jacoco.minimum.instruction>
-        <jacoco.minimum.branch>0.56</jacoco.minimum.branch>
+        <jacoco.minimum.instruction>0.80</jacoco.minimum.instruction>
+        <jacoco.minimum.branch>0.59</jacoco.minimum.branch>
     </properties>
 
 

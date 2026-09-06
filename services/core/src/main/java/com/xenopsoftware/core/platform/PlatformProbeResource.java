@@ -1,10 +1,7 @@
-package com.xenopsoftware.core.web.rest;
+package com.xenopsoftware.core.platform;
 
 import com.xenopsoftware.common.security.SecurityUtils;
 import com.xenopsoftware.common.storage.ConditionalOnObjectStore;
-import com.xenopsoftware.core.domain.Document;
-import com.xenopsoftware.core.service.DocumentService;
-import com.xenopsoftware.core.service.dto.CachedDocumentPage;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
@@ -27,7 +24,23 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import tech.jhipster.web.util.PaginationUtil;
 
 /**
- * Document upload and download (T-3.7).
+ * The platform probe: the template's self-test, as an HTTP path (T-9.2).
+ *
+ * <h2>Why a template that claims to have no business logic ships an endpoint</h2>
+ *
+ * Because the alternative is a stemcell whose smoke test, load tests and restore drill all pass
+ * because there is nothing left for them to check. This path is deliberately named for what it is
+ * — a probe, not a document, not an item — and it exists to be exercised, then deleted by a fork
+ * whose own endpoints exercise the same seams.
+ *
+ * <p>One request through {@code POST} touches every one of them:
+ *
+ * <pre>
+ *   Idempotency-Key header  -&gt; IdempotencyFilter, replay instead of a second row
+ *   the row                 -&gt; audit columns, audit_log, tenant discriminator, soft delete
+ *   the outbox              -&gt; a message committed with the change it announces
+ *   the response            -&gt; a presigned PUT the client uses against real object storage
+ * </pre>
  *
  * <h2>Bytes never touch this service</h2>
  *
@@ -35,11 +48,11 @@ import tech.jhipster.web.util.PaginationUtil;
  * URL, then talks to the object store directly:
  *
  * <pre>
- *   POST /api/documents                 -&gt; { id, uploadUrl, ... }
- *   PUT  &lt;uploadUrl&gt;                    (client -&gt; object store, not through here)
- *   POST /api/documents/{id}/complete   -&gt; the row becomes AVAILABLE
+ *   POST /api/platform/probe                 -&gt; { id, uploadUrl, ... }
+ *   PUT  &lt;uploadUrl&gt;                         (client -&gt; object store, not through here)
+ *   POST /api/platform/probe/{id}/complete   -&gt; the row becomes AVAILABLE
  *
- *   GET  /api/documents/{id}/download   -&gt; 302 to a presigned GET
+ *   GET  /api/platform/probe/{id}/download   -&gt; 302 to a presigned GET
  * </pre>
  *
  * Proxying the bytes would put this service on the critical path for something the object store
@@ -49,28 +62,28 @@ import tech.jhipster.web.util.PaginationUtil;
  * <h2>Ownership</h2>
  *
  * Every lookup is scoped by the caller's {@code sub} in the repository query rather than filtered
- * after loading. A document belonging to someone else is indistinguishable from one that does not
+ * after loading. A probe belonging to someone else is indistinguishable from one that does not
  * exist, which is the intended answer.
  */
 @RestController
-@RequestMapping("/api/documents")
+@RequestMapping("/api/platform/probe")
 @ConditionalOnObjectStore
-public class DocumentResource {
+public class PlatformProbeResource {
 
     /** The largest page this API will serve, whatever the client asks for. */
     static final int MAX_PAGE_SIZE = 100;
 
-    private final DocumentService documentService;
+    private final PlatformProbeService probeService;
 
-    public DocumentResource(DocumentService documentService) {
-        this.documentService = documentService;
+    public PlatformProbeResource(PlatformProbeService probeService) {
+        this.probeService = probeService;
     }
 
     /** Registers the intent to upload and returns the URL to PUT to. */
     @PostMapping
     public ResponseEntity<UploadTicket> initiate(@Valid @RequestBody InitiateRequest request) {
-        DocumentService.Upload upload = documentService.initiateUpload(
-            request.filename(),
+        PlatformProbeService.Upload upload = probeService.initiateUpload(
+            request.label(),
             request.contentType(),
             request.sizeBytes(),
             currentOwner()
@@ -78,7 +91,7 @@ public class DocumentResource {
 
         return ResponseEntity.status(HttpStatus.CREATED).body(
             new UploadTicket(
-                upload.document().getId(),
+                upload.probe().getId(),
                 upload.uploadUrl(),
                 upload.expiresInSeconds(),
                 upload.contentLength(),
@@ -94,20 +107,20 @@ public class DocumentResource {
      * otherwise the client learns only that something was rejected, and the obvious next move is
      * to retry the same upload.
      */
-    @ExceptionHandler(DocumentService.UploadTooLargeException.class)
-    public ResponseEntity<String> handleTooLarge(DocumentService.UploadTooLargeException e) {
+    @ExceptionHandler(PlatformProbeService.UploadTooLargeException.class)
+    public ResponseEntity<String> handleTooLarge(PlatformProbeService.UploadTooLargeException e) {
         return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(e.getMessage());
     }
 
     /**
-     * Confirms the object arrived. Until this is called the document is not downloadable, because
+     * Confirms the object arrived. Until this is called the probe is not downloadable, because
      * until this is called nothing has verified that any bytes exist.
      */
     @PostMapping("/{id}/complete")
-    public ResponseEntity<DocumentView> complete(@PathVariable Long id) {
-        return documentService
+    public ResponseEntity<ProbeView> complete(@PathVariable Long id) {
+        return probeService
             .completeUpload(id, currentOwner())
-            .map(DocumentView::of)
+            .map(ProbeView::of)
             .map(ResponseEntity::ok)
             .orElseGet(() -> ResponseEntity.notFound().build());
     }
@@ -131,21 +144,21 @@ public class DocumentResource {
      * result set, and nothing in the code path that objects.
      */
     @GetMapping
-    public ResponseEntity<List<DocumentView>> list(
+    public ResponseEntity<List<ProbeView>> list(
         @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
     ) {
         // Cache-aside through Valkey (T-3.22, #264). A miss, an unreachable cache or an entry that
         // will not deserialise all fall through to Postgres inside the service, so this method has
         // no cache-specific branch and no way to behave differently when Valkey is gone.
         Pageable requested = capped(pageable);
-        CachedDocumentPage cached = documentService.listAvailableCached(currentOwner(), requested);
+        CachedProbePage cached = probeService.listAvailableCached(currentOwner(), requested);
 
         // Rebuilt rather than cached: PageImpl carries the Pageable that produced it and has no
         // stable JSON contract, so only the content and the total are stored (ADR-0011). The
         // pagination headers need a Page, and this is the cheapest honest way to give them one.
-        Page<CachedDocumentPage.CachedDocument> page = new PageImpl<>(cached.content(), requested, cached.totalElements());
+        Page<CachedProbePage.CachedProbe> page = new PageImpl<>(cached.content(), requested, cached.totalElements());
         HttpHeaders headers = PaginationUtil.generatePaginationHttpHeaders(ServletUriComponentsBuilder.fromCurrentRequest(), page);
-        return ResponseEntity.ok().headers(headers).body(cached.content().stream().map(DocumentView::of).toList());
+        return ResponseEntity.ok().headers(headers).body(cached.content().stream().map(ProbeView::of).toList());
     }
 
     /**
@@ -168,7 +181,7 @@ public class DocumentResource {
      */
     @GetMapping("/{id}/download")
     public ResponseEntity<Void> download(@PathVariable Long id) {
-        Optional<URI> url = documentService.presignDownload(id, currentOwner());
+        Optional<URI> url = probeService.presignDownload(id, currentOwner());
         return url
             .map(uri -> ResponseEntity.status(HttpStatus.FOUND).header("Cache-Control", "no-store").location(uri).<Void>build())
             .orElseGet(() -> ResponseEntity.notFound().build());
@@ -176,14 +189,14 @@ public class DocumentResource {
 
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
-        return documentService.delete(id, currentOwner()) ? ResponseEntity.noContent().build() : ResponseEntity.notFound().build();
+        return probeService.delete(id, currentOwner()) ? ResponseEntity.noContent().build() : ResponseEntity.notFound().build();
     }
 
     /**
      * The stable identifier for a Keycloak user.
      *
      * <p>{@code sub}, not {@code preferred_username}: a username can be changed in Keycloak, and
-     * every document owned under the old one would become unreachable.
+     * every probe owned under the old one would become unreachable.
      */
     private String currentOwner() {
         return SecurityUtils.getCurrentUserId().orElseThrow(() ->
@@ -196,7 +209,7 @@ public class DocumentResource {
      *                  value and S3 treats it as exact — there is no way to presign a range.
      */
     public record InitiateRequest(
-        @NotBlank @Size(max = 255) String filename,
+        @NotBlank @Size(max = 255) String label,
         @NotBlank @Size(max = 255) String contentType,
         @Positive long sizeBytes
     ) {}
@@ -207,26 +220,19 @@ public class DocumentResource {
      */
     public record UploadTicket(Long id, URI uploadUrl, long expiresInSeconds, long contentLength, String contentType) {}
 
-    public record DocumentView(Long id, String filename, String contentType, Long sizeBytes, String status, Instant createdAt) {
+    public record ProbeView(Long id, String label, String contentType, Long sizeBytes, String status, Instant createdAt) {
         /**
-         * From the cached DTO. Kept as a separate type from {@code CachedDocument} on purpose: the
+         * From the cached DTO. Kept as a separate type from {@code CachedProbe} on purpose: the
          * wire format is this repository's public contract and the cached shape is an internal one,
          * and letting them be the same type means a wire change silently reinterprets entries
          * already sitting in Valkey under the current schema version.
          */
-        static DocumentView of(CachedDocumentPage.CachedDocument d) {
-            return new DocumentView(d.id(), d.filename(), d.contentType(), d.sizeBytes(), d.status(), d.createdAt());
+        static ProbeView of(CachedProbePage.CachedProbe d) {
+            return new ProbeView(d.id(), d.label(), d.contentType(), d.sizeBytes(), d.status(), d.createdAt());
         }
 
-        static DocumentView of(Document d) {
-            return new DocumentView(
-                d.getId(),
-                d.getFilename(),
-                d.getContentType(),
-                d.getSizeBytes(),
-                d.getStatus().name(),
-                d.getCreatedAt()
-            );
+        static ProbeView of(PlatformProbe d) {
+            return new ProbeView(d.getId(), d.getLabel(), d.getContentType(), d.getSizeBytes(), d.getStatus().name(), d.getCreatedAt());
         }
     }
 }
