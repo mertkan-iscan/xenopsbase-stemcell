@@ -95,7 +95,35 @@ images:
     #
     # listAvailableCached is no longer @Transactional -- waiters must not hold a
     # connection while they wait, which is the pressure being removed.
-    digest: sha256:5dc6f3f4503a9cc16abe2b52daa5a0841a09259937209aee04b82a691e50cbb4
+    #
+    # Commit b0eddf3 -- THE DEMO DOMAIN IS GONE AND THE OUTBOX IS FINALLY
+    # DRAINED (T-9.2, T-9.4, T-9.6, T-9.8, ADR-0017, ADR-0018).
+    #
+    # Carries 765dc69 as well, which was published by nobody: `publish` read
+    # needs.changes.outputs.matrix while declaring only `needs: build`, so the
+    # expression was invalid and GitHub failed the run before creating the job.
+    # #430 and #433 both merged reporting every job green with no image pushed.
+    # This is the first image built from either of them.
+    #
+    # THE MIGRATIONS ARE THE RISK, not the code. V7 DROPS `document` and
+    # `example_item`; it is one-way, and the rows are gone the moment the first
+    # new pod passes Flyway. The CNPG backup `pre-t9-drop-demo-domain`
+    # (completed 2026-09-06T20:12:31Z) is the restore point, taken against
+    # document=20, example_item=1, outbox_message=0. V8 creates `platform_probe`
+    # with the (owner, status, created_at DESC) index V6 paid to learn.
+    #
+    # The S3 objects behind those 20 rows are NOT dropped with the table. They
+    # are orphaned in xenopsbase-dev-documents and age out under the bucket
+    # lifecycle rules; in dev that is the right trade, and in an environment
+    # with real content it would not be.
+    #
+    # New at runtime, all of it inert until something uses it: the outbox relay
+    # actually runs now, on a two-second fixedDelay guarded by
+    # pg_try_advisory_lock, publishing to NATS in `messaging`; core holds the
+    # svc-core client credential, whose secret must equal the realm's copy in
+    # keycloak-clients; virtual threads are on, so Tomcat's 200-thread pool is
+    # no longer the admission control and hikari.maximum-pool-size is.
+    digest: sha256:4ed3605aea60f414c16cbdf7269364c40da03dd5314d8b3bc54fe928bedc9609
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway
     # Commit c805107 -- the gateway can shed load without the circuit breaker
     # counting it as core failing, and the fallback stops telling the caller
@@ -152,4 +180,20 @@ images:
     # the three are bypasses in the servlet container every request goes through,
     # so this is the reason the digest moves rather than a side effect (T-6.13,
     # #403).
-    digest: sha256:a11dd0a68154bae1118baf72bb8ccf4635fb5a78e3533ea76a94bb7389baffe3
+    #
+    # Commit b0eddf3 -- generic routing and virtual threads (T-9.5, T-9.8).
+    #
+    # FallbackResource takes the service name from its path, and the per-service
+    # `instances: {core: ...}` blocks are gone: resilience4j applies
+    # configs.default to an instance it creates on demand, so adding a route no
+    # longer means adding three configuration blocks that are only ever copies.
+    #
+    # Also the first gateway image published since #430 -- see the note on core
+    # for why nothing was published for two merges.
+    #
+    # The static page loses the upload panel, the table and the pager along with
+    # the demo domain; it keeps the session identity, the log-out and the
+    # infrastructure panel, because `/` must serve something to an authenticated
+    # caller or SecurityConfiguration's anyExchange().authenticated() and
+    # smoke.sh both pass against a 404.
+    digest: sha256:451fa38b0003e8d6a7e417b62ac6dfa171411f6fae3a5cd9a0df2f88f6954be1

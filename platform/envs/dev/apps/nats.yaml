@@ -36,3 +36,25 @@ spec:
       # added by another Application survives about two minutes before root
       # strips it, leaving enforcement off with nothing reporting it.
       - ServerSideApply=true
+
+  # A StatefulSet with volumeClaimTemplates is OutOfSync for ever without this,
+  # and it is not cosmetic: rollout-status.sh asserts that EVERY Application is
+  # Synced and Healthy, so one permanently-drifted Application makes the check
+  # that proves a deploy landed unable to pass at all.
+  #
+  # The API server writes `apiVersion`, `kind`, `volumeMode` and a `status` block
+  # into each template. `volumeMode` is declared in the manifest instead; the
+  # other three cannot be, because a template is not an object anyone submits
+  # and `status` is written by the controller. So they are ignored here, named
+  # individually rather than ignoring the whole template -- a change to the size
+  # or the access mode must still show as drift, since those are the fields a
+  # mistake would land in.
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      name: nats
+      namespace: messaging
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.status
+        - .spec.volumeClaimTemplates[]?.apiVersion
+        - .spec.volumeClaimTemplates[]?.kind
