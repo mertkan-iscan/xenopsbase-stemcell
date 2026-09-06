@@ -24,7 +24,7 @@ import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
  * context beyond JPA (T-5.2).
  *
  * <p>The queries under test are the ownership boundary. {@code owner} holds the Keycloak
- * {@code sub}, and these derived queries are the only thing standing between one user's documents
+ * {@code sub}, and these derived queries are the only thing standing between one user's probes
  * and another's — {@code PlatformProbeResource} passes {@code currentOwner()} into every one of them. A
  * mistake here is not a wrong result, it is one user reading another user's files.
  *
@@ -74,8 +74,8 @@ class PlatformProbeRepositorySliceTest {
     }
 
     @Test
-    @DisplayName("findByIdAndOwner returns the document to its owner")
-    void ownerFindsOwnDocument() {
+    @DisplayName("findByIdAndOwner returns the probe to its owner")
+    void ownerFindsOwnProbe() {
         PlatformProbe mine = saved(OWNER, PlatformProbe.Status.AVAILABLE, "mine.txt");
 
         Optional<PlatformProbe> found = repository.findByIdAndOwner(mine.getId(), OWNER);
@@ -93,7 +93,7 @@ class PlatformProbeRepositorySliceTest {
     }
 
     @Test
-    @DisplayName("the paged listing returns only the caller's documents")
+    @DisplayName("the paged listing returns only the caller's probes")
     void listingIsScopedToTheOwner() {
         saved(OWNER, PlatformProbe.Status.AVAILABLE, "a.txt");
         saved(OWNER, PlatformProbe.Status.AVAILABLE, "b.txt");
@@ -106,8 +106,8 @@ class PlatformProbeRepositorySliceTest {
     }
 
     @Test
-    @DisplayName("a PENDING upload is not listed - an incomplete upload is not a document yet")
-    void pendingDocumentsAreNotListed() {
+    @DisplayName("a PENDING upload is not listed - an incomplete upload is not a probe yet")
+    void pendingProbesAreNotListed() {
         saved(OWNER, PlatformProbe.Status.AVAILABLE, "done.txt");
         saved(OWNER, PlatformProbe.Status.PENDING, "half-uploaded.txt");
 

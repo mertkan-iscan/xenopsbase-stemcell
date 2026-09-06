@@ -65,7 +65,7 @@ class RealTokenAuthorizationIT {
      * ObjectStorageTestcontainer is a static registrar, not an @ImportTestcontainers interface like
      * the other two. Importing it does nothing: the container never starts and the storage
      * properties are never registered, which leaves this context configured to talk to real AWS.
-     * That is how the first version of this test broke DocumentResourceIT rather than itself.
+     * That is how the first version of this test broke PlatformProbeResourceIT rather than itself.
      */
     @DynamicPropertySource
     static void objectStorage(DynamicPropertyRegistry registry) {
