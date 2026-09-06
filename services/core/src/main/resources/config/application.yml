@@ -116,6 +116,39 @@ management:
 spring:
   application:
     name: core
+  # VIRTUAL THREADS (T-9.8, JEP 444 / JEP 491).
+  #
+  # These services block by design: JPA, JDBC, and a RestClient hop between
+  # services. That is a deliberate choice -- the reactive programming model is
+  # confined to the gateway, where Spring Cloud Gateway requires it -- and
+  # virtual threads are what make a blocking model scale without changing it.
+  #
+  # WHY NOW AND NOT BEFORE. Java 25 removed the carrier-thread pinning that
+  # `synchronized` used to cause (JEP 491). Before that, any blocking call inside
+  # a synchronized block pinned a platform thread and the benefit evaporated
+  # exactly where it was needed most -- inside libraries nobody here controls.
+  #
+  # THE OPERATIONAL CONSEQUENCE, STATED RATHER THAN DISCOVERED. Tomcat's
+  # 200-thread pool WAS the admission control. It is gone: every accepted request
+  # now gets a thread, because a virtual thread costs almost nothing. The queue
+  # does not disappear, it MOVES -- to hikari.maximum-pool-size, which is now a
+  # capacity decision rather than a courtesy to Postgres. See the note there
+  # (application-prod.yml): that number times the HPA ceiling is what the
+  # database sees, and check-connection-budget.sh is what fails when the three
+  # numbers stop adding up.
+  #
+  # It also interacts with T-9.6: the outbox relay draws from the same pool on a
+  # schedule. One connection every two seconds per replica, and only the replica
+  # holding the advisory lock actually uses it.
+  #
+  # WHAT IS ASSERTED, because it is the part that fails silently:
+  # TaskDecoratorSurvivesVirtualThreadsTest. Boot builds the virtual-thread
+  # executor through a different auto-configuration path than the pooled one, so
+  # a TaskDecorator can quietly stop being applied -- and the symptom is an
+  # @Async method losing its request context, not an error.
+  threads:
+    virtual:
+      enabled: true
   docker:
     compose:
       # Off, and it must be. The generated compose files were deleted in T-3.2
@@ -286,13 +319,87 @@ jhipster:
       audience:
         # Must match the `aud` claim Keycloak actually issues, or every relayed
         # token is rejected by AudienceValidator while looking valid.
-        # Okta's api://default is removed: accepting a foreign audience widens
-        # what this service trusts for no reason.
-        - account
-        - gateway
+        #
+        # NARROWED TO THIS SERVICE'S OWN NAME (T-9.4), and that is the point.
+        #
+        # It was `account, gateway`, which meant this service accepted any token
+        # the realm issued for the gateway -- and so would every other service
+        # added behind it. Every service trusted every relayed token identically,
+        # so "this token is for core" was not something the system could say, let
+        # alone check. A token minted for one service was replayable against
+        # another, and nothing anywhere would have noticed.
+        #
+        # `core` is now put on the token by an oidc-audience-mapper on each client
+        # whose tokens reach here -- gateway, for relayed user tokens, and
+        # smoke-tests, for the tests that call this service directly. Adding a
+        # service means adding a mapper there, not widening this list.
+        #
+        # `account` is gone with the rest. It is Keycloak's own built-in audience,
+        # present on every token the realm issues to anyone, so accepting it is
+        # accepting the realm rather than accepting this service's callers.
+        #
+        # Env-overridable so a fork can widen it during a migration without a
+        # rebuild -- deliberately awkward to do permanently.
+        - ${OIDC_AUDIENCE:core}
 
 
 ---
+# ===================================================================
+# Service-to-service calls (T-9.4)
+#
+# INERT BY DEFAULT, and that is the shipped state: this template has one
+# service, which calls nothing. ServiceTokens reports itself unconfigured and
+# ServiceCalls refuses rather than silently calling with no credential.
+#
+# To turn it on in a fork: give the service a svc-<name> client in the realm,
+# set the two values below from the environment, and list the services it may
+# reach. `endpoints` is a NAME to URL map rather than free-form URLs at the call
+# site, because a relay that takes a URL from a caller is a request-forgery
+# hole.
+# ===================================================================
+platform:
+  # The transactional outbox's delivery half (T-9.6, ADR-0018).
+  #
+  # UNTIL NOW NOTHING DRAINED IT. OutboxService wrote messages in the same
+  # transaction as the change they announce -- that half was real and tested --
+  # and OutboxRelay.relayBatch() was called by nothing, in any environment,
+  # since the table was created. The mechanism reported success and delivered
+  # nothing.
+  outbox:
+    relay:
+      # ON by default, which is the opposite of how the other seams here
+      # default. An outbox that records and never delivers is not a disabled
+      # feature, it is a broken one.
+      enabled: ${OUTBOX_RELAY_ENABLED:true}
+      # fixedDelay, measured from the END of the previous pass, so the relay
+      # cannot race itself when a drain runs long.
+      delay: ${OUTBOX_RELAY_DELAY:PT2S}
+      initial-delay: ${OUTBOX_RELAY_INITIAL_DELAY:PT10S}
+    # `logging` or `nats`. The default writes a log line, so a fork with no
+    # broker still builds, starts and passes its tests -- and the local stack
+    # and the cluster both set this to `nats`.
+    publisher: ${OUTBOX_PUBLISHER:logging}
+    # Only meaningful when two products share one broker: without a prefix,
+    # this template and xenopsbase-learn would both publish
+    # `platform.probe.initiated` to the same subject and each would receive the
+    # other's messages.
+    subject-prefix: ${OUTBOX_SUBJECT_PREFIX:}
+    nats:
+      # Only read when `publisher` is `nats`. Declared here rather than left to
+      # the @Value default in NatsConnectionConfiguration, because a knob that
+      # exists only in Java is a knob an operator cannot find: everything else
+      # this service can be pointed at is in this file.
+      url: ${OUTBOX_NATS_URL:nats://localhost:4222}
+  service-auth:
+    # Defaults to this service's own issuer, because a service that accepts
+    # tokens from one realm while obtaining them from another is a
+    # misconfiguration nothing would report.
+    token-uri: ${SERVICE_AUTH_TOKEN_URI:${OIDC_ISSUER_URI:http://localhost:9080/realms/xenopsbase}/protocol/openid-connect/token}
+    client-id: ${SERVICE_AUTH_CLIENT_ID:}
+    client-secret: ${SERVICE_AUTH_CLIENT_SECRET:}
+  services:
+    endpoints: {}
+
 # ===================================================================
 # Application specific properties
 # Add your own application properties here, see the ApplicationProperties class

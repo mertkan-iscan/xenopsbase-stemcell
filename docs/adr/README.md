@@ -69,3 +69,4 @@ than a clean file that hides the fact a mistake was ever made.
 | [0015](0015-kube-hetzner-stays.md) | The cluster stays on kube-hetzner, as a hybrid with a chosen boundary | Accepted |
 | [0016](0016-threat-model.md) | The threat model is six boundaries, and every mitigation names a task or is an accepted risk | Accepted |
 | [0017](0017-shared-service-modules.md) | Services share a parent pom and two libraries, split by web stack rather than by topic | Accepted |
+| [0018](0018-message-broker.md) | NATS is the message broker, and its JetStream state is disposable | Accepted |

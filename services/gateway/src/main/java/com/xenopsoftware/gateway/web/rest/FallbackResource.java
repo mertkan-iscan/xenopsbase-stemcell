@@ -15,6 +15,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ServerWebExchange;
@@ -61,14 +62,6 @@ import reactor.core.publisher.Mono;
 public class FallbackResource {
 
     /**
-     * The route filter's {@code name: core} and the resilience4j instance of the same name. Used
-     * here to read {@code waitDurationInOpenState} back off the live configuration rather than
-     * restating it — the previous constant said ten seconds for months after the value became two
-     * (T-5.10), telling every client to come back five times later than necessary.
-     */
-    private static final String CORE = "core";
-
-    /**
      * A bulkhead permit is released the moment an in-flight call completes, so the condition clears
      * in milliseconds, not seconds. This is a floor that keeps a rejected client from retrying
      * straight back into a full bulkhead and adding to the load that filled it — not an estimate of
@@ -87,21 +80,35 @@ public class FallbackResource {
     }
 
     /**
-     * Deliberately unrestricted by method. A circuit opens for the service, not for a verb, so a
+     * ONE HANDLER FOR EVERY SERVICE (T-9.5).
+     *
+     * <p>It was {@code @RequestMapping("/fallback/core")} with a {@code CORE} constant beside it,
+     * which made adding a service four edits in this repository rather than one: a route block, a
+     * circuitbreaker instance, a timelimiter instance, and a method here. Three of those are now
+     * gone; this is the fourth.
+     *
+     * <p>The service name comes from the PATH, and the path is written by the route's own
+     * {@code fallbackUri} in application.yml — never by a caller, because
+     * {@code SecurityConfiguration} does not expose {@code /fallback/**} and the filter forwards
+     * internally. It is used only to look a breaker up by name and to fill in a sentence, so a
+     * value that names no configured instance yields a breaker with the default config rather than
+     * an error, which is the same answer resilience4j gives everywhere else.
+     *
+     * <p>Deliberately unrestricted by method. A circuit opens for the service, not for a verb, so a
      * short-circuited DELETE needs this answer as much as a GET does.
      *
      * <p>Stacking {@code @GetMapping}, {@code @PostMapping} and friends on one method compiles and
      * does not work: Spring resolves a single mapping annotation per method, so the others are
      * silently ignored and every verb but one falls through to a 405 in place of the fallback.
      */
-    @RequestMapping("/core")
-    public Mono<ResponseEntity<ProblemDetail>> core(ServerWebExchange exchange) {
+    @RequestMapping("/{service}")
+    public Mono<ResponseEntity<ProblemDetail>> fallback(@PathVariable String service, ServerWebExchange exchange) {
         // Set by SpringCloudCircuitBreakerFilterFactory immediately before it forwards here, so
         // the fallback sees the actual cause rather than having to guess it. Null is possible --
-        // a direct request to /fallback/core, or a future filter that forwards without setting it
+        // a direct request to /fallback/<name>, or a future filter that forwards without setting it
         // -- and is treated as the unknown-outcome case, which is the safe direction to be wrong in.
         Throwable cause = exchange.getAttribute(ServerWebExchangeUtils.CIRCUITBREAKER_EXECUTION_EXCEPTION_ATTR);
-        return Mono.just(unavailable(CORE, cause));
+        return Mono.just(unavailable(service, cause));
     }
 
     private ResponseEntity<ProblemDetail> unavailable(String service, Throwable cause) {

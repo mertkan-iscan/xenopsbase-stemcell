@@ -1,0 +1,38 @@
+# The message broker (T-9.6, ADR-0018).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nats
+  namespace: argocd
+  annotations:
+    # Wave 2, alongside Valkey and the database rather than after them. The
+    # services (wave 4) resolve their publisher at startup, and a broker that
+    # arrives after them means every service's first outbox drain fails against
+    # a name that does not resolve yet.
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mertkan-iscan/xenopsbase-stemcell.git
+    targetRevision: main
+    path: platform/envs/dev/messaging
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: messaging
+  syncPolicy:
+    automated:
+      # prune: true, like the cache and unlike the database. ADR-0018 makes the
+      # JetStream store disposable by decision -- the durable record is the
+      # Postgres outbox -- so removing a manifest from git should remove the
+      # object, and nothing is lost that the relay will not republish.
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # CreateNamespace is deliberately ABSENT. The namespace is declared in
+      # namespaces.yaml, owned by the root Application, because the image-policy
+      # label has to live on an object root owns -- #418 showed that a label
+      # added by another Application survives about two minutes before root
+      # strips it, leaving enforcement off with nothing reporting it.
+      - ServerSideApply=true

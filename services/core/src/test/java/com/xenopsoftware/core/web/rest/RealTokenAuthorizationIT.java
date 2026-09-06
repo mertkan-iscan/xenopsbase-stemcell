@@ -48,7 +48,12 @@ import org.springframework.test.web.servlet.MockMvc;
 // noticed, because a mocked JwtDecoder never builds an AudienceValidator. The first run against a
 // real Keycloak failed at startup with "Allowed audience should not be null or empty" -- a gap that
 // had been sitting in the test configuration for as long as the mock had.
-@TestPropertySource(properties = { "jhipster.security.oauth2.audience[0]=account", "jhipster.security.oauth2.audience[1]=gateway" })
+// The SHIPPED audience, not a widened one (T-9.4). It used to override this to
+// `account, gateway`, which made the test pass against a configuration nothing
+// deploys -- exactly the failure the real-token harness exists to prevent, one
+// level up. `core` is what application.yml now says and what the realm's
+// per-client audience mappers now put on every token that reaches here.
+@TestPropertySource(properties = { "jhipster.security.oauth2.audience[0]=core" })
 @SpringBootTest(classes = { CoreApp.class, JacksonConfiguration.class, AsyncSyncConfiguration.class })
 @AutoConfigureMockMvc
 @ImportTestcontainers({ DatabaseTestcontainer.class, KeycloakTestcontainer.class })
@@ -60,7 +65,7 @@ class RealTokenAuthorizationIT {
      * ObjectStorageTestcontainer is a static registrar, not an @ImportTestcontainers interface like
      * the other two. Importing it does nothing: the container never starts and the storage
      * properties are never registered, which leaves this context configured to talk to real AWS.
-     * That is how the first version of this test broke DocumentResourceIT rather than itself.
+     * That is how the first version of this test broke PlatformProbeResourceIT rather than itself.
      */
     @DynamicPropertySource
     static void objectStorage(DynamicPropertyRegistry registry) {
@@ -72,9 +77,20 @@ class RealTokenAuthorizationIT {
 
     /** A real password grant against the realm's own automation client. */
     private static String tokenFor(String username) throws Exception {
-        String body =
-            "grant_type=password&client_id=" + KeycloakTestcontainer.TEST_CLIENT_ID + "&username=" + username + "&password=" + PASSWORD;
+        return grant(
+            "grant_type=password&client_id=" + KeycloakTestcontainer.TEST_CLIENT_ID + "&username=" + username + "&password=" + PASSWORD
+        );
+    }
 
+    /**
+     * A real client_credentials grant for the {@code svc-core} service account (T-9.4). This is the
+     * token an inter-service call would carry, obtained the way the service obtains it.
+     */
+    private static String serviceToken() throws Exception {
+        return grant("grant_type=client_credentials&client_id=svc-core&client_secret=" + KeycloakTestcontainer.TEST_SVC_CORE_CLIENT_SECRET);
+    }
+
+    private static String grant(String body) throws Exception {
         HttpResponse<String> response = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build()
@@ -109,6 +125,38 @@ class RealTokenAuthorizationIT {
         // the realm declares, every service validating `aud` rejects a token that is otherwise
         // perfectly valid -- and a mocked decoder never notices.
         assertThat(claims.get("aud").toString()).contains("gateway");
+
+        // AND this service's own name (T-9.4). Narrowing the accepted audience to `core` without
+        // adding the matching mapper to every client whose tokens reach here turns every request
+        // into a 401 against a token that logged in successfully a second earlier.
+        assertThat(claims.get("aud").toString()).as("the per-service audience mapper is present").contains("core");
+    }
+
+    @Test
+    @DisplayName("a service-account token carries svc-caller, which is what identifies it as one")
+    void serviceTokenCarriesTheServiceRole() throws Exception {
+        Map<String, Object> claims = claimsOf(serviceToken());
+
+        // Granted on the SERVICE ACCOUNT USER rather than on the client: a client_credentials token
+        // carries the roles of its service account, and a realm role attached anywhere else on the
+        // client never reaches the token. The failure is silent -- the role is granted, the token
+        // is valid, and ServiceAuthenticationFilter refuses every call as "not a service account".
+        assertThat(claims.get("realm_access").toString()).contains("svc-caller");
+
+        // And it is FOR core, like every other token this service accepts.
+        assertThat(claims.get("aud").toString()).contains("core");
+    }
+
+    @Test
+    @DisplayName("a service token is not a user: it reaches nothing an app role guards")
+    void aServiceTokenIsNotAUser() throws Exception {
+        // THE SILENT-WIDENING ASSERTION. A service account holds svc-caller and nothing else, so a
+        // service credential presented as a USER must not satisfy an app-admin rule. If this ever
+        // returns 200, either the realm granted an app role to a service account or the authority
+        // mapping stopped distinguishing them -- and every service would be an administrator.
+        mvc.perform(get("/api/admin/platform/probe").header(HttpHeaders.AUTHORIZATION, "Bearer " + serviceToken())).andExpect(
+            status().isForbidden()
+        );
     }
 
     @Test

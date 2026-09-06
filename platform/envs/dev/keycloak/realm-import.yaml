@@ -116,6 +116,19 @@ spec:
         # role. Do not add it to them.
         - name: app-loadtest
           description: Exempt from the gateway rate limit. Load testing only, dev only.
+        # WHAT MAKES A SERVICE CALL RECOGNISABLE AS ONE (T-9.4).
+        #
+        # Granted to every svc-* service account and to nothing else, so a
+        # service-to-service token is distinguishable from a user's token by a
+        # claim rather than by guesswork. Without it the only difference is the
+        # absence of preferred_username, and "the thing with no username" is not
+        # something an authorization rule can be written against -- it is also
+        # what a misconfigured user token looks like.
+        #
+        # ServiceAuthenticationFilter maps it to an authority, so @PreAuthorize
+        # can say hasAuthority('svc-caller') and mean it.
+        - name: svc-caller
+          description: Held by service accounts. Identifies a call made BY a service, not by a user.
 
     # `clientScopes`, not `scope`. The realm representation rejects the latter:
     #   .spec.realm.scope: field not declared in schema
@@ -169,6 +182,39 @@ spec:
             protocolMapper: oidc-audience-mapper
             config:
               included.client.audience: gateway
+              id.token.claim: "false"
+              access.token.claim: "true"
+              introspection.token.claim: "true"
+          # ONE MAPPER PER DOWNSTREAM SERVICE (T-9.4).
+          #
+          # WHAT THIS FIXES. Until now core accepted `aud: account, gateway`,
+          # which means it accepted any token this realm issued for the gateway
+          # -- and so would every other service added behind it. Every service
+          # trusted every relayed token identically, so "this token is for core"
+          # was not a statement the system could make, let alone check.
+          #
+          # The gateway relays the USER's token inward (TokenRelay), so the
+          # audience the downstream service checks has to be on the token the
+          # gateway holds. Keycloak adds one audience per mapper, so a second
+          # mapper here gives `aud: [gateway, core]`: the gateway still accepts
+          # it, and core can now narrow to `core` alone.
+          #
+          # ADDING A SERVICE IS ADDING A MAPPER HERE. Forgetting it presents as
+          # every call to the new service returning 401 with a token that is
+          # otherwise perfectly valid -- which is the failure AudienceValidator
+          # exists to produce, but it does not say WHY, so this list is where to
+          # look first.
+          #
+          # ON THE CLIENT, NOT ON A CLIENT SCOPE, and the comment above is not
+          # decoration: a scope was tried for the gateway's own mapper and
+          # Keycloak's import created the scope while silently dropping its
+          # protocolMappers. The scope existed, the mapper did not, and tokens
+          # still had no audience. Do not "tidy" these into a shared scope.
+          - name: core-audience
+            protocol: openid-connect
+            protocolMapper: oidc-audience-mapper
+            config:
+              included.client.audience: core
               id.token.claim: "false"
               access.token.claim: "true"
               introspection.token.claim: "true"
@@ -323,6 +369,106 @@ spec:
               id.token.claim: "false"
               access.token.claim: "true"
               introspection.token.claim: "true"
+          # AND ONE PER DOWNSTREAM SERVICE, for the same reason the gateway
+          # client has one (T-9.4).
+          #
+          # smoke.sh sends a token from THIS client through the gateway, and the
+          # gateway relays it unchanged -- so this is the token core validates,
+          # not one the gateway minted. Narrowing core's accepted audience to
+          # `core` without adding this mapper turns every smoke test into a 401
+          # against a token that logged in successfully seconds earlier.
+          #
+          # RealTokenAuthorizationIT drives core directly with a token from this
+          # client, so it fails the same way and is the cheaper place to notice.
+          - name: smoke-core-audience
+            protocol: openid-connect
+            protocolMapper: oidc-audience-mapper
+            config:
+              included.client.audience: core
+              id.token.claim: "false"
+              access.token.claim: "true"
+              introspection.token.claim: "true"
+
+      # ---------------------------------------------------------------------
+      # SERVICE ACCOUNTS (T-9.4). One per service that CALLS another.
+      #
+      # `svc-<name>`, and the naming is the pattern rather than decoration:
+      # infra/scripts/service-modules.sh derives the service list from
+      # services/pom.xml, and a fork adding `reporting` adds `svc-reporting`
+      # here plus one line in the SOPS file. Nothing else.
+      #
+      # WHAT MAKES THIS DIFFERENT FROM THE GATEWAY CLIENT, which also has
+      # serviceAccountsEnabled: true. The gateway's service account exists as a
+      # side effect of being confidential; it is never used to call anything.
+      # These exist ONLY to call, and say so:
+      #
+      #   standardFlowEnabled: false     no browser flow. A service account that
+      #                                  can also complete an authorization code
+      #                                  flow is a client that can impersonate a
+      #                                  user if its secret leaks.
+      #   directAccessGrantsEnabled:     no password grant, for the same reason.
+      #     false
+      #   serviceAccountsEnabled: true   client_credentials, which is the only
+      #                                  grant this client may use.
+      #
+      # THE SECRET AND THE KUBERNETES SECRET MUST CHANGE TOGETHER. Rotating one
+      # without the other fails every inter-service call with a 401 from
+      # Keycloak's token endpoint while both the caller and the callee report
+      # themselves healthy -- there is no request to see failing, because the
+      # caller never gets a token to make one with. See
+      # docs/runbooks/authorization.md.
+      - clientId: svc-core
+        name: Service account for core
+        enabled: true
+        protocol: openid-connect
+        publicClient: false
+        standardFlowEnabled: false
+        directAccessGrantsEnabled: false
+        serviceAccountsEnabled: true
+        # Read from the environment at import time, exactly as GATEWAY_CLIENT_SECRET
+        # is: the realm file in git shows THAT the client has a secret, never what
+        # it is (ADR-0003). Sourced from platform/envs/dev/secrets/service-clients.yaml.
+        secret: ${SVC_CORE_CLIENT_SECRET}
+        # THE ROLE IS GRANTED ON THE SERVICE ACCOUNT USER, IN `users:` BELOW,
+        # NOT HERE -- and this comment is the fix for a mistake, kept because the
+        # wrong version is the obvious one.
+        #
+        # `serviceAccountsRealmRoles` reads like the field for this and is not a
+        # field at all. It belongs to keycloak-config-cli, not to Keycloak's own
+        # RealmRepresentation, and Keycloak refuses the whole import:
+        #
+        #   Unrecognized field "serviceAccountsRealmRoles"
+        #   (class org.keycloak.representations.idm.ClientRepresentation),
+        #   not marked as ignorable (44 known properties: ...)
+        #
+        # Which is at least loud. It failed the container in
+        # RealTokenAuthorizationIT rather than in the cluster, because that test
+        # imports THIS file into a real Keycloak -- which is the entire reason
+        # the harness reads the deployed realm instead of a copy.
+        protocolMappers:
+          # A service token names who it is FOR, like every other token here.
+          # `core` because that is what svc-core calls today; a fork whose
+          # reporting service calls catalog adds a mapper naming catalog on
+          # svc-reporting, not a wildcard here.
+          - name: svc-core-audience
+            protocol: openid-connect
+            protocolMapper: oidc-audience-mapper
+            config:
+              included.client.audience: core
+              id.token.claim: "false"
+              access.token.claim: "true"
+              introspection.token.claim: "true"
+        # Same trap as every other client in this file: declaring either scope
+        # list strips BOTH, so the built-ins are named explicitly. `roles` is the
+        # one that carries realm_access.roles, which is what puts svc-caller in
+        # the token -- omit it and the role is granted and invisible.
+        defaultClientScopes:
+          - acr
+          - basic
+          - email
+          - profile
+          - roles
+          - web-origins
 
       # The single-page app: public, PKCE. A browser client cannot keep a
       # secret, so it does not get one -- PKCE is what replaces it.
@@ -456,6 +602,28 @@ spec:
     # ids. See ADR-0010 for why that is accepted here and what it would cost to
     # fix properly.
     users:
+      # THE SERVICE ACCOUNT FOR svc-core (T-9.4).
+      #
+      # Keycloak creates a user called `service-account-<clientId>` for every
+      # client with serviceAccountsEnabled, and a client_credentials token
+      # carries THAT USER's realm roles. So this is where svc-caller is granted;
+      # there is nowhere on the client to put it (see the note on the client).
+      #
+      # `serviceAccountClientId` is what links the two. Without it this is an
+      # ordinary user that happens to be named like a service account, the real
+      # service account is created separately with no roles, and every
+      # inter-service call is refused as "not a service account" while the realm
+      # shows the role granted to something.
+      #
+      # No credentials block: a service account authenticates with the CLIENT
+      # secret, not with a password. Giving it one would create a second way in.
+      - username: service-account-svc-core
+        id: 9f3d7c21-4a08-4e6b-9c14-2b5e8f0a7d63
+        enabled: true
+        serviceAccountClientId: svc-core
+        realmRoles:
+          - svc-caller
+
       # The load harness, deliberately separate from `smoke` (T-5.13, #371).
       #
       # Exempting `smoke` would have been one line fewer and would have handed the

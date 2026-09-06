@@ -234,6 +234,34 @@ spec:
             - name: OIDC_ISSUER_URI
               valueFrom: {configMapKeyRef: {name: oidc, key: OIDC_ISSUER_URI}}
 
+            # THIS SERVICE'S OWN CREDENTIAL, for calling other services (T-9.4).
+            #
+            # Inert here: core calls nothing today, so ServiceTokens simply
+            # reports itself unconfigured and ServiceCalls throws if anything
+            # asks. Wired anyway, because the alternative is that the first fork
+            # to need an inter-service call invents one at a call site with a
+            # shared secret or a trusted header.
+            #
+            # THE VALUE MUST MATCH THE REALM'S. Both come from a generated dev
+            # value: the realm reads it from the keycloak-clients Secret in the
+            # `keycloak` namespace, this reads the same value from
+            # service-clients in `apps`. Rotate them together -- a mismatch is
+            # invisible, because the caller never obtains a token and therefore
+            # never makes a request anyone can see fail.
+            # The broker (T-9.6, ADR-0018). `logging` is the shipped default so a
+            # fork with no broker still starts; the cluster has one, so it says so.
+            #
+            # A NATS that is down does NOT stop this service starting -- the
+            # outbox is a background path and the caller has already been
+            # answered. What it produces instead is a growing outbox_message
+            # table with last_error set, which is what to alert on.
+            - {name: OUTBOX_PUBLISHER, value: nats}
+            - {name: OUTBOX_NATS_URL, value: "nats://nats.messaging.svc.cluster.local:4222"}
+
+            - {name: SERVICE_AUTH_CLIENT_ID, value: svc-core}
+            - name: SERVICE_AUTH_CLIENT_SECRET
+              valueFrom: {secretKeyRef: {name: service-clients, key: SVC_CORE_CLIENT_SECRET}}
+
             # Flyway runs at startup and the schema is validated against the
             # entities (T-3.6a), so a drifted image fails here rather than on
             # the first query that touches a missing column.

@@ -29,7 +29,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 /**
- * End-to-end document storage against a real S3 implementation (T-3.7).
+ * End-to-end probe payload storage against a real S3 implementation (T-3.7, T-9.2).
  *
  * <p>The bytes in these tests genuinely do not pass through the application. Each upload is a
  * {@link HttpClient} PUT straight to MinIO using the presigned URL the API returned, and each
@@ -38,7 +38,7 @@ import org.springframework.test.web.servlet.MvcResult;
  */
 @IntegrationTest
 @org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
-class DocumentResourceIT {
+class PlatformProbeResourceIT {
 
     /**
      * Declared here rather than on the container holder. The TestContext framework applies a
@@ -173,7 +173,7 @@ class DocumentResourceIT {
     }
 
     @Test
-    void aDocumentBelongingToSomeoneElseIsIndistinguishableFromOneThatDoesNotExist() throws Exception {
+    void aProbeBelongingToSomeoneElseIsIndistinguishableFromOneThatDoesNotExist() throws Exception {
         JsonNode ticket = initiate(OWNER_SUB, "private.txt", "text/plain", "secret".getBytes(StandardCharsets.UTF_8).length);
         long id = ticket.get("id").asLong();
         putBytes(ticket.get("uploadUrl").asText(), "text/plain", "secret".getBytes(StandardCharsets.UTF_8));
@@ -188,7 +188,7 @@ class DocumentResourceIT {
     }
 
     @Test
-    void listingShowsOnlyCompletedDocuments() throws Exception {
+    void listingShowsOnlyCompletedProbes() throws Exception {
         initiate(OWNER_SUB, "pending.txt", "text/plain", 10);
 
         JsonNode done = initiate(OWNER_SUB, "done.txt", "text/plain", 1);

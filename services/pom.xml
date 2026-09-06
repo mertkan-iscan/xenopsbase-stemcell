@@ -269,6 +269,7 @@
             measured number and the run it came from, same convention as here.
         -->
         <jhipster-framework.version>9.1.0</jhipster-framework.version>
+        <jnats.version>2.20.5</jnats.version>
         <jib-maven-plugin.architecture>amd64</jib-maven-plugin.architecture>
         <!--
             Pinned by digest, not by tag. T-6.1 requires that the same commit
@@ -358,6 +359,17 @@
                 <groupId>tech.jhipster</groupId>
                 <artifactId>jhipster-framework</artifactId>
                 <version>${jhipster-framework.version}</version>
+            </dependency>
+            <!--
+                NATS, the message broker (T-9.6, ADR-0018). Pinned here so a fork
+                with eight services cannot drift onto eight client versions; the
+                broker itself is pinned by digest in the image allowlist and by
+                tag in infra/dev/compose.yml.
+            -->
+            <dependency>
+                <groupId>io.nats</groupId>
+                <artifactId>jnats</artifactId>
+                <version>${jnats.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.springdoc</groupId>

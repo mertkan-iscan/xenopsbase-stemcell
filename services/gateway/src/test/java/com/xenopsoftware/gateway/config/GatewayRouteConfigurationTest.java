@@ -76,12 +76,26 @@ class GatewayRouteConfigurationTest {
     }
 
     @Test
-    void theCircuitBreakerInstanceReferencedByTheRouteIsActuallyConfigured() {
-        // A CircuitBreaker filter naming an instance that does not exist does not fail — it falls
-        // back to library defaults, which are not the posture this project chose.
-        assertThat(config.stringPropertyNames())
-            .as("resilience4j must define the instance the route names")
-            .anyMatch(key -> key.startsWith("resilience4j.circuitbreaker.instances.core"));
+    void theCircuitBreakerConfigTheRouteWillInheritIsActuallyDeclared() {
+        // THIS ASSERTION WAS INVERTED IN T-9.5, AND THE OLD VERSION IS WORTH KNOWING ABOUT.
+        //
+        // It used to require `resilience4j.circuitbreaker.instances.core` to exist, on the grounds
+        // that a filter naming an unconfigured instance silently gets library defaults. The premise
+        // was right and the conclusion was one service too narrow: it made adding a service an edit
+        // in three places here plus a method in FallbackResource.
+        //
+        // What actually protects the route is `configs.default`, which resilience4j applies to an
+        // instance it creates on demand for a name it has never seen. So THAT is what must exist,
+        // and it is asserted here statically while
+        // ResilienceDefaultsApplyToUnconfiguredServicesTest asserts the library really behaves that
+        // way. Neither alone is enough: this one would pass if resilience4j changed its
+        // on-demand behaviour, and that one would pass if this file stopped declaring a default.
+        // Asserted on a concrete key rather than by scanning prefixes: stringPropertyNames() does
+        // not list every key getProperty() resolves in this flattened view, which cost a confusing
+        // half hour when a prefix scan failed for a key the next test reads successfully.
+        assertThat(config.getProperty("resilience4j.circuitbreaker.configs.default.failureRateThreshold"))
+            .as("configs.default is what an unconfigured instance inherits; without it the route gets library defaults")
+            .isNotBlank();
     }
 
     // -----------------------------------------------------------------------
@@ -102,9 +116,39 @@ class GatewayRouteConfigurationTest {
     void theRouteIsSubjectToAConcurrencyLimitAndNotJustABreaker() {
         // A circuit breaker is binary -- all traffic or none -- so on its own it can only choose
         // between over- and under-protecting the downstream. T-5.10 measured both, in one run.
-        assertThat(config.stringPropertyNames())
-            .as("the bulkhead instance must be named after the breaker the route uses, or a default one of 25 governs the route instead")
-            .anyMatch(key -> key.startsWith("resilience4j.bulkhead.instances.core"));
+        //
+        // Inverted in T-9.5 for the same reason as the breaker above: what governs the route is the
+        // default config, applied to the bulkhead resilience4j creates on demand under the breaker's
+        // own id. A per-service instance block was three lines that said "use the default".
+        assertThat(config.getProperty("resilience4j.bulkhead.configs.default.maxConcurrentCalls"))
+            .as("without configs.default a library bulkhead of 25 permits governs every route instead")
+            .isNotBlank();
+    }
+
+    @Test
+    void theTimeLimiterConfigTheRouteWillInheritIsActuallyDeclared() {
+        // The one whose library default is actively wrong rather than merely unchosen: resilience4j
+        // defaults a time limiter to ONE SECOND, which is shorter than the transport's own
+        // response-timeout, so every slow response would be attributed to the wrong layer.
+        assertThat(config.getProperty("resilience4j.timelimiter.configs.default.timeoutDuration"))
+            .as("without this the route inherits a 1s timeout that fires before the transport does")
+            .isNotBlank();
+    }
+
+    @Test
+    void noPerServiceResilienceInstancesRemain() {
+        // The assertion that keeps T-9.5 true rather than merely done. Adding
+        // `instances.<name>: {baseConfig: default}` back is harmless in itself and is how the
+        // four-edits-per-service shape returns: the next service copies it, and the one after
+        // that copies both.
+        //
+        // A deliberate OVERRIDE -- different numbers for a service with a measured reason -- is
+        // still allowed. What is refused is an instance that only restates the default.
+        for (String control : new String[] { "circuitbreaker", "timelimiter", "bulkhead" }) {
+            assertThat(config.getProperty("resilience4j." + control + ".instances.core.baseConfig"))
+                .as("%s: an instance that only says baseConfig: default is the thing T-9.5 removed", control)
+                .isNull();
+        }
     }
 
     @Test

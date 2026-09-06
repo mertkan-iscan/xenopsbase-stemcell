@@ -59,6 +59,14 @@ public interface KeycloakTestcontainer {
     String TEST_GATEWAY_CLIENT_SECRET = "test-only-gateway-secret";
 
     /**
+     * Same reason, for the service account (T-9.4). Every {@code ${...}} placeholder in the realm
+     * must be substituted here, and a missed one is not a test failure: Keycloak imports the client
+     * with the LITERAL string as its secret, so the realm loads, the client exists, and only a
+     * client-credentials grant nobody in this suite performs would have noticed.
+     */
+    String TEST_SVC_CORE_CLIENT_SECRET = "test-only-svc-core-secret";
+
+    /**
      * The client the realm already provides for automated callers: public, direct access grants
      * enabled, and an audience mapper that puts {@code gateway} in {@code aud} — which is what
      * {@code AudienceValidator} requires. Tests do not need a client of their own.
@@ -118,7 +126,9 @@ public interface KeycloakTestcontainer {
                 // registers its converters with it -- and picking the wrong one compiles cleanly
                 // and fails at runtime, which cost a day on T-3.16.
                 String json = new tools.jackson.databind.ObjectMapper().writeValueAsString(realm);
-                return json.replace("${GATEWAY_CLIENT_SECRET}", TEST_GATEWAY_CLIENT_SECRET);
+                return json
+                    .replace("${GATEWAY_CLIENT_SECRET}", TEST_GATEWAY_CLIENT_SECRET)
+                    .replace("${SVC_CORE_CLIENT_SECRET}", TEST_SVC_CORE_CLIENT_SECRET);
             } catch (IOException e) {
                 throw new UncheckedIOException("could not read the realm from " + yaml, e);
             }

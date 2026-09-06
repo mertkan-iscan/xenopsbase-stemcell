@@ -247,6 +247,9 @@ resolved locally" — a message that says nothing about somebody having tidied t
 
 - **The ADRs.** They are the argument, not the outcome. `docs/adr/0002` in particular is what makes
   the rest coherent.
+- **[adding-a-service.md](runbooks/adding-a-service.md).** It is the checklist the whole shared-module
+  restructure exists to make short, and every entry in it is somewhere this repository has already
+  been bitten.
 - **The runbooks**, including the "when the automation fails" half of
   [cold-rebuild.md](runbooks/cold-rebuild.md). Every entry there is something that actually
   happened.

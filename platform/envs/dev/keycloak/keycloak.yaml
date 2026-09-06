@@ -160,6 +160,17 @@ spec:
         name: keycloak-clients
         key: GATEWAY_CLIENT_SECRET
 
+    # One per svc-* client in the realm (T-9.4). Adding a service means adding a
+    # key to keycloak-clients, an entry here, and a mapper in the realm import;
+    # forget this one and Keycloak imports the client with the LITERAL string
+    # "${SVC_<NAME>_CLIENT_SECRET}" as its secret, which is a working client with
+    # a credential nothing else knows -- so every call fails with invalid_client
+    # and the realm looks correctly imported.
+    - name: SVC_CORE_CLIENT_SECRET
+      secret:
+        name: keycloak-clients
+        key: SVC_CORE_CLIENT_SECRET
+
     # THE HEAP, PINNED — AND THE REASON THE REQUEST BELOW IS WHAT IT IS
     # (T-2.26, #340)
     #

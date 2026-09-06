@@ -76,8 +76,8 @@ denies everyone looks identical to one that works.
 
 ## Service-to-service
 
-Client credentials, never a shared header. The `gateway` client has `serviceAccountsEnabled: true`,
-so a service obtains its own token:
+Client credentials, never a shared header. Each service that CALLS another has its own confidential
+client, `svc-<name>`, and obtains its own token:
 
 ```bash
 curl -X POST -d grant_type=client_credentials \
@@ -92,6 +92,61 @@ cannot be revoked without redeploying everything that knows it.
 **A service-account token has no user.** No `preferred_username`, and Keycloak's `/userinfo` returns
 **403** for it. The gateway therefore falls back to `sub` for the principal and treats enrichment as
 optional — see [ADR-context in the gateway's SecurityConfiguration](../../services/gateway/src/main/java/com/xenopsoftware/gateway/config/SecurityConfiguration.java).
+
+### Two credentials, two questions (T-9.4)
+
+An inter-service call carries both, and conflating them is the mistake the design exists to prevent.
+
+```
+Authorization: Bearer <the USER's token, forwarded unchanged>
+X-Service-Authorization: Bearer <the CALLING SERVICE's own token>
+```
+
+| | answers | verified how |
+|---|---|---|
+| `Authorization` | *on whose behalf* | the callee validates the Keycloak signature itself |
+| `X-Service-Authorization` | *by which service* | same, plus the `svc-caller` realm role |
+
+The user token is **forwarded, never re-minted**. A claim the calling service made about who it is
+acting for would be a claim, and the third service in a chain has no reason to believe it. Forwarding
+unchanged is also what makes a chain of any length work: the token that reaches the last service is
+the one the person presented at the edge.
+
+`ServiceAuthenticationFilter` maps `svc-caller` to an authority, so `@PreAuthorize` can distinguish a
+service caller from a user. **Absence of the service header is not a refusal** — a request without one
+is an ordinary edge request, which is what lets the filter ship in every service before any
+inter-service call exists.
+
+### Per-service audiences
+
+Until T-9.4 core accepted `aud: account, gateway`, which meant it accepted any token this realm
+issued for the gateway — and so would every service added behind it. Every service trusted every
+relayed token identically, so a token minted for one was replayable against another and nothing
+would have noticed.
+
+Each service now narrows its accepted audience to its own name, and each client whose tokens reach a
+service carries an `oidc-audience-mapper` naming it. **Adding a service is adding a mapper**, on the
+client, not widening the accepted list.
+
+> The mappers are on the CLIENTS, not on a shared client scope. That was tried and Keycloak's import
+> created the scope while silently dropping its `protocolMappers` — the scope existed, the mapper did
+> not, and tokens still had no audience. Do not tidy them into a scope.
+
+### The realm secret and the Kubernetes Secret must change together
+
+`svc-core`'s secret exists twice: in the realm, imported from `keycloak-clients` in the `keycloak`
+namespace, and in `service-clients` in `apps`, which the service reads.
+
+**When they disagree, nothing looks wrong.** Every pod is Ready, the databases are up, the gateway
+serves users normally. Keycloak's token endpoint answers `invalid_client`, the caller never obtains a
+token, and so it never makes a request that anyone can see fail — there is no 401 downstream to find,
+because there was no downstream call. Rotate both or neither.
+
+```bash
+# What to check first when inter-service calls stop working and nothing is unhealthy.
+kubectl -n keycloak get secret keycloak-clients -o jsonpath='{.data.SVC_CORE_CLIENT_SECRET}' | base64 -d
+kubectl -n apps      get secret service-clients  -o jsonpath='{.data.SVC_CORE_CLIENT_SECRET}' | base64 -d
+```
 
 ## Token lifetime and refresh
 

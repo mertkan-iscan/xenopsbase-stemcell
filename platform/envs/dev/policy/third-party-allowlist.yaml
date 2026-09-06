@@ -59,6 +59,11 @@ spec:
     # one HTTPS GET to the cluster's own OIDC issuer, in a loop, and exits.
     - glob: "curlimages/curl@sha256:7c12af72ceb38b7432ab85e1a265cff6ae58e06f95539d539b654f2cfa64bb13"
     - glob: "index.docker.io/curlimages/curl@sha256:7c12af72ceb38b7432ab85e1a265cff6ae58e06f95539d539b654f2cfa64bb13"
+
+    # nats -- the message broker (T-9.6, ADR-0018). Resolved from
+    # nats:2.12-alpine. Both forms for the same reason as curl above.
+    - glob: "nats@sha256:b270f5e2428354c0335612694d7dd2fb588148e567a5757fdff325ef9c9332e6"
+    - glob: "index.docker.io/library/nats@sha256:b270f5e2428354c0335612694d7dd2fb588148e567a5757fdff325ef9c9332e6"
   authorities:
     - static:
         action: pass

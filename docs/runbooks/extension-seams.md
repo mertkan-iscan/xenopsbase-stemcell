@@ -188,12 +188,35 @@ message blocks everything behind it forever, which looks like the relay being br
 `MessagePublisher` has one method and no broker concepts, because no broker has been chosen and an
 interface shaped around one would encode assumptions the eventual choice may not share.
 
+**NATS is the broker (ADR-0018), and it is opt-in.** `platform.outbox.publisher` is `logging` by
+default, so a fork with no broker still builds, starts and passes its tests. The cluster and the
+local stack both set it to `nats`.
+
+`NatsPublisher` is the only broker-aware class. Its JetStream state is disposable by decision — the
+durable record is `outbox_message` in Postgres — so a cluster rebuild recreates the stream empty and
+the relay republishes anything unacknowledged. **Consumers must therefore be idempotent**, which the
+at-least-once outbox already required.
+
 The default `LoggingMessagePublisher` writes a log line. Replace it by declaring your own
 `MessagePublisher` bean — `@ConditionalOnMissingBean` means there is no flag to set and nothing to
 delete.
 
-**Nothing schedules `OutboxRelay.relayBatch()`.** As with the document reaper, a `@Scheduled` baked
-into a template runs on every replica at once. Wire it to a CronJob or a `ShedLock`-guarded task.
+**The relay is scheduled, and holds a Postgres advisory lock (T-9.6, ADR-0018).** This paragraph
+used to say nothing scheduled it — which was true, and meant the outbox recorded messages that were
+never read out, in every environment, from the day the table was created.
+
+`OutboxRelayScheduler` now drives it on a `fixedDelay`, guarded by `pg_try_advisory_lock`. The
+row-level `SKIP LOCKED` in `claimUnpublished` already made concurrent draining safe; the lock is
+about not doing N times the work to publish the same total.
+
+**An advisory lock rather than ShedLock**, because it needs no table, no migration and no dependency,
+and because Postgres releases it when the session ends — including when the pod is killed. A lock
+table gets that case wrong: the row outlives its holder and blocks the relay until somebody notices.
+
+The one way to get it wrong is silent: take the lock on one pooled connection and release it on
+another. `OutboxRelayScheduler` does both inside a single `JdbcTemplate.execute` callback for exactly
+that reason, and `OutboxRelayLockIT` asserts that a second pass acquires the lock — which only
+happens if the first released it.
 
 ## Known gaps
 

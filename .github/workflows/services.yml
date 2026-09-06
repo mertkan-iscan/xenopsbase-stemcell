@@ -225,7 +225,11 @@ jobs:
         run: |
           base="${{ github.event.pull_request.base.sha }}"
           failed=0
-          for service in core gateway; do
+          # Derived, not typed. This was the last hardcoded [core, gateway] in the
+          # repository (T-9.7): a service added without being listed here would
+          # have had its API contract compared against nothing, and reported a
+          # green "no breaking changes" for a spec it never read.
+          for service in $(bash infra/scripts/service-modules.sh); do
             committed="docs/api/${service}.json"
             echo "=================================================================="
             echo " ${service}"
@@ -289,7 +293,14 @@ jobs:
     # must not be able to publish an image: the tag would exist, be pullable,
     # and carry code that was never merged.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: build
+    # `changes` as well as `build`, and it is not decorative: this job's matrix
+    # reads needs.changes.outputs.matrix, and a `needs` context only exposes jobs
+    # this one declares. Without it the expression is invalid, and GitHub fails
+    # the WHOLE RUN before the job is created -- so the run is red, every job in
+    # it is green, and `publish` does not appear in the job list at all. That is
+    # what happened on 5d5dbe4: no image was pushed for a merge that reported
+    # only successful jobs (T-9.7).
+    needs: [changes, build]
     permissions:
       contents: read
       # The only job that gets this. GITHUB_TOKEN is scoped per job, so a

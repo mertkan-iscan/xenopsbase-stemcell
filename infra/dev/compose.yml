@@ -105,3 +105,31 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+
+  nats:
+    # The message broker (T-9.6, ADR-0018). Pinned to the same MINOR as the
+    # cluster's, by tag rather than by digest: the cluster pins the digest
+    # because policy-controller enforces it there, and a digest here would mean
+    # two places to edit for a local stack whose whole point is being cheap to
+    # rebuild.
+    image: nats:2.12-alpine
+    # -js turns JetStream on -- without it the server starts, accepts
+    # connections, and refuses every stream operation, which reads as a client
+    # bug. -sd is the store directory and -m is the monitoring port the
+    # healthcheck below uses.
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    healthcheck:
+      # /healthz, not the client port. NATS accepts TCP on 4222 before
+      # JetStream has finished recovering its store, so a port check reports
+      # healthy while a publish would still fail.
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8222/healthz"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    # No volume, deliberately. The local store is disposable in the strongest
+    # sense: `make dev-down` removes it and the outbox in Postgres is still the
+    # record of what was published. Adding one would make a local stack keep
+    # messages across rebuilds, which is a behaviour the cluster does not have.

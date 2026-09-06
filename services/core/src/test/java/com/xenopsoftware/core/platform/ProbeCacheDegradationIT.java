@@ -67,15 +67,15 @@ class ProbeCacheDegradationIT {
     }
 
     private PlatformProbe available(String filename) {
-        PlatformProbe document = new PlatformProbe();
-        document.setOwner(OWNER);
-        document.setLabel(filename);
-        document.setContentType("text/plain");
-        document.setObjectKey("2026/09/" + OWNER + "/" + filename);
-        document.setSizeBytes(11L);
-        document.setStatus(PlatformProbe.Status.AVAILABLE);
-        document.setCreatedAt(Instant.now());
-        return probeRepository.saveAndFlush(document);
+        PlatformProbe probe = new PlatformProbe();
+        probe.setOwner(OWNER);
+        probe.setLabel(filename);
+        probe.setContentType("text/plain");
+        probe.setObjectKey("2026/09/" + OWNER + "/" + filename);
+        probe.setSizeBytes(11L);
+        probe.setStatus(PlatformProbe.Status.AVAILABLE);
+        probe.setCreatedAt(Instant.now());
+        return probeRepository.saveAndFlush(probe);
     }
 
     /** A read with no cache returns the right answer from Postgres rather than a 500. */
@@ -111,16 +111,16 @@ class ProbeCacheDegradationIT {
      */
     @Test
     void aFailedEvictionDoesNotFailACommittedWrite() {
-        PlatformProbe document = available("doomed.txt");
+        PlatformProbe probe = available("doomed.txt");
 
         assertThatCode(() -> {
-            boolean deleted = probeService.delete(document.getId(), OWNER);
+            boolean deleted = probeService.delete(probe.getId(), OWNER);
             assertThat(deleted).isTrue();
         })
             .as("the eviction cannot reach Valkey, and that must not surface to the caller")
             .doesNotThrowAnyException();
 
-        assertThat(probeRepository.findById(document.getId())).isEmpty();
+        assertThat(probeRepository.findById(probe.getId())).isEmpty();
         assertThat(probeService.listAvailableCached(OWNER, FIRST_PAGE).content()).isEmpty();
     }
 }

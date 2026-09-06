@@ -1,11 +1,16 @@
 package com.xenopsoftware.common.outbox;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.nats.client.Connection;
 import jakarta.persistence.EntityManagerFactory;
+import javax.sql.DataSource;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration;
 import org.springframework.context.annotation.Bean;
 
@@ -65,5 +70,42 @@ public class OutboxAutoConfiguration {
     @ConditionalOnMissingBean
     public OutboxRelay outboxRelay(OutboxMessageRepository repository, ObjectProvider<MessagePublisher> publisher) {
         return new OutboxRelay(repository, publisher);
+    }
+
+    /**
+     * The scheduled drain (T-9.6, ADR-0018). Nothing called {@link OutboxRelay#relayBatch()} until
+     * this existed, which made the whole outbox inert in every environment since T-3.10.
+     *
+     * <p>Conditional on a property so a fork can turn it off, defaulting to ON — which is the
+     * opposite of how the other seams here default, and deliberately so. An outbox that records and
+     * never delivers is not a disabled feature, it is a broken one, and the version of this that
+     * defaulted to off would have shipped the same silence with a flag to explain it.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(name = "platform.outbox.relay.enabled", havingValue = "true", matchIfMissing = true)
+    public OutboxRelayScheduler outboxRelayScheduler(OutboxRelay relay, DataSource dataSource) {
+        return new OutboxRelayScheduler(relay, dataSource);
+    }
+
+    /**
+     * NATS, when the service has a connection and has been told to use it (ADR-0018).
+     *
+     * <p>Two conditions and both are load-bearing. {@code @ConditionalOnClass} because jnats is an
+     * OPTIONAL dependency of this module — a service that does not want a broker must not fail to
+     * start over a missing class. {@code @ConditionalOnProperty} because a service can have jnats on
+     * its classpath and still want the logging publisher, and a broker chosen by classpath rather
+     * than by configuration is a decision nobody made.
+     *
+     * <p>{@link LoggingMessagePublisher} remains the default, resolved by {@link OutboxRelay}
+     * through an {@code ObjectProvider}, so a fork with no broker still builds, starts and passes
+     * its tests.
+     */
+    @Bean
+    @ConditionalOnMissingBean(MessagePublisher.class)
+    @ConditionalOnClass(Connection.class)
+    @ConditionalOnProperty(name = "platform.outbox.publisher", havingValue = "nats")
+    public MessagePublisher natsPublisher(Connection connection, @Value("${platform.outbox.subject-prefix:}") String subjectPrefix) {
+        return new NatsPublisher(connection, subjectPrefix);
     }
 }

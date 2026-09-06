@@ -111,15 +111,15 @@ class ProbeCacheIT {
     }
 
     private PlatformProbe available(String owner, String filename) {
-        PlatformProbe document = new PlatformProbe();
-        document.setOwner(owner);
-        document.setLabel(filename);
-        document.setContentType("text/plain");
-        document.setObjectKey("2026/09/" + owner + "/" + filename);
-        document.setSizeBytes(11L);
-        document.setStatus(PlatformProbe.Status.AVAILABLE);
-        document.setCreatedAt(Instant.now());
-        return probeRepository.saveAndFlush(document);
+        PlatformProbe probe = new PlatformProbe();
+        probe.setOwner(owner);
+        probe.setLabel(filename);
+        probe.setContentType("text/plain");
+        probe.setObjectKey("2026/09/" + owner + "/" + filename);
+        probe.setSizeBytes(11L);
+        probe.setStatus(PlatformProbe.Status.AVAILABLE);
+        probe.setCreatedAt(Instant.now());
+        return probeRepository.saveAndFlush(probe);
     }
 
     /**
@@ -127,18 +127,18 @@ class ProbeCacheIT {
      *
      * <p>Proven by removing the row <em>behind the service's back</em>, straight through the
      * repository, so no invalidation event is published. A second read that still returns the
-     * document can only have come from the cache. Asserting a hit any other way -- counting queries,
+     * probe can only have come from the cache. Asserting a hit any other way -- counting queries,
      * timing -- measures something else.
      */
     @Test
     void secondReadIsServedFromTheCache() {
-        PlatformProbe document = available(owner, "cached.txt");
+        PlatformProbe probe = available(owner, "cached.txt");
 
         CachedProbePage first = probeService.listAvailableCached(owner, FIRST_PAGE);
         assertThat(first.content()).hasSize(1);
         assertThat(first.content().getFirst().label()).isEqualTo("cached.txt");
 
-        probeRepository.deleteById(document.getId());
+        probeRepository.deleteById(probe.getId());
         probeRepository.flush();
 
         CachedProbePage second = probeService.listAvailableCached(owner, FIRST_PAGE);

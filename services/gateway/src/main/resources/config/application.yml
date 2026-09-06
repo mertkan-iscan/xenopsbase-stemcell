@@ -142,9 +142,24 @@ resilience4j:
         # own rejections, and naming it here would be cargo cult.
         ignoreExceptions:
           - io.github.resilience4j.bulkhead.BulkheadFullException
-    instances:
-      core:
-        baseConfig: default
+    # NO `instances:` BLOCK, AND THAT IS THE POINT (T-9.5).
+    #
+    # It used to say `instances: {core: {baseConfig: default}}`, three times over
+    # -- here, on the timelimiter and on the bulkhead -- which made adding a
+    # service four edits in this file plus a method in FallbackResource.
+    #
+    # Resilience4j creates an instance ON DEMAND for a name it has never seen and
+    # gives it `configs.default`, so a route naming a service with no instance
+    # block gets exactly what those three lines were spelling out. VERIFIED
+    # rather than assumed: ResilienceDefaultsApplyToUnconfiguredServicesTest
+    # reads the config back off a breaker, a timelimiter and a bulkhead created
+    # for a name that appears nowhere in this file, and asserts each matches the
+    # default. The failure this guards against is a new service silently running
+    # with library defaults -- an unbounded bulkhead and a 1s timelimiter -- and
+    # looking completely fine until it is the one under load.
+    #
+    # A service that needs different numbers still adds `instances.<name>` here.
+    # The point is that it is an override rather than a requirement.
   timelimiter:
     configs:
       default:
@@ -153,9 +168,7 @@ resilience4j:
         # response is attributed to the wrong layer.
         timeoutDuration: 12s
         cancelRunningFuture: true
-    instances:
-      core:
-        baseConfig: default
+    # Same as above: no per-service instances. See the circuitbreaker block.
   bulkhead:
     configs:
       default:
@@ -204,9 +217,7 @@ resilience4j:
         # exactly the overload it was configured to survive. BlockHound (see
         # JHipsterBlockHoundIntegration) fails the build on it.
         maxWaitDuration: 0
-    instances:
-      core:
-        baseConfig: default
+    # Same as above: no per-service instances. See the circuitbreaker block.
 
 management:
   endpoints:
@@ -302,6 +313,27 @@ spring:
     context-propagation: auto
   application:
     name: gateway
+  # VIRTUAL THREADS (T-9.8, JEP 444 / JEP 491).
+  #
+  # ON HERE TOO, AND IT IS NOT THE SAME DECISION AS CORE'S. This process is
+  # WebFlux and its request path never blocks, so virtual threads change nothing
+  # about how requests are served. What they cover is everything OFF that path --
+  # @Async work, scheduled tasks, the occasional blocking call a filter makes --
+  # and setting it here keeps the two services' concurrency configuration
+  # identical rather than differing for a reason a reader would have to
+  # reconstruct from first principles.
+  #
+  # This process has no Tomcat thread pool to lose and no database, so the
+  # admission-control consequence described in core's copy of this note does not
+  # apply here. The bulkhead is what bounds concurrency at this tier, and it is
+  # unaffected.
+  #
+  # BLOCKHOUND STILL FAILS THE BUILD on a blocking call on an event loop, and
+  # that must stay true. A virtual thread is not permission to block a Netty
+  # thread; it is permission to block a thread that is cheap to have.
+  threads:
+    virtual:
+      enabled: true
 
   # Session storage (T-2.11, ADR-0009).
   #
@@ -428,6 +460,24 @@ spring:
             connect-timeout: 2000
             response-timeout: 10s
           routes:
+            # ---------------------------------------------------------------
+            # ADDING A SERVICE IS ADDING A BLOCK HERE (T-9.5).
+            #
+            # It used to be four edits: a block here, a circuitbreaker instance,
+            # a timelimiter instance, a bulkhead instance, and a method in
+            # FallbackResource. Three of those are gone -- resilience4j applies
+            # `configs.default` to an instance it creates on demand for an
+            # unconfigured name, which ResilienceDefaultsApplyToUnconfiguredServicesTest
+            # asserts rather than assumes -- and the fallback handler now takes
+            # the service name from its path.
+            #
+            # So a new service is: copy the block below, change `core` in the
+            # four places it appears (id, uri, predicate, breaker name and
+            # fallbackUri), and add a matching Deployment and realm client. The
+            # resilience numbers, the retry policy and the rate limit come from
+            # the defaults above and are the same for every service until one of
+            # them has a measured reason to differ.
+            # ---------------------------------------------------------------
             # Kubernetes Service DNS, not lb://. There is no service registry
             # (JDL: serviceDiscoveryType no) because Kubernetes already provides
             # discovery; lb:// here would fail to resolve at runtime rather than
