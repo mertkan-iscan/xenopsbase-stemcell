@@ -5,8 +5,8 @@ import static com.xenopsoftware.gateway.test.util.OAuth2TestUtil.authenticationT
 import static com.xenopsoftware.gateway.test.util.OAuth2TestUtil.registerAuthenticationToken;
 import static org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.*;
 
+import com.xenopsoftware.common.security.AuthoritiesConstants;
 import com.xenopsoftware.gateway.IntegrationTest;
-import com.xenopsoftware.gateway.security.AuthoritiesConstants;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;

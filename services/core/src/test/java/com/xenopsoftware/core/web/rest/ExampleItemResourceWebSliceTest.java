@@ -7,9 +7,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.xenopsoftware.common.idempotency.IdempotencyRecordRepository;
 import com.xenopsoftware.core.domain.ExampleItem;
 import com.xenopsoftware.core.repository.ExampleItemRepository;
-import com.xenopsoftware.core.repository.IdempotencyRecordRepository;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

@@ -36,10 +36,14 @@ version: 2
 
 updates:
   # ---------------------------------------------------------------------------
-  # The services. Two independent Maven projects with no parent pom, so each
-  # needs its own entry -- Dependabot does not discover sibling modules.
+  # The services. ONE entry, at the reactor root: since ADR-0017 these are a
+  # multi-module Maven project, and Dependabot resolves the modules from the
+  # parent. It used to be two entries with a comment explaining that Dependabot
+  # does not discover sibling modules -- true when there was no parent, and the
+  # reason the two poms were able to drift onto different versions of the same
+  # library without either bot noticing.
   - package-ecosystem: maven
-    directory: /services/core
+    directory: /services
     schedule:
       interval: weekly
       day: monday
@@ -68,34 +72,6 @@ updates:
           - "com.tngtech.archunit*"
       # Everything else, still grouped, because the alternative is one PR per
       # transitive bump on a project with this many dependencies.
-      minor-and-patch:
-        update-types:
-          - minor
-          - patch
-
-  - package-ecosystem: maven
-    directory: /services/gateway
-    schedule:
-      interval: weekly
-      day: monday
-      time: "06:00"
-      timezone: Europe/Istanbul
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: "chore(deps)"
-      prefix-development: "chore(deps-dev)"
-    groups:
-      spring:
-        patterns:
-          - "org.springframework*"
-          - "io.micrometer*"
-      testing:
-        patterns:
-          - "org.junit*"
-          - "org.assertj*"
-          - "org.mockito*"
-          - "org.testcontainers*"
-          - "com.tngtech.archunit*"
       minor-and-patch:
         update-types:
           - minor
@@ -141,8 +117,12 @@ updates:
 
   # ---------------------------------------------------------------------------
   # The prettier toolchain. Small, but it decides the formatting of every Java
-  # file, and Spotless pins the same versions in both poms -- so an update here
-  # that is not mirrored there means `make format` and CI disagree.
+  # file, and Spotless pins the same versions in services/pom.xml -- so an update
+  # here that is not mirrored there means `make format` and CI disagree.
+  #
+  # Still two entries, because package.json is still per-service. The style
+  # itself is not: .prettierrc-java moved to services/ with the parent pom, so
+  # there is one style file for all four modules.
   - package-ecosystem: npm
     directory: /services/core
     schedule:

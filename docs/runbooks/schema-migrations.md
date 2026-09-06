@@ -9,7 +9,7 @@ follows from it.
 
 | | |
 |---|---|
-| Migrations | `services/core/src/main/resources/db/migration` |
+| Migrations | `services/core/src/main/resources/db/migration/core` |
 | History table | `flyway_schema_history` in the `app` database |
 | Hibernate mode | `ddl-auto: validate` (`services/core/src/main/resources/config/application.yml`) |
 | The guard | `SchemaOwnershipTest` in `services/core/src/test/java/com/xenopsoftware/core/config` |
@@ -84,11 +84,23 @@ deciding what `V<n+1>` has to assume.
 ## Adding a migration
 
 ```bash
-cd services/core
-# 1. write src/main/resources/db/migration/V<n>__<description>.sql
+cd services
+# 1. write core/src/main/resources/db/migration/core/V<n>__<description>.sql
 # 2. write or change the entity to match
-./mvnw test
+./mvnw test -pl core -am
 ```
+
+**The trailing `/core` in the path is the module's namespace, and it matters.**
+`classpath:db/migration` resolves across **every jar on the classpath**, and every module numbers
+from `V1`. The moment two modules share a process — or one service depends on another's jar —
+Flyway finds two different `V1__` files and refuses to start with *"Found more than one migration
+with version 1"*. Nothing collides today, which is exactly why the namespacing was cheap to add
+(ADR-0017). A new service gets its own `db/migration/<service>` and points
+`spring.flyway.locations` at it.
+
+Relocating an already-applied migration is safe: `flyway_schema_history` keys on version and
+description, not on where the file was read from, so the same file under a new directory is the
+same migration and nothing re-runs.
 
 `SchemaOwnershipTest` runs as an ordinary unit test and needs no database. It fails the build if any
 configuration file — including a profile no test activates — sets `ddl-auto` or `hibernate.hbm2ddl.auto`

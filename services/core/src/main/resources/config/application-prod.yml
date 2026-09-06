@@ -210,7 +210,8 @@ spring:
   # Replace by 'prod, faker' to add the faker context and have sample data loaded in production
   flyway:
     enabled: true
-    locations: classpath:db/migration
+    # Namespaced per module -- see application-dev.yml for why.
+    locations: classpath:db/migration/core
     # Fail rather than guess. Without this, Flyway will happily
     # "baseline" a database that already has tables it did not create,
     # silently adopting an unknown schema as version 1.

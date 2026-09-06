@@ -1,5 +1,6 @@
 package com.xenopsoftware.gateway.web.filter;
 
+import com.xenopsoftware.common.correlation.CorrelationId;
 import io.micrometer.common.KeyValue;
 import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationFilter;
@@ -42,12 +43,6 @@ import org.springframework.stereotype.Component;
 @Component
 public class CorrelationIdObservationFilter implements ObservationFilter {
 
-    /**
-     * Dotted, unlike the {@code requestId} MDC key, because span attributes are namespaced with
-     * dots by convention and every other attribute in the trace store follows it.
-     */
-    public static final String SPAN_ATTRIBUTE = "request.id";
-
     @Override
     public Observation.Context map(Observation.Context context) {
         if (!(context instanceof ServerRequestObservationContext serverContext)) {
@@ -68,6 +63,6 @@ public class CorrelationIdObservationFilter implements ObservationFilter {
             return context;
         }
 
-        return context.addHighCardinalityKeyValue(KeyValue.of(SPAN_ATTRIBUTE, id));
+        return context.addHighCardinalityKeyValue(KeyValue.of(CorrelationId.SPAN_ATTRIBUTE, id));
     }
 }

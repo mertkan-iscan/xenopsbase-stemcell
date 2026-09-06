@@ -1,5 +1,6 @@
 package com.xenopsoftware.gateway.web.filter;
 
+import com.xenopsoftware.common.correlation.CorrelationId;
 import java.util.UUID;
 import org.slf4j.MDC;
 import org.springframework.core.Ordered;

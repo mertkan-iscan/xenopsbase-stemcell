@@ -1,8 +1,8 @@
 package com.xenopsoftware.core.web.rest;
 
+import com.xenopsoftware.common.security.AuthoritiesConstants;
 import com.xenopsoftware.core.domain.ExampleItem;
 import com.xenopsoftware.core.repository.ExampleItemRepository;
-import com.xenopsoftware.core.security.AuthoritiesConstants;
 import jakarta.validation.Valid;
 import java.util.HashMap;
 import java.util.List;

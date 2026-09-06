@@ -1,0 +1,1226 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    The parent every module under services/ inherits.
+
+    WHY THIS FILE EXISTS, BECAUSE IT DID NOT USED TO.
+
+    Until now `core` and `gateway` each carried an independent 1400-line pom
+    under spring-boot-starter-parent, and the two were very nearly the same
+    file: a structural diff of them, comments stripped, differed in the
+    artifact name, the web stack, and about forty lines of genuinely
+    per-service configuration. Everything else — every plugin version, the
+    coverage floors, the reproducible-build timestamp, the two deliberate CVE
+    version overrides, the whole 580-line pluginManagement block — was stated
+    twice.
+
+    With two services that was defensible: one duplicated block is cheaper than
+    a layer of indirection. It stops being defensible the moment the template
+    is asked to host a third service, which is the thing this repository exists
+    to make easy. A change to the JDK, the error shape or a coverage floor
+    becomes N edits, N-1 of which get made, and the one that does not is found
+    much later.
+
+    The drift had already started, and is recorded here rather than quietly
+    fixed: the two poms had reached jhipster-framework 9.1.0 vs 8.12.0 and
+    spring-cloud-dependencies 2025.1.2 vs 2025.1.3. Nobody chose either
+    difference. Both are stated once below, at the newer version, which is the
+    one change in this restructure that is not a pure move.
+
+    Modelled on xenopsbase-learn/services/pom.xml, which hit this wall first at
+    six modules. docs/adr/0018-shared-service-modules.md pins the commit that
+    shape was read from, so this file does not depend on another repository's
+    branch to explain itself.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.xenopsoftware</groupId>
+    <artifactId>services</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <packaging>pom</packaging>
+    <name>XenOpsBase services</name>
+    <description>The parent every service and shared module inherits</description>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>4.0.8</version>
+        <relativePath/>
+    </parent>
+
+    <!--
+        Declared in dependency order, which is also build order: the two shared
+        modules are libraries the services depend on, so they compile first.
+
+        THIS LIST IS THE SERVICE REGISTRY. Adding a service is adding a line
+        here; every other list of services in this repository is derived from
+        it rather than typed again (infra/scripts/service-modules.sh).
+    -->
+    <modules>
+        <module>platform-common</module>
+        <module>platform-common-web</module>
+        <module>gateway</module>
+        <module>core</module>
+    </modules>
+
+    <properties>
+        <maven.version>3.2.5</maven.version>
+        <java.version>25</java.version>
+
+        <!--
+            Ahead of Spring Boot, deliberately (T-5.12, #224).
+
+            Boot 4.0.8 manages httpcore5 5.3.6, which carries CVE-2026-54399 and
+            CVE-2026-54428 (both HIGH, both fixed in 5.4.3). The image scan added
+            by T-5.8 failed on them against the digest the cluster was running.
+
+            Boot moved netty for the same round of advisories and did not move
+            httpcore5, so waiting for a patch release is not a plan with a date
+            on it. This override is what carries the fix.
+
+            It outruns Boot's tested matrix, which is the actual risk. What makes
+            it acceptable is that the suites exercise the path: the AWS SDK's
+            apache-client is what pulls httpcore5 in, and DocumentResourceIT
+            drives presigned uploads and downloads against real object storage
+            through it. A binary incompatibility fails there rather than in
+            production.
+
+            REMOVE THIS when Boot manages 5.4.3 or later. To check, read
+            httpcore5.version out of the spring-boot-dependencies pom for the
+            version in the parent above, on repo1.maven.org.
+        -->
+        <httpcore5.version>5.4.3</httpcore5.version>
+        <!--
+            Ahead of Spring Boot, deliberately, and for the same reason as the
+            httpcore5 override above (T-6.13, #403).
+
+            Boot 4.0.8 manages tomcat-embed-core 11.0.24, which carries three
+            CRITICAL advisories, all fixed in 11.0.25:
+
+              CVE-2026-65182   security constraint bypass
+              CVE-2026-65905   authentication bypass
+              CVE-2026-68525   unauthorized access
+
+            Two of the three are authentication or authorization bypasses in the
+            component that terminates every request reaching this service, so
+            these are not linked-but-unreached code paths.
+
+            There is no Boot release to wait for: 4.0.8 IS the newest
+            spring-boot-starter-parent, checked against repo1.maven.org on
+            2026-09-03. Waiting for a parent bump waits for a release that does
+            not exist.
+
+            11.0.24 -> 11.0.25 is a patch release inside 11.0.x, so binary
+            compatibility is the expected case rather than a hope, and the
+            servlet path is what every test in this module goes through.
+
+            REMOVE THIS when Boot manages 11.0.25 or later. To check, read
+            tomcat.version out of the spring-boot-dependencies pom for the
+            version in the parent above, on repo1.maven.org.
+        -->
+        <tomcat.version>11.0.25</tomcat.version>
+        <!--
+            The Maven-standard reproducible-build timestamp. Without it,
+            spring-boot:build-info writes a wall-clock build.time into
+            META-INF/build-info.properties, that file lands in an image layer,
+            and two builds of the same commit produce different image digests.
+
+            That was measured, not assumed: with only Jib's creationTime pinned,
+            two consecutive builds of an unchanged tree gave config digests
+            7f68d680... and 9fded033....
+
+            Maven also uses this to normalise entry timestamps inside the jar,
+            so it fixes the archive and the image together. Bump it when
+            releasing; release tooling is expected to own it.
+        -->
+        <project.build.outputTimestamp>2026-08-21T00:00:00Z</project.build.outputTimestamp>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <maven.build.timestamp.format>yyyyMMddHHmmss</maven.build.timestamp.format>
+        <maven.compiler.source>${java.version}</maven.compiler.source>
+        <maven.compiler.target>${java.version}</maven.compiler.target>
+        <argLine>-Xmx1G</argLine>
+        <m2e.apt.activation>jdt_apt</m2e.apt.activation>
+        <run.addResources>false</run.addResources>
+        <spring-boot.version>${project.parent.version}</spring-boot.version>
+
+        <!--
+            PER-MODULE KNOBS, WITH DEFAULTS THAT SUIT A SERVLET SERVICE.
+
+            Each of these exists because the two poms genuinely differed there,
+            so lifting the shared configuration meant naming the difference
+            rather than losing it. A module overrides what it needs and
+            inherits the rest.
+        -->
+        <!-- Extra flags for the test JVMs. The gateway needs one, for BlockHound. -->
+        <test.jvm.args/>
+        <!-- The port declared in the image. -->
+        <service.container.port>8081</service.container.port>
+        <!-- The OpenAPI generator emits a reactive API for the gateway, a servlet one elsewhere. -->
+        <openapi.generator.reactive>false</openapi.generator.reactive>
+
+        <archunit-junit5.version>1.4.2</archunit-junit5.version>
+        <awssdk.version>2.46.7</awssdk.version>
+        <checkstyle.version>13.7.0</checkstyle.version>
+        <cucumber-bom.version>7.34.4</cucumber-bom.version>
+        <jackson-databind-nullable.version>0.2.10</jackson-databind-nullable.version>
+        <jacoco-maven-plugin.version>0.8.15</jacoco-maven-plugin.version>
+        <!--
+            THE ENFORCED FLOOR, WHICH IS NOT THE TARGET.
+
+            docs/testing.md sets the target at 80% instruction / 70% branch and says why. This
+            module measured 60.0% / 46.0% on a merged unit+integration run (2026-08-22), so
+            enforcing the target would fail every build from the moment the gate went in - a gate
+            that cannot pass is removed within a day, and then there is no gate at all.
+
+            These numbers are the measured baseline, one point below, so the build fails on a
+            REGRESSION today and the target is reached by raising them as tests are added. Raise
+            them deliberately, with the reason in the commit, the same as every other threshold in
+            this repository. Getting from here to the target is its own body of work and has its
+            own card.
+                    RAISED 2026-09-01, T-5.9 (#172): 0.58/0.44 to 0.77/0.68, in three steps.
+
+            TAKE THE NUMBER FROM CI, NOT FROM A DEVELOPER MACHINE. A local merged run
+            measured 74.7% instruction; CI measured 0.73 on the same commit, and a floor of 0.74
+            set from the local figure failed the build immediately:
+
+              Rule violated for bundle core: instructions covered ratio is 0.73,
+              but expected minimum is 0.74
+
+            The gate runs in CI, so CI's measurement is the one that exists. These are that number
+            with a point of margin, which is the same convention the original floors used. The
+            ratchet only means anything if it is always true, so it is never moved ahead of the
+            tests that earn it, and never set from a run that does not gate anything.
+
+            Where the movement came from, since the two halves are not equal:
+
+              exclusion of generated DTOs   61.4/46.7 to 64.1/48.9
+              the tests themselves          64.1/48.9 to 74.7/57.0
+
+            SECOND STEP: three filter and error classes, 75.8% / 64.4% locally.
+
+              InfraUsageService + ExceptionTranslator   61.4/46.7 to 74.7/57.0
+              CorrelationIdFilter + IdempotencyFilter   74.7/57.0 to 75.8/64.4
+
+            The second step is the shape this card asks for and the first was not. Against the
+            fourth criterion - branch must rise at least as fast as instruction - the first step
+            managed +8.1 branch against +10.6 instruction, because those classes had large untested
+            bodies as well as untaken branches. The second managed +7.4 branch against +1.1
+            instruction: small, branch-dense classes move the number the card actually cares about.
+
+            CorrelationIdFilter went from 1 of 26 branches to 26 of 26. It sanitises an
+            attacker-controlled header that lands in every log line, so those branches are a
+            log-forging defence, and a defence nothing exercises is indistinguishable from an
+            absent one.
+
+            THIRD STEP: InfraUsageService's assembly and LoggingAspect, 80.6% / 70.1% locally.
+
+              75.8/64.4 to 78.7/67.9   the assembly half of InfraUsageService
+              78.7/67.9 to 80.6/70.1   LoggingAspect
+
+            WHICH MEETS THE TARGET LOCALLY AND IS NOT WHY THE FLOOR IS 0.77/0.68.
+
+            The margin is 0.6 and 0.1. CI measured 1.7 points below this machine the last time both
+            numbers were visible, so a floor at the target would fail the first build after it. The
+            floor is what CI can be relied on to clear, not the best number anyone has seen, and
+            saying "the target is met" while the gate sits lower would be recording an
+            achievement the build cannot demonstrate.
+
+            Raising it to 0.80/0.70 needs CI's own reading of this commit. That is a follow-up with
+            a number in it, not a guess.
+
+            SecurityUtils remains the largest untouched gap at 11 branches, spread one to three at
+            a time across seven methods, and is deliberately left rather than padded.
+
+            FOURTH STEP: the claims-to-authorities mapping and the status mapping table,
+            81.94% / 75.67%.
+
+              80.3/70.1 to 81.0/72.5   SecurityUtils.extractAuthorityFromClaims
+              81.0/72.5 to 81.9/75.7   the ExceptionTranslator status mapping table
+
+            AND THE FOLLOW-UP THE THIRD STEP ASKED FOR, WITH THE NUMBER IN IT. services.yml now
+            prints the merged figure to the job summary, and run 33529950824 reported 80.29/70.05
+            for core and 81.93/76.95 for gateway, matching this machine to the second decimal on
+            all four counters.
+
+            So the premise above is wrong, and is corrected here rather than left standing: there
+            is no 1.7 point local-versus-CI gap. Whatever failed the earlier 0.74 ratchet, it was
+            not a systematic difference between this machine and the runner, and two floors were
+            set lower than the evidence supported on the strength of it.
+
+            Floors go to T-5.1's target of 0.80/0.70, with 1.94 and 5.67 points of measured margin.
+
+            What is left, for whoever picks up the next coverage card: OutboxRelay at 87
+            instructions and IdempotencyFilter at 50 are the two worth having, because both fail
+            silently by nature. CoreApp's 125 are a startup banner and are not worth a test.
+        -->
+        <jacoco.minimum.instruction>0.80</jacoco.minimum.instruction>
+        <jacoco.minimum.branch>0.70</jacoco.minimum.branch>
+        <!--
+            The floors above are the SERVICE floors, and the two shared modules
+            override them downward in their own poms. That is not a lowered
+            standard, it is a different measurement: a library bundle is small
+            enough that one untested branch moves the ratio by whole points, so
+            a floor copied from a service would fail the first build after the
+            move and be deleted within a day. Each module's pom carries its own
+            measured number and the run it came from, same convention as here.
+        -->
+        <jhipster-framework.version>9.1.0</jhipster-framework.version>
+        <jib-maven-plugin.architecture>amd64</jib-maven-plugin.architecture>
+        <!--
+            Pinned by digest, not by tag. T-6.1 requires that the same commit
+            produces the same image digest; a floating tag breaks that on the
+            day upstream republishes it, and the resulting difference is
+            invisible in the diff. Resolved from eclipse-temurin:25-jre-noble.
+            Update deliberately, the same way a dependency version is updated.
+        -->
+        <jib-maven-plugin.image>eclipse-temurin@sha256:1a99f30a84d58729f1184c1c693f25fb6f91970ddf05395515540bc5773b8edd</jib-maven-plugin.image>
+        <jib-maven-plugin.version>3.5.1</jib-maven-plugin.version>
+        <lifecycle-mapping.version>1.0.0</lifecycle-mapping.version>
+        <mapstruct.version>1.6.3</mapstruct.version>
+        <maven-checkstyle-plugin.version>3.6.0</maven-checkstyle-plugin.version>
+        <modernizer-maven-plugin.version>3.4.0</modernizer-maven-plugin.version>
+        <nohttp-checkstyle.version>0.0.11</nohttp-checkstyle.version>
+        <openapi-generator-maven-plugin.version>7.23.0</openapi-generator-maven-plugin.version>
+        <profile.api-docs/>
+        <profile.e2e/>
+        <profile.test/>
+        <profile.tls/>
+        <properties-maven-plugin.version>1.3.0</properties-maven-plugin.version>
+        <resource.delimiter>@</resource.delimiter>
+        <sonar-maven-plugin.version>5.7.0.6970</sonar-maven-plugin.version>
+        <spotless-maven-plugin.version>3.8.0</spotless-maven-plugin.version>
+        <!--
+            2025.1.3, which is the GATEWAY's version. core was one patch behind
+            at 2025.1.2 for no recorded reason; consolidating had to pick one,
+            and picking the older would have been choosing to un-patch a module.
+        -->
+        <spring-cloud-dependencies.version>2025.1.3</spring-cloud-dependencies.version>
+        <spring.profiles.active>dev</spring.profiles.active>
+        <!-- One version, two starters: the servlet one and the reactive one. -->
+        <springdoc-openapi.version>3.0.3</springdoc-openapi.version>
+
+        <!-- Gateway-only, declared here so no version is stated in a module pom. -->
+        <blockhound-junit-platform.version>1.0.17.RELEASE</blockhound-junit-platform.version>
+        <commons-beanutils.version>1.11.0</commons-beanutils.version>
+        <micrometer-context-propagation.version>1.2.1</micrometer-context-propagation.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!--
+                The two shared modules, versioned with the reactor so a service
+                never states a version for them.
+            -->
+            <dependency>
+                <groupId>com.xenopsoftware</groupId>
+                <artifactId>platform-common</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.xenopsoftware</groupId>
+                <artifactId>platform-common-web</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <!--
+                Object storage (T-3.7). The AWS SDK is used as an S3 CLIENT, not as
+                an AWS integration: every call is plain S3 API, so the same code runs
+                against Hetzner Object Storage, MinIO or R2. Nothing here may reach for
+                an AWS-only service.
+            -->
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${awssdk.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud-dependencies.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.cucumber</groupId>
+                <artifactId>cucumber-bom</artifactId>
+                <version>${cucumber-bom.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <dependency>
+                <groupId>tech.jhipster</groupId>
+                <artifactId>jhipster-framework</artifactId>
+                <version>${jhipster-framework.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springdoc</groupId>
+                <artifactId>springdoc-openapi-starter-webmvc-api</artifactId>
+                <version>${springdoc-openapi.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springdoc</groupId>
+                <artifactId>springdoc-openapi-starter-webflux-api</artifactId>
+                <version>${springdoc-openapi.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.tngtech.archunit</groupId>
+                <artifactId>archunit-junit5-api</artifactId>
+                <version>${archunit-junit5.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.tngtech.archunit</groupId>
+                <artifactId>archunit-junit5-engine</artifactId>
+                <version>${archunit-junit5.version}</version>
+                <scope>test</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <!--
+            Resource filtering, so `@spring.profiles.active@` and friends in a
+            module's config yml are substituted at build time. `${resource.delimiter}`
+            is @ rather than ${} because a Spring yml is full of ${} placeholders
+            that Maven must not touch.
+        -->
+        <resources>
+            <resource>
+                <directory>${basedir}/src/main/resources/</directory>
+                <filtering>true</filtering>
+                <includes>
+                    <include>config/**/*.yml</include>
+                </includes>
+            </resource>
+            <resource>
+                <directory>${basedir}/src/main/resources/</directory>
+                <excludes>
+                    <exclude>config/**/*.yml</exclude>
+                </excludes>
+            </resource>
+        </resources>
+        <!--
+            Only what EVERY module needs, libraries included. The plugins that
+            turn a module into a deployable service — spring-boot-maven-plugin,
+            jib, the OpenAPI generator, properties-maven-plugin, sonar — are
+            declared by the two service poms instead.
+
+            That split is not tidiness. Running jib in a library module fails on
+            a missing mainClass, and spring-boot:repackage would rewrite a
+            library jar into an executable archive whose classes live under
+            BOOT-INF/ and are therefore invisible to anything depending on it —
+            which presents as "cannot find symbol" for a class that is plainly
+            inside the jar.
+
+            Versions and configuration for all of them, the service-only ones
+            included, are in pluginManagement below, so a service pom names a
+            plugin and states nothing about it.
+        -->
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-checkstyle-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.gaul</groupId>
+                <artifactId>modernizer-maven-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-checkstyle-plugin</artifactId>
+                    <version>${maven-checkstyle-plugin.version}</version>
+                    <dependencies>
+                        <dependency>
+                            <groupId>com.puppycrawl.tools</groupId>
+                            <artifactId>checkstyle</artifactId>
+                            <version>${checkstyle.version}</version>
+                        </dependency>
+                        <dependency>
+                            <groupId>io.spring.nohttp</groupId>
+                            <artifactId>nohttp-checkstyle</artifactId>
+                            <version>${nohttp-checkstyle.version}</version>
+                        </dependency>
+                    </dependencies>
+                    <configuration>
+                        <!--
+                            ONE FILE, AT THE REACTOR ROOT. It used to sit in each service, identical,
+                            and the two new library modules had no copy at all, so checkstyle
+                            would have failed there on a missing config rather than on a violation.
+
+                            ${maven.multiModuleProjectDirectory} is set by the Maven launcher to the
+                            directory holding .mvn, which is services/. It resolves the same whether
+                            the reactor is built whole or with -pl, which ${project.basedir} does not.
+                        -->
+                        <configLocation>${maven.multiModuleProjectDirectory}/checkstyle.xml</configLocation>
+                        <includes>pom.xml,README.md</includes>
+                        <excludes>.git/**/*,target/**/*,node_modules/**/*</excludes>
+                        <sourceDirectories>./</sourceDirectories>
+                    </configuration>
+                    <executions>
+                        <execution>
+                            <goals>
+                                <goal>check</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-clean-plugin</artifactId>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <configuration>
+                        <source>${java.version}</source>
+                        <target>${java.version}</target>
+                        <parameters>true</parameters>
+                        <annotationProcessorPaths>
+                            <path>
+                                <groupId>org.springframework.boot</groupId>
+                                <artifactId>spring-boot-configuration-processor</artifactId>
+                            </path>
+                            <path>
+                                <groupId>org.mapstruct</groupId>
+                                <artifactId>mapstruct-processor</artifactId>
+                                <version>${mapstruct.version}</version>
+                            </path>
+                            <path>
+                                <groupId>org.hibernate.orm</groupId>
+                                <artifactId>hibernate-processor</artifactId>
+                            </path>
+                            <path>
+                                <groupId>org.glassfish.jaxb</groupId>
+                                <artifactId>jaxb-runtime</artifactId>
+                            </path>
+                        </annotationProcessorPaths>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-enforcer-plugin</artifactId>
+                    <executions>
+                        <execution>
+                            <id>enforce-versions</id>
+                            <goals>
+                                <goal>enforce</goal>
+                            </goals>
+                        </execution>
+                        <execution>
+                            <id>enforce-dependencyConvergence</id>
+                            <configuration>
+                                <rules>
+                                    <DependencyConvergence/>
+                                </rules>
+                                <fail>false</fail>
+                            </configuration>
+                            <goals>
+                                <goal>enforce</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                    <configuration>
+                        <rules>
+                            <requireMavenVersion>
+                                <message>This project requires at least Maven ${maven.version}. Use ./mvnw, which fetches a supported version rather than relying on whatever is installed.</message>
+                                <version>[${maven.version},)</version>
+                            </requireMavenVersion>
+                            <!--
+                                Derived from java.version rather than written out, and a lower
+                                bound rather than a range. Both of those are the fix for a real
+                                failure, not tidying.
+
+                                The generated rule was [21,22),[25,26) while java.version was 25,
+                                so a JDK 21 PASSED this check and then failed in the compiler with:
+
+                                    error: release version 25 not supported
+
+                                A guard that admits a JDK the build cannot use is worse than no
+                                guard: it moves the failure past the point that was supposed to
+                                explain it, into a message that names neither the JDK in use nor
+                                where it came from.
+
+                                Tying the version to ${java.version} means the two cannot drift
+                                apart again. The open upper bound is deliberate: a newer JDK
+                                can always compile to release ${java.version}, so refusing one
+                                would block a build that would have worked.
+
+                                (No double hyphens above: XML forbids them inside a comment, and
+                                the resulting parse error names a line number rather than the
+                                rule.)
+                            -->
+                            <requireJavaVersion>
+                                <message>This project targets Java ${java.version} and cannot be built with an older JDK. Check JAVA_HOME: `make java-home` reports which JDKs are on this machine and which one is needed.</message>
+                                <version>[${java.version},)</version>
+                            </requireJavaVersion>
+                        </rules>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-failsafe-plugin</artifactId>
+                    <configuration>
+                        <!-- Due to spring-boot repackage, without adding this property test classes are not found
+                             See https://github.com/spring-projects/spring-boot/issues/6254 -->
+                        <!-- Force alphabetical order to have a reproducible build -->
+                        <classesDirectory>${project.build.outputDirectory}</classesDirectory>
+                        <runOrder>alphabetical</runOrder>
+                        <includes>
+                            <include>**/*IT*</include>
+                            <include>**/*IntTest*</include>
+                        </includes>
+                        <excludes>
+                            <exclude>**/*CucumberIT*</exclude>
+                        </excludes>
+                        <argLine>@{argLine} ${test.jvm.args} -Dspring.profiles.active=${profile.test}</argLine>
+                    </configuration>
+                    <executions>
+                        <execution>
+                            <id>integration-test</id>
+                            <goals>
+                                <goal>integration-test</goal>
+                            </goals>
+                        </execution>
+                        <execution>
+                            <id>verify</id>
+                            <goals>
+                                <goal>verify</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-jar-plugin</artifactId>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-javadoc-plugin</artifactId>
+                    <configuration>
+                        <source>${maven.compiler.source}</source>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <configuration>
+                        <!-- Force alphabetical order to have a reproducible build -->
+                        <runOrder>alphabetical</runOrder>
+                        <!--
+                            `@{argLine}` is the JaCoCo agent, late-resolved. Stating it here rather
+                            than letting Surefire read the `argLine` PROPERTY is what makes room for
+                            ${test.jvm.args}: the moment this element exists, Surefire stops reading
+                            the property, and a module that needed an extra flag would silently lose
+                            coverage instead of failing.
+                        -->
+                        <argLine>@{argLine} ${test.jvm.args}</argLine>
+                        <excludes>
+                            <exclude>**/*IT*</exclude>
+                            <exclude>**/*IntTest*</exclude>
+                        </excludes>
+                        <systemPropertyVariables>
+                            <java.util.logging.config.file>src/test/resources/logback.xml</java.util.logging.config.file>
+                        </systemPropertyVariables>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-war-plugin</artifactId>
+                    <executions>
+                        <execution>
+                            <id>default-war</id>
+                            <goals>
+                                <goal>war</goal>
+                            </goals>
+                            <phase>package</phase>
+                        </execution>
+                    </executions>
+                    <configuration>
+                        <warSourceIncludes>WEB-INF/**,META-INF/**</warSourceIncludes>
+                        <failOnMissingWebXml>false</failOnMissingWebXml>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-maven-plugin</artifactId>
+                    <executions>
+                        <execution>
+                            <id>build-info</id>
+                            <goals>
+                                <goal>build-info</goal>
+                            </goals>
+                        </execution>
+                        <execution>
+                            <id>repackage</id>
+                            <goals>
+                                <goal>repackage</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                    <configuration>
+                        <mainClass>${start-class}</mainClass>
+                        <!--
+                        Enable the line below to have remote debugging of your application on port 5005
+                        <jvmArguments>-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005</jvmArguments>
+                        -->
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>com.diffplug.spotless</groupId>
+                    <artifactId>spotless-maven-plugin</artifactId>
+                    <version>${spotless-maven-plugin.version}</version>
+                    <configuration>
+                        <!--
+                            THE FORMATTER IS PRETTIER, AND .prettierrc IS THE ONLY PLACE THE
+                            STYLE IS WRITTEN DOWN (T-4.3, #37).
+
+                            Before this, spotless ran `apply` on every build with an EMPTY
+                            <java> block: it rewrote nothing, failed on nothing, and reported
+                            success. Meanwhile .prettierrc declared a Java style that no
+                            command in the repository ever ran. Two halves of a formatter,
+                            neither connected to the other.
+
+                            prettier rather than a native Spotless formatter because the code
+                            is ALREADY in this style — JHipster generated it that way. Only
+                            25 of 99 files in core had drifted. Switching to palantir or
+                            google-java-format would have rewritten every file and made
+                            `git blame` useless across the whole codebase, to settle an
+                            argument nobody was having.
+
+                            `check`, not `apply`. A formatter bound to `apply` inside the
+                            build silently edits the tree while you are reading the output,
+                            so a dirty checkout looks like your own change. `make format`
+                            is the one command that rewrites; the build only ever judges.
+                        -->
+                        <java>
+                            <includes>
+                                <include>src/main/java/**/*.java</include>
+                                <include>src/test/java/**/*.java</include>
+                            </includes>
+                            <prettier>
+                                <devDependencies>
+                                    <prettier>3.9.5</prettier>
+                                    <prettier-plugin-java>2.10.2</prettier-plugin-java>
+                                    <prettier-plugin-packagejson>3.0.2</prettier-plugin-packagejson>
+                                </devDependencies>
+<!--
+                                    NOT <configFile>.prettierrc</configFile>. Spotless's prettier
+                                    bridge does not apply that file's `overrides` section, so Java
+                                    would be formatted at tabWidth 2 instead of 4 — 87 of 99 files
+                                    "needing changes" rather than 25. It would have reindented the
+                                    whole codebase and reported success. .prettierrc-java states
+                                    the same Java values flatly, with no overrides to lose, and
+                                    explains itself at the top.
+                                -->
+                                <configFile>${maven.multiModuleProjectDirectory}/.prettierrc-java</configFile>
+                            </prettier>
+                        </java>
+                    </configuration>
+                    <executions>
+                        <execution>
+                            <id>spotless</id>
+                            <phase>validate</phase>
+                            <goals>
+                                <goal>check</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
+                <plugin>
+                    <groupId>com.google.cloud.tools</groupId>
+                    <artifactId>jib-maven-plugin</artifactId>
+                    <version>${jib-maven-plugin.version}</version>
+                    <configuration>
+                        <from>
+                            <image>${jib-maven-plugin.image}</image>
+                            <platforms>
+                                <platform>
+                                    <architecture>${jib-maven-plugin.architecture}</architecture>
+                                    <os>linux</os>
+                                </platform>
+                            </platforms>
+                        </from>
+                        <to>
+                            <image>${project.artifactId}:latest</image>
+                        </to>
+                        <container>
+                            <!--
+                                No custom entrypoint. The generated configuration ran
+                                `bash -c /entrypoint.sh` and mounted it from
+                                src/main/docker/jib, a directory that was removed with the
+                                rest of the generator in T-3.4 and is not in this repository.
+
+                                Jib builds that image quite happily. The container then dies
+                                on start with "No such file or directory", so the first sign
+                                of it is a CrashLoopBackOff in a cluster, not a build failure.
+
+                                JibSpringBootExtension writes the correct entrypoint for a
+                                Spring Boot application on its own, which is what it is for.
+                            -->
+                            <ports>
+                                <port>${service.container.port}</port>
+                            </ports>
+                            <environment>
+                                <SPRING_OUTPUT_ANSI_ENABLED>ALWAYS</SPRING_OUTPUT_ANSI_ENABLED>
+                            </environment>
+                            <!--
+                                EPOCH, not USE_CURRENT_TIMESTAMP. The generated
+                                value stamps the build time into the image config, so two
+                                builds of the same commit produce different digests and
+                                "reproducible" is false by construction (T-6.1).
+
+                                The cost is that `docker images` reports the creation date as
+                                1970, which is the conventional trade for reproducibility.
+                            -->
+                            <creationTime>EPOCH</creationTime>
+                            <user>1000</user>
+                        </container>
+                        <pluginExtensions>
+                            <pluginExtension>
+                                <implementation>com.google.cloud.tools.jib.maven.extension.springboot.JibSpringBootExtension</implementation>
+                            </pluginExtension>
+                        </pluginExtensions>
+                    </configuration>
+                    <dependencies>
+                        <dependency>
+                            <groupId>com.google.cloud.tools</groupId>
+                            <artifactId>jib-spring-boot-extension-maven</artifactId>
+                            <version>0.1.0</version>
+                        </dependency>
+                    </dependencies>
+                </plugin>
+                <plugin>
+                    <groupId>io.github.git-commit-id</groupId>
+                    <artifactId>git-commit-id-maven-plugin</artifactId>
+                    <executions>
+                        <execution>
+                            <goals>
+                                <goal>revision</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                    <configuration>
+                        <failOnNoGitDirectory>false</failOnNoGitDirectory>
+                        <failOnUnableToExtractRepoInfo>false</failOnUnableToExtractRepoInfo>
+                        <generateGitPropertiesFile>true</generateGitPropertiesFile>
+                        <includeOnlyProperties>
+                            <includeOnlyProperty>^git.commit.id.abbrev$</includeOnlyProperty>
+                            <includeOnlyProperty>^git.commit.id.describe$</includeOnlyProperty>
+                            <includeOnlyProperty>^git.branch$</includeOnlyProperty>
+                        </includeOnlyProperties>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.codehaus.mojo</groupId>
+                    <artifactId>properties-maven-plugin</artifactId>
+                    <version>${properties-maven-plugin.version}</version>
+                    <executions>
+                        <execution>
+                            <phase>initialize</phase>
+                            <goals>
+                                <goal>read-project-properties</goal>
+                            </goals>
+                            <configuration>
+                                <files>
+                                    <file>sonar-project.properties</file>
+                                </files>
+                            </configuration>
+                        </execution>
+                    </executions>
+                </plugin>
+                <plugin>
+                    <groupId>org.gaul</groupId>
+                    <artifactId>modernizer-maven-plugin</artifactId>
+                    <version>${modernizer-maven-plugin.version}</version>
+                    <executions>
+                        <execution>
+                            <id>modernizer</id>
+                            <phase>package</phase>
+                            <goals>
+                                <goal>modernizer</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                    <configuration>
+                        <javaVersion>${java.version}</javaVersion>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.jacoco</groupId>
+                    <artifactId>jacoco-maven-plugin</artifactId>
+                    <version>${jacoco-maven-plugin.version}</version>
+                    <configuration>
+                        <!--
+                            EXCLUSIONS ARE LISTED ONE BY ONE, WITH A REASON EACH (T-5.9, #172).
+
+                            The card that raises the floor also says the quiet part: excluding code
+                            is legitimate, and using it as an excuse for the number is not. So the
+                            rule here is that an entry must name code nobody would ever choose to
+                            write a test for, not code that is merely hard to reach.
+
+                            Measured before adding this, so the size of the concession is known
+                            rather than assumed. It moves the merged report from 61.4% to 64.1%
+                            instruction and 46.7% to 48.9% branch. The remaining ~16 and ~21 points
+                            to the target are tests, not exclusions.
+                        -->
+                        <excludes>
+                            <!--
+                                OpenAPI-generated DTOs. Written by the generator into
+                                target/generated-sources on every build, never edited, and asserting
+                                on a generated getter tests the generator rather than this service.
+                                227 instructions and 18 branches, none of them ours.
+                            -->
+                            <exclude>com/xenopsoftware/${project.artifactId}/service/api/dto/**</exclude>
+                        </excludes>
+                    </configuration>
+                    <executions>
+                        <execution>
+                            <id>pre-unit-tests</id>
+                            <goals>
+                                <goal>prepare-agent</goal>
+                            </goals>
+                        </execution>
+                        <execution>
+                            <!-- Ensures that the code coverage report for unit tests is created after unit tests have been run -->
+                            <id>post-unit-test</id>
+                            <phase>test</phase>
+                            <goals>
+                                <goal>report</goal>
+                            </goals>
+                        </execution>
+                        <execution>
+                            <id>pre-integration-tests</id>
+                            <goals>
+                                <goal>prepare-agent-integration</goal>
+                            </goals>
+                        </execution>
+                        <execution>
+                            <!-- Ensures that the code coverage report for integration tests is created after integration tests have been run -->
+                            <id>post-integration-tests</id>
+                            <phase>post-integration-test</phase>
+                            <goals>
+                                <goal>report-integration</goal>
+                            </goals>
+                        </execution>
+                        <!--
+                            THE GATE (T-5.2, #41).
+
+                            jacoco writes two separate exec files, so neither report is the
+                            project's coverage: jacoco.exec is unit-only and jacoco-it.exec is
+                            integration-only, and the same line covered by both counts in each.
+                            Gating on either would be gating on half the suite. These three
+                            executions merge them, report the union, and fail the build below the
+                            floor T-5.1 sets.
+                        -->
+                        <execution>
+                            <id>merge-unit-and-integration</id>
+                            <phase>post-integration-test</phase>
+                            <goals>
+                                <goal>merge</goal>
+                            </goals>
+                            <configuration>
+                                <fileSets>
+                                    <fileSet>
+                                        <directory>${project.build.directory}</directory>
+                                        <includes>
+                                            <include>jacoco.exec</include>
+                                            <include>jacoco-it.exec</include>
+                                        </includes>
+                                    </fileSet>
+                                </fileSets>
+                                <destFile>${project.build.directory}/jacoco-merged.exec</destFile>
+                            </configuration>
+                        </execution>
+                        <execution>
+                            <id>merged-report</id>
+                            <phase>post-integration-test</phase>
+                            <goals>
+                                <goal>report</goal>
+                            </goals>
+                            <configuration>
+                                <dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
+                                <outputDirectory>${project.build.directory}/site/jacoco-merged</outputDirectory>
+                            </configuration>
+                        </execution>
+                        <execution>
+                            <id>coverage-gate</id>
+                            <phase>verify</phase>
+                            <goals>
+                                <goal>check</goal>
+                            </goals>
+                            <configuration>
+                                <dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
+                                <rules>
+                                    <rule>
+                                        <!--
+                                            BUNDLE, not CLASS. A per-class floor forces tests onto
+                                            records, DTOs and configuration holders; a module floor
+                                            leaves judgement where it belongs and still fails if a
+                                            substantial untested feature lands.
+                                        -->
+                                        <element>BUNDLE</element>
+                                        <limits>
+                                            <limit>
+                                                <counter>INSTRUCTION</counter>
+                                                <value>COVEREDRATIO</value>
+                                                <minimum>${jacoco.minimum.instruction}</minimum>
+                                            </limit>
+                                            <limit>
+                                                <!--
+                                                    Stated separately and lower than instruction on
+                                                    purpose. Instruction coverage inflates on a
+                                                    single happy path; branch coverage is what
+                                                    notices the error path was never taken, and
+                                                    error paths are where this project's defects
+                                                    have been.
+                                                -->
+                                                <counter>BRANCH</counter>
+                                                <value>COVEREDRATIO</value>
+                                                <minimum>${jacoco.minimum.branch}</minimum>
+                                            </limit>
+                                        </limits>
+                                    </rule>
+                                </rules>
+                            </configuration>
+                        </execution>
+                    </executions>
+                </plugin>
+
+                <plugin>
+                    <groupId>org.openapitools</groupId>
+                    <artifactId>openapi-generator-maven-plugin</artifactId>
+                    <version>${openapi-generator-maven-plugin.version}</version>
+                    <executions>
+                        <execution>
+                            <goals>
+                                <goal>generate</goal>
+                            </goals>
+                            <configuration>
+                                <inputSpec>${project.basedir}/src/main/resources/swagger/api.yml</inputSpec>
+                                <generatorName>spring</generatorName>
+                                <apiPackage>com.xenopsoftware.${project.artifactId}.web.api</apiPackage>
+                                <modelPackage>com.xenopsoftware.${project.artifactId}.service.api.dto</modelPackage>
+                                <supportingFilesToGenerate>ApiUtil.java</supportingFilesToGenerate>
+                                <skipValidateSpec>false</skipValidateSpec>
+                                <configOptions>
+                                    <reactive>${openapi.generator.reactive}</reactive>
+                                    <delegatePattern>true</delegatePattern>
+                                    <title>${project.artifactId}</title>
+                                    <useSpringBoot3>true</useSpringBoot3>
+                                </configOptions>
+                            </configuration>
+                        </execution>
+                    </executions>
+                </plugin>
+                <plugin>
+                    <groupId>org.sonarsource.scanner.maven</groupId>
+                    <artifactId>sonar-maven-plugin</artifactId>
+                    <version>${sonar-maven-plugin.version}</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>    </build>
+
+    <profiles>
+        <profile>
+            <id>api-docs</id>
+            <properties>
+                <profile.api-docs>,api-docs</profile.api-docs>
+            </properties>
+        </profile>
+        <profile>
+            <id>dev</id>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
+            <properties>
+                <!-- default Spring profiles -->
+                <profile.test>test,testdev</profile.test>
+                <spring.profiles.active>dev${profile.tls}</spring.profiles.active>
+            </properties>
+            <dependencies>
+                <dependency>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-devtools</artifactId>
+                    <optional>true</optional>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
+            <id>docker-compose</id>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
+            <dependencies>
+                <dependency>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-docker-compose</artifactId>
+                    <optional>true</optional>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
+            <!-- This is automatically activated when working in Eclipse -->
+            <id>eclipse</id>
+            <activation>
+                <property>
+                    <name>m2e.version</name>
+                </property>
+            </activation>
+            <build>
+                <pluginManagement>
+                    <plugins>
+                        <!--
+                            This plugin's configuration is used to store Eclipse m2e settings only.
+                            It has no influence on the Maven build itself.
+                            Remove when the m2e plugin can correctly bind to Maven lifecycle
+                        -->
+                        <plugin>
+                            <groupId>org.eclipse.m2e</groupId>
+                            <artifactId>lifecycle-mapping</artifactId>
+                            <version>${lifecycle-mapping.version}</version>
+                            <configuration>
+                                <lifecycleMappingMetadata>
+                                    <pluginExecutions>
+                                        <pluginExecution>
+                                            <pluginExecutionFilter>
+                                                <groupId>org.jacoco</groupId>
+                                                <artifactId>jacoco-maven-plugin</artifactId>
+                                                <versionRange>${jacoco-maven-plugin.version}</versionRange>
+                                                <goals>
+                                                    <goal>prepare-agent</goal>
+                                                </goals>
+                                            </pluginExecutionFilter>
+                                            <action>
+                                                <ignore/>
+                                            </action>
+                                        </pluginExecution>
+                                        <pluginExecution>
+                                            <pluginExecutionFilter>
+                                                <groupId>org.openapitools</groupId>
+                                                <artifactId>openapi-generator-maven-plugin</artifactId>
+                                                <versionRange>${openapi-generator-maven-plugin.version}</versionRange>
+                                                <goals>
+                                                    <goal>generate</goal>
+                                                </goals>
+                                            </pluginExecutionFilter>
+                                            <action>
+                                                <ignore/>
+                                            </action>
+                                        </pluginExecution>
+                                    </pluginExecutions>
+                                </lifecycleMappingMetadata>
+                            </configuration>
+                        </plugin>
+                    </plugins>
+                </pluginManagement>
+            </build>
+        </profile>
+        <profile>
+            <!--
+                Profile for applying IDE-specific configuration.
+                At the moment it configures MapStruct and Hibernate JPA Metamodel Generator, which you need when working
+                with DTOs and entity filtering.
+            -->
+            <id>IDE</id>
+            <dependencies>
+                <dependency>
+                    <groupId>org.hibernate.orm</groupId>
+                    <artifactId>hibernate-processor</artifactId>
+                </dependency>
+                <dependency>
+                    <groupId>org.mapstruct</groupId>
+                    <artifactId>mapstruct-processor</artifactId>
+                    <version>${mapstruct.version}</version>
+                </dependency>
+            </dependencies>
+        </profile>
+
+        <profile>
+            <id>prod</id>
+            <properties>
+                <!-- default Spring profiles -->
+                <profile.test>test,testprod</profile.test>
+                <spring.profiles.active>prod${profile.api-docs}${profile.tls}${profile.e2e}</spring.profiles.active>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-clean-plugin</artifactId>
+                        <configuration>
+                            <filesets>
+                                <fileset>
+                                    <directory>target/classes/static/</directory>
+                                </fileset>
+                            </filesets>
+                        </configuration>
+                    </plugin>
+                    <plugin>
+                        <groupId>io.github.git-commit-id</groupId>
+                        <artifactId>git-commit-id-maven-plugin</artifactId>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <id>tls</id>
+            <properties>
+                <profile.tls>,tls</profile.tls>
+            </properties>
+        </profile>
+        <profile>
+            <id>war</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-war-plugin</artifactId>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+</project>

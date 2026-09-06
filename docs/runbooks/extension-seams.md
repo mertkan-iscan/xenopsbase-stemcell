@@ -3,6 +3,28 @@
 Four hooks that are cheap now and expensive later. None of them carry business semantics — they
 are shapes, not decisions.
 
+**Where they live, since ADR-0017.** All four moved out of `core` and into the shared modules, so a
+service gets them by depending on a library rather than by copying a package:
+
+| Seam | Module | Package |
+|---|---|---|
+| Audit | `platform-common-web` | `com.xenopsoftware.common.domain`, `...common.config.audit` |
+| Soft delete | the service's own domain | (a shape, not a class) |
+| Multi-tenancy | `platform-common-web` | `com.xenopsoftware.common.tenancy` |
+| Transactional outbox | `platform-common` | `com.xenopsoftware.common.outbox` |
+
+The outbox is in the stack-neutral module and the other two are servlet-side, which is the same
+split the rest of ADR-0017 describes: the outbox never names a request, and a tenant filter cannot
+avoid it.
+
+**None of these are component-scanned any more.** They are contributed by auto-configuration
+(`OutboxAutoConfiguration`, `PlatformWebAutoConfiguration`), because `com.xenopsoftware.common` is
+outside every service's scan root and a `@Component` that scanning does not find produces no error
+— only an absent bean. `PlatformCommonBeansExistIT` in each service is what turns that into a
+failure. A service that persists must also name the shared modules in its `@EntityScan` and
+`@EnableJpaRepositories`; see `DatabaseConfiguration` in `core` for the one line and why the
+libraries cannot declare it themselves.
+
 The reason a template carries them at all: adding audit columns to a populated table means deciding
 what `created_by` holds for a million rows nobody recorded. Adding soft delete after code has been
 written against hard delete means auditing every query. Adding a tenant column after go-live means

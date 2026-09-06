@@ -59,7 +59,7 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 @SpringBootTest(
     classes = {
         GatewayApp.class,
-        com.xenopsoftware.gateway.config.JacksonConfiguration.class,
+        com.xenopsoftware.common.config.JacksonConfiguration.class,
         AsyncSyncConfiguration.class,
         RealClientRegistrationConfiguration.class,
     }

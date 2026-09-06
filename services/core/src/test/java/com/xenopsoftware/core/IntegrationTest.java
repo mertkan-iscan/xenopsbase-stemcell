@@ -1,8 +1,8 @@
 package com.xenopsoftware.core;
 
+import com.xenopsoftware.common.config.JacksonConfiguration;
 import com.xenopsoftware.core.config.AsyncSyncConfiguration;
 import com.xenopsoftware.core.config.DatabaseTestcontainer;
-import com.xenopsoftware.core.config.JacksonConfiguration;
 import com.xenopsoftware.core.config.TestSecurityConfiguration;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;

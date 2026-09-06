@@ -40,6 +40,23 @@ permissions:
   contents: read
 
 jobs:
+  modules:
+    name: service list
+    runs-on: ubuntu-latest
+    outputs:
+      # Derived from services/pom.xml rather than typed here. See
+      # infra/scripts/service-modules.sh: a list of services that has to be edited
+      # by hand is a list that gets missed, and a workflow that never builds a
+      # service is a green workflow (ADR-0017).
+      matrix: ${{ steps.modules.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - id: modules
+        run: |
+          matrix="$(bash infra/scripts/service-modules.sh --json)"
+          echo "services: ${matrix}"
+          echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
+
   analyze:
     name: CodeQL (${{ matrix.service }})
     runs-on: ubuntu-latest
@@ -48,10 +65,11 @@ jobs:
       # Writes the findings to the Security tab. Without this the analysis runs
       # and the results go nowhere.
       security-events: write
+    needs: modules
     strategy:
       fail-fast: false
       matrix:
-        service: [core, gateway]
+        service: ${{ fromJSON(needs.modules.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -61,7 +79,9 @@ jobs:
           java-version: '25'
           distribution: corretto
           cache: maven
-          cache-dependency-path: services/${{ matrix.service }}/pom.xml
+          cache-dependency-path: |
+            services/pom.xml
+            services/${{ matrix.service }}/pom.xml
 
       - name: Initialise CodeQL
         uses: github/codeql-action/init@42947a340483f03ba47bb1a039b2c519aab3df85 # v3.37.8
@@ -74,8 +94,10 @@ jobs:
           queries: security-extended
 
       - name: Build ${{ matrix.service }}
-        working-directory: services/${{ matrix.service }}
-        run: ./mvnw --batch-mode clean compile -DskipTests
+      # From services/, not services/<service>: since ADR-0017 a module cannot
+      # resolve platform-common until the reactor has built it.
+        working-directory: services
+        run: ./mvnw --batch-mode clean compile -pl ${{ matrix.service }} -am -DskipTests
 
       - name: Analyse
         uses: github/codeql-action/analyze@42947a340483f03ba47bb1a039b2c519aab3df85 # v3.37.8

@@ -1,7 +1,7 @@
 package com.xenopsoftware.gateway;
 
+import com.xenopsoftware.common.config.CRLFLogConverter;
 import com.xenopsoftware.gateway.config.ApplicationProperties;
-import com.xenopsoftware.gateway.config.CRLFLogConverter;
 import jakarta.annotation.PostConstruct;
 import java.net.InetAddress;
 import java.net.UnknownHostException;

@@ -109,7 +109,7 @@ class FlywayMigrationIT {
 
     /** Versions parsed from the committed {@code V<n>__name.sql} files. */
     private static List<String> committedMigrationVersions() {
-        Path migrations = repositoryRoot().resolve("services/core/src/main/resources/db/migration");
+        Path migrations = repositoryRoot().resolve("services/core/src/main/resources/db/migration/core");
         try (Stream<Path> files = Files.list(migrations)) {
             return files
                 .map(path -> path.getFileName().toString())

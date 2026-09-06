@@ -12,7 +12,7 @@ The list below is derived from the repository rather than remembered: every coun
 
 | What | Where | Occurrences |
 |---|---|---|
-| Java package `com.xenopsoftware.*` | `services/*/src` | 192 files |
+| Java package `com.xenopsoftware.*` | `services/*/src`, across all four modules | 192 files |
 | Domain `xenopsoftware.com` | hostnames, realm, edge module, docs | 219 files |
 | Resource prefix `xenopsbase` | buckets, cluster name, Keycloak realm, tfvars | 85 files |
 | GitHub owner and repo `mertkan-iscan/xenopsbase-stemcell` | image paths, Argo `repoURL`, docs | 28 files |
@@ -54,6 +54,28 @@ find services -type d -path '*/com/xenopsoftware' | while read -r d; do
 done
 ```
 
+**This now spans four source trees, not two** — `platform-common`, `platform-common-web`, `gateway`
+and `core` (ADR-0017). The `find` above walks all of them, which is why it is a find rather than a
+list of directories.
+
+**Three things outside `src` name the package and are missed by a rename that only walks source:**
+
+```bash
+# Both AutoConfiguration.imports files list fully-qualified class names, and Boot
+# reads them as strings -- a stale name there is not a compile error, it is a
+# module that silently contributes no beans.
+services/platform-common*/src/main/resources/META-INF/spring/*.imports
+
+# Both logback-spring.xml files name the CRLF converter class the same way.
+services/*/src/main/resources/logback-spring.xml
+
+# The <groupId> of the two shared modules, and the dependency entries that
+# reference them.
+services/pom.xml services/*/pom.xml
+```
+
+The first is the one to be careful with. The other two fail loudly.
+
 Then check nothing was missed, because a stale package name compiles fine until Spring cannot find
 a bean:
 
@@ -62,7 +84,9 @@ git grep -n 'xenopsoftware' -- services | grep -v '\.md:'
 ```
 
 The ArchUnit rules in `TechnicalStructureTest` are written against the package root, so a partial
-rename fails there rather than at runtime — which is the good outcome.
+rename fails there rather than at runtime — which is the good outcome. So is
+`PlatformCommonBeansExistIT` in each service: it asserts the shared beans are actually present,
+which is exactly what a half-renamed `AutoConfiguration.imports` breaks.
 
 ## Step 2 — rename the resource prefix
 

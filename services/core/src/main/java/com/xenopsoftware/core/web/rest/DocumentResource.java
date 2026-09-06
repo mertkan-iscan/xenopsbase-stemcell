@@ -1,8 +1,8 @@
 package com.xenopsoftware.core.web.rest;
 
-import com.xenopsoftware.core.config.ConditionalOnDocumentStorage;
+import com.xenopsoftware.common.security.SecurityUtils;
+import com.xenopsoftware.common.storage.ConditionalOnObjectStore;
 import com.xenopsoftware.core.domain.Document;
-import com.xenopsoftware.core.security.SecurityUtils;
 import com.xenopsoftware.core.service.DocumentService;
 import com.xenopsoftware.core.service.dto.CachedDocumentPage;
 import jakarta.validation.Valid;
@@ -54,7 +54,7 @@ import tech.jhipster.web.util.PaginationUtil;
  */
 @RestController
 @RequestMapping("/api/documents")
-@ConditionalOnDocumentStorage
+@ConditionalOnObjectStore
 public class DocumentResource {
 
     /** The largest page this API will serve, whatever the client asks for. */

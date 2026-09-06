@@ -1,5 +1,6 @@
 package com.xenopsoftware.gateway.web.filter;
 
+import com.xenopsoftware.common.correlation.CorrelationId;
 import com.xenopsoftware.gateway.IntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

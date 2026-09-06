@@ -30,6 +30,10 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       services: ${{ steps.filter.outputs.services }}
+      # The matrix, derived rather than typed. See infra/scripts/service-modules.sh:
+      # services/pom.xml's <modules> is the list Maven itself uses, so it cannot be
+      # stale without the build breaking, and adding a service needs no edit here.
+      matrix: ${{ steps.modules.outputs.matrix }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -37,6 +41,13 @@ jobs:
           # has the head and not the base, and `git diff` against a commit it
           # does not have fails — which would skip every build.
           fetch-depth: 0
+
+      - name: Derive the service list from services/pom.xml
+        id: modules
+        run: |
+          matrix="$(bash infra/scripts/service-modules.sh --json)"
+          echo "services: ${matrix}"
+          echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
 
       - name: Decide whether anything relevant changed
         id: filter
@@ -82,7 +93,7 @@ jobs:
       # failure in one is frequently a failure in both.
       fail-fast: false
       matrix:
-        service: [core, gateway]
+        service: ${{ fromJSON(needs.changes.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -106,7 +117,9 @@ jobs:
           # Spring Boot dependency tree anyway. Caching that always hits and
           # rarely helps is worse than none, because the hit is what stops
           # anyone looking.
-          cache-dependency-path: services/${{ matrix.service }}/pom.xml
+          cache-dependency-path: |
+            services/pom.xml
+            services/${{ matrix.service }}/pom.xml
 
       # Integration tests use Testcontainers, which needs a working Docker daemon. Ubuntu runners
       # have one; this fails loudly if that ever stops being true, rather than every IT erroring
@@ -114,9 +127,13 @@ jobs:
       - name: Check Docker is available
         run: docker info > /dev/null
 
+      # From services/, not services/<service>: since ADR-0017 a module cannot
+      # resolve platform-common until the reactor has built it. `-am` builds this
+      # module and what it depends on, so the shared libraries' own tests and
+      # coverage floors are enforced here too.
       - name: Build and test
-        working-directory: services/${{ matrix.service }}
-        run: ./mvnw --batch-mode clean verify -DskipITs=false
+        working-directory: services
+        run: ./mvnw --batch-mode clean verify -pl ${{ matrix.service }} -am -DskipITs=false
 
       # WHAT THE COVERAGE GATE DOES NOT TELL ANYONE (T-5.9, #172).
       #
@@ -133,9 +150,9 @@ jobs:
       # otherwise be skipped.
       - name: Report merged coverage
         if: always()
-        working-directory: services/${{ matrix.service }}
+        working-directory: services
         run: |
-          report=target/site/jacoco-merged/jacoco.csv
+          report=${{ matrix.service }}/target/site/jacoco-merged/jacoco.csv
           if [ ! -f "$report" ]; then
             echo "No merged coverage report at $report -- the build failed before it was written." \
               | tee -a "$GITHUB_STEP_SUMMARY"
@@ -252,7 +269,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [core, gateway]
+        service: ${{ fromJSON(needs.changes.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -264,7 +281,9 @@ jobs:
           cache: maven
           # Scoped to this service, so the publish job reuses the cache its own
           # build job populated rather than another job's.
-          cache-dependency-path: services/${{ matrix.service }}/pom.xml
+          cache-dependency-path: |
+            services/pom.xml
+            services/${{ matrix.service }}/pom.xml
 
       # Jib talks to the registry directly and never builds a local image, so
       # there is no docker build, no daemon, and no Dockerfile to keep in step
@@ -274,9 +293,9 @@ jobs:
       # places is a version that will eventually be wrong in one of them.
       - name: Read the project version
         id: version
-        working-directory: services/${{ matrix.service }}
+        working-directory: services
         run: |
-          version="$(./mvnw --batch-mode --quiet -DforceStdout help:evaluate -Dexpression=project.version | tail -1 | tr -d '[:space:]')"
+          version="$(./mvnw --batch-mode --quiet -pl ${{ matrix.service }} -DforceStdout help:evaluate -Dexpression=project.version | tail -1 | tr -d '[:space:]')"
           case "$version" in
             ''|*[!0-9A-Za-z._-]*)
               echo "::error::project.version is empty or not usable as an image tag: '$version'"
@@ -287,9 +306,9 @@ jobs:
           echo "project version: $version"
 
       - name: Build and push to GHCR
-        working-directory: services/${{ matrix.service }}
+        working-directory: services
         run: |
-          ./mvnw --batch-mode -DskipTests package jib:build             -Djib.to.image=ghcr.io/${{ github.repository }}/${{ matrix.service }}             -Djib.to.tags=${{ github.sha }},${{ steps.version.outputs.version }},main             -Djib.to.auth.username=${{ github.actor }}             -Djib.to.auth.password=${{ secrets.GITHUB_TOKEN }}
+          ./mvnw --batch-mode -DskipTests package jib:build -pl ${{ matrix.service }} -am             -Djib.to.image=ghcr.io/${{ github.repository }}/${{ matrix.service }}             -Djib.to.tags=${{ github.sha }},${{ steps.version.outputs.version }},main             -Djib.to.auth.username=${{ github.actor }}             -Djib.to.auth.password=${{ secrets.GITHUB_TOKEN }}
 
       # THE DIGEST IS THE SUBJECT OF EVERYTHING BELOW.
       #
@@ -299,9 +318,9 @@ jobs:
       # signed, attested, and later verified.
       - name: Resolve the pushed digest
         id: digest
-        working-directory: services/${{ matrix.service }}
+        working-directory: services
         run: |
-          digest="$(cat target/jib-image.digest)"
+          digest="$(cat ${{ matrix.service }}/target/jib-image.digest)"
           case "$digest" in
             sha256:*) ;;
             *)
@@ -426,7 +445,6 @@ jobs:
       # immutable reference for a deployment is the digest, not either tag:
       # `main` moves, and even a commit tag can be overwritten by a re-run.
       - name: Report the digest
-        working-directory: services/${{ matrix.service }}
         run: |
           echo "### ${{ matrix.service }}" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"

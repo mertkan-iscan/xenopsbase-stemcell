@@ -55,13 +55,13 @@ echo "Tool versions, against what the repository declares:"
 # container, and it is exactly what infra/scripts/java-home.sh was written for
 # after a machine had Java 8 first on PATH -- so reporting "1" there would be a
 # confusing answer to a question somebody is already confused by.
-JAVA_DECLARED="$(sed -n 's|.*<java.version>\([0-9]*\)</java.version>.*|\1|p' services/core/pom.xml | head -1)"
+JAVA_DECLARED="$(sed -n 's|.*<java.version>\([0-9]*\)</java.version>.*|\1|p' services/pom.xml | head -1)"
 JAVA_RAW="$(java -version 2>&1 | sed -n '1s/.*version "\([0-9._]*\).*/\1/p')"
 case "$JAVA_RAW" in
 1.*) JAVA_INSTALLED="$(echo "$JAVA_RAW" | cut -d. -f2)" ;;
 *) JAVA_INSTALLED="${JAVA_RAW%%.*}" ;;
 esac
-check "JDK" "$JAVA_DECLARED" "$JAVA_INSTALLED" "services/core/pom.xml"
+check "JDK" "$JAVA_DECLARED" "$JAVA_INSTALLED" "services/pom.xml"
 
 # --------------------------------------------------------------------------
 # Node. engines.node is a MINIMUM (">=24.18.0"), so this compares the major and

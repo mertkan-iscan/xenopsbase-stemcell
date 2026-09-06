@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    The servlet half of what every MVC service shares (ADR-0017).
+
+    Everything in here names a request: OncePerRequestFilter, HttpServletRequest,
+    SecurityContextHolder, a ResponseEntityExceptionHandler. None of it is wrong
+    — it is what every service except the gateway runs — and none of it can be
+    on the gateway's classpath, which is why it is a separate artifact rather
+    than a package.
+
+    WHAT DECIDES WHICH MODULE A CLASS GOES IN. Not "is it shared" — both of
+    these are shared. The question is whether the class can be written without
+    naming a servlet request. CorrelationId can (it is four constants and a
+    validator), so it is next door and the gateway reads the header name from
+    it. CorrelationIdFilter cannot, so it is here, and the gateway has a
+    WebFilter that binds the same value from the same header.
+
+    The duplication that leaves is deliberate and bounded: two filters, one per
+    stack, agreeing on one constant in one place. The alternative was one
+    filter and a gateway that does not start.
+
+    A servlet service depends on THIS module and gets `platform-common`
+    transitively. Nothing depends on `platform-common` alone except the gateway.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.xenopsoftware</groupId>
+        <artifactId>services</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>platform-common-web</artifactId>
+    <name>Platform common (servlet)</name>
+    <description>The request-scoped half: filters, errors, auditing, tenancy, idempotency</description>
+
+    <properties>
+        <!-- Measured, not copied. See platform-common's pom for why a library floor differs. -->
+        <jacoco.minimum.instruction>0.49</jacoco.minimum.instruction>
+        <jacoco.minimum.branch>0.62</jacoco.minimum.branch>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.xenopsoftware</groupId>
+            <artifactId>platform-common</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-jackson2</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-data</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>tech.jhipster</groupId>
+            <artifactId>jhipster-framework</artifactId>
+        </dependency>
+        <!-- ExceptionTranslator's string handling. Version managed by Boot. -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
+        </dependency>
+
+        <!--
+            Persistence, optional for the same reason it is optional next door:
+            the idempotency record, the auditing superclass and the audit log
+            writer are for services that persist, and a service that does not
+            must not inherit Hibernate by depending on this library. The beans
+            that need it are behind @ConditionalOnBean(EntityManagerFactory) in
+            PlatformWebAutoConfiguration, so "no database" means "no idempotency
+            filter" rather than "context fails to start".
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!--
+            SecurityUtilsUnitTest builds an OAuth2AuthenticationToken, which is
+            a CLIENT type. The production code here is resource-server only, so
+            this is test scope rather than a widening of what this module ships.
+        -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-oauth2-client</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jackson-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+                NOT AN IMAGE, NOT AN EXECUTABLE ARCHIVE. This module is a library
+                every service depends on; it has no main class and nothing to run.
+
+                Skipped explicitly rather than simply left out of the parent's
+                <plugins> list, because `mvn ... jib:build` names the goal on the
+                command line and Maven then runs it against every module in the
+                reactor — including this one, where it fails on a missing
+                mainClass and reads as "the plugin is misconfigured" rather than
+                "this module is a library".
+            -->
+            <plugin>
+                <groupId>com.google.cloud.tools</groupId>
+                <artifactId>jib-maven-plugin</artifactId>
+                <configuration>
+                    <skip>true</skip>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <skip>true</skip>
+                </configuration>
+            </plugin>
+            <!--
+                THE MIRROR OF platform-common's RULE, POINTING THE OTHER WAY.
+
+                Nothing reactive may reach this module, because a module every
+                servlet service depends on has no business carrying Reactor —
+                and, more practically, because the presence of both stacks is
+                what makes Boot's application-type resolution ambiguous. The
+                gateway's own mirror rule, banning THIS artifact, is in its pom.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>enforce-no-reactive-stack</id>
+                        <goals><goal>enforce</goal></goals>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <searchTransitive>true</searchTransitive>
+                                    <excludes>
+                                        <exclude>org.springframework.boot:spring-boot-starter-webflux</exclude>
+                                        <exclude>org.springframework:spring-webflux</exclude>
+                                    </excludes>
+                                    <message>
+                                        platform-common-web is the servlet half (ADR-0017). Anything
+                                        both stacks need belongs in platform-common; anything only
+                                        the gateway needs belongs in the gateway.
+                                    </message>
+                                </bannedDependencies>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -1,11 +1,12 @@
 package com.xenopsoftware.core.service;
 
+import com.xenopsoftware.common.storage.ConditionalOnObjectStore;
+import com.xenopsoftware.common.storage.ObjectStore;
+import com.xenopsoftware.common.storage.ObjectStoreProperties;
 import com.xenopsoftware.core.config.ApplicationProperties;
-import com.xenopsoftware.core.config.ConditionalOnDocumentStorage;
 import com.xenopsoftware.core.domain.Document;
 import com.xenopsoftware.core.repository.DocumentRepository;
 import com.xenopsoftware.core.service.dto.CachedDocumentPage;
-import com.xenopsoftware.core.service.storage.DocumentStorage;
 import java.net.URI;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -47,7 +48,7 @@ import org.springframework.transaction.annotation.Transactional;
  * upload produce unreferenced data that nothing can find, delete, or account for.
  */
 @Service
-@ConditionalOnDocumentStorage
+@ConditionalOnObjectStore
 public class DocumentService {
 
     private static final Logger LOG = LoggerFactory.getLogger(DocumentService.class);
@@ -56,14 +57,14 @@ public class DocumentService {
     private static final DateTimeFormatter KEY_PREFIX = DateTimeFormatter.ofPattern("yyyy/MM").withZone(ZoneOffset.UTC);
 
     private final DocumentRepository repository;
-    private final DocumentStorage storage;
-    private final ApplicationProperties.Storage settings;
+    private final ObjectStore storage;
+    private final ObjectStoreProperties settings;
     private final ApplicationEventPublisher events;
     private final SingleFlight singleFlight;
 
     public DocumentService(
         DocumentRepository repository,
-        DocumentStorage storage,
+        ObjectStore storage,
         ApplicationProperties properties,
         ApplicationEventPublisher events,
         SingleFlight singleFlight
@@ -125,7 +126,7 @@ public class DocumentService {
 
         // The only source of truth about whether bytes exist is the store. A client saying it is
         // done proves nothing, because that is what a client would say either way.
-        DocumentStorage.StoredObject stored = storage.stat(document.getObjectKey()).orElse(null);
+        ObjectStore.StoredObject stored = storage.stat(document.getObjectKey()).orElse(null);
         if (stored == null) {
             LOG.warn("Completion requested for document {} but object {} is absent", id, document.getObjectKey());
             return Optional.empty();

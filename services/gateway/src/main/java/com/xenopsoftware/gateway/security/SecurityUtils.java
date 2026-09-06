@@ -1,5 +1,6 @@
 package com.xenopsoftware.gateway.security;
 
+import com.xenopsoftware.common.security.AuthoritiesConstants;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;

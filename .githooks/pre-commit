@@ -44,20 +44,19 @@ fi
 # 2. Formatting, only when Java is actually staged. Starting Maven for a
 #    documentation commit is how a hook earns the reputation that makes people
 #    reach for --no-verify by reflex.
+#    One reactor pass rather than a loop over module names (ADR-0017): the
+#    module list is derived, and a hardcoded loop would have silently stopped
+#    checking the two shared modules the day they were added.
 java_staged="$(git diff --cached --name-only --diff-filter=ACM -- '*.java' || true)"
-if [ -n "$java_staged" ]; then
-  for m in core gateway; do
-    if echo "$java_staged" | grep -q "^services/$m/"; then
-      printf 'pre-commit: formatting services/%s ... ' "$m"
-      if ( cd "services/$m" && ./mvnw -q --offline --batch-mode spotless:check >/dev/null 2>&1 ); then
-        echo "ok"
-      else
-        echo "VIOLATIONS"
-        echo "           run: make format"
-        fail=1
-      fi
-    fi
-  done
+if echo "$java_staged" | grep -q '^services/'; then
+  printf 'pre-commit: formatting services ... '
+  if ( cd services && ./mvnw -q --offline --batch-mode spotless:check >/dev/null 2>&1 ); then
+    echo "ok"
+  else
+    echo "VIOLATIONS"
+    echo "           run: make format"
+    fail=1
+  fi
 fi
 
 if [ "$fail" -ne 0 ]; then

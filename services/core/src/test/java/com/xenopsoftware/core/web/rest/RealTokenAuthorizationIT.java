@@ -4,10 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.xenopsoftware.common.config.JacksonConfiguration;
 import com.xenopsoftware.core.CoreApp;
 import com.xenopsoftware.core.config.AsyncSyncConfiguration;
 import com.xenopsoftware.core.config.DatabaseTestcontainer;
-import com.xenopsoftware.core.config.JacksonConfiguration;
 import com.xenopsoftware.core.config.KeycloakTestcontainer;
 import com.xenopsoftware.core.config.ObjectStorageTestcontainer;
 import java.net.URI;

@@ -68,3 +68,4 @@ than a clean file that hides the fact a mistake was ever made.
 | [0014](0014-provisioning-and-platform-are-separate-phases.md) | Provisioning the cluster and bootstrapping the platform are separate phases | Accepted |
 | [0015](0015-kube-hetzner-stays.md) | The cluster stays on kube-hetzner, as a hybrid with a chosen boundary | Accepted |
 | [0016](0016-threat-model.md) | The threat model is six boundaries, and every mitigation names a task or is an accepted risk | Accepted |
+| [0017](0017-shared-service-modules.md) | Services share a parent pom and two libraries, split by web stack rather than by topic | Accepted |

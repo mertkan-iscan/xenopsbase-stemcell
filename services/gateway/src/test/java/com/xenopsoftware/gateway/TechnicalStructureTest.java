@@ -35,7 +35,7 @@ class TechnicalStructureTest {
 
         .ignoreDependency(belongToAnyOf(GatewayApp.class), alwaysTrue())
         .ignoreDependency(alwaysTrue(), belongToAnyOf(
-            com.xenopsoftware.gateway.config.Constants.class,
+            com.xenopsoftware.common.config.Constants.class,
             com.xenopsoftware.gateway.config.ApplicationProperties.class
         ));
 }
