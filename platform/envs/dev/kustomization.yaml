@@ -25,6 +25,7 @@ resources:
   - apps/barman-cloud-plugin.yaml
   - apps/postgres.yaml
   - apps/valkey.yaml
+  - apps/nats.yaml
   - apps/keycloak-operator.yaml
   - apps/keycloak.yaml
   - apps/kube-prometheus-stack.yaml

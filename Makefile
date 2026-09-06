@@ -718,6 +718,13 @@ connection-budget: ## Do the HPA ceiling, the pools and max_connections add up? 
 resource-audit: ## What each namespace BOOKS against what it USES, read from the cluster (T-2.26)
 	@KUBECONFIG="$(CURDIR)/infra/terraform/cluster/kubeconfig" python infra/scripts/resource-audit.py $(ARGS)
 
+.PHONY: verify-apps-wired
+verify-apps-wired: ## Is every Argo CD Application actually deployed by its environment? (T-9.7)
+	@# kustomize deploys its `resources:` list, not the directory. An Application
+	@# that is committed and unlisted runs nowhere, with everything reporting
+	@# Synced and Healthy.
+	@bash $(SCRIPTS)/verify-apps-wired.sh
+
 .PHONY: verify-alert-runbooks
 verify-alert-runbooks: ## Does every alert link to a runbook section that exists? (T-7.6)
 	@bash $(SCRIPTS)/verify-alert-runbooks.sh
