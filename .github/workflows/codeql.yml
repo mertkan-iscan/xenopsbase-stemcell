@@ -50,7 +50,7 @@ jobs:
       # service is a green workflow (ADR-0017).
       matrix: ${{ steps.modules.outputs.matrix }}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: modules
         run: |
           matrix="$(bash infra/scripts/service-modules.sh --json)"
@@ -72,9 +72,9 @@ jobs:
         service: ${{ fromJSON(needs.modules.outputs.matrix) }}
 
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
         with:
           java-version: '25'
           distribution: corretto
@@ -84,7 +84,7 @@ jobs:
             services/${{ matrix.service }}/pom.xml
 
       - name: Initialise CodeQL
-        uses: github/codeql-action/init@42947a340483f03ba47bb1a039b2c519aab3df85 # v3.37.8
+        uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           languages: java-kotlin
           build-mode: manual
@@ -100,6 +100,6 @@ jobs:
         run: ./mvnw --batch-mode clean compile -pl ${{ matrix.service }} -am -DskipTests
 
       - name: Analyse
-        uses: github/codeql-action/analyze@42947a340483f03ba47bb1a039b2c519aab3df85 # v3.37.8
+        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           category: /language:java-kotlin/service:${{ matrix.service }}
