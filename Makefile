@@ -718,6 +718,13 @@ connection-budget: ## Do the HPA ceiling, the pools and max_connections add up? 
 resource-audit: ## What each namespace BOOKS against what it USES, read from the cluster (T-2.26)
 	@KUBECONFIG="$(CURDIR)/infra/terraform/cluster/kubeconfig" python infra/scripts/resource-audit.py $(ARGS)
 
+.PHONY: verify-realm-limits
+verify-realm-limits: ## Do the realm imports fit Keycloak's own columns? (T-9.12)
+	@# An over-long role description crashes the import job rather than
+	@# truncating -- and a crashed import cannot recreate a realm that was
+	@# deleted in order to apply the change.
+	@bash $(SCRIPTS)/verify-realm-limits.sh
+
 .PHONY: verify-apps-wired
 verify-apps-wired: ## Is every Argo CD Application actually deployed by its environment? (T-9.7)
 	@# kustomize deploys its `resources:` list, not the directory. An Application

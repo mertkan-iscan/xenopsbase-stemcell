@@ -69,7 +69,7 @@ spec:
           },
           {
             "name": "svc-caller",
-            "description": "May make inter-service calls. The GATE, separate from the `svc` claim that says WHICH service is calling -- a claim mapper is a per-client detail nobody reviews, a role is a grant somebody makes and can take away. Same name and meaning as the xenopsbase realm's (T-9.12)."
+            "description": "May make inter-service calls. The gate; the `svc` claim says which service (T-9.12)."
           }
         ]
       },
