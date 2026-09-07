@@ -65,7 +65,7 @@ jobs:
     env:
       ENVIRONMENT: ${{ inputs.environment || 'dev' }}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Before joining anything. If there is no cluster there is nothing to
       # verify, and no reason to put a runner on the tailnet to find that out.
@@ -85,7 +85,7 @@ jobs:
             echo "${count} server(s) running — checking whether ${GITHUB_SHA} reached them."
           fi
 
-      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         if: steps.cluster.outputs.count != '0'
         with:
           terraform_version: 1.14.8
