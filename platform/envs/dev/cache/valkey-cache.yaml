@@ -223,6 +223,34 @@ spec:
             matchLabels: {kubernetes.io/metadata.name: apps}
       ports:
         - {protocol: TCP, port: 6379}
+    # xenopsbase-learn, deployed from its own repository into `learn`. The same
+    # clause NATS already carries, and it was missed here: all three of learn's
+    # services name `valkey-cache.cache.svc.cluster.local:6379` as their cache,
+    # and none of them could open a connection to it.
+    #
+    # WHAT THAT LOOKED LIKE, because it is not what a blocked port usually looks
+    # like. k3s enforces NetworkPolicy with kube-router, which REJECTS rather
+    # than drops, so the refusal came back in about 12ms and read as "nothing is
+    # listening" instead of "you are not allowed". Valkey was Running with zero
+    # restarts and its own logs were clean, so the policy was investigated and
+    # cleared -- on a probe from `apps` that timed out for an unrelated reason.
+    # The measurement that settles it is the whole matrix at once, from four
+    # namespaces (learn, apps, cache, observability) against both ports: `apps`
+    # connects on 6379 and is refused on 9121, `observability` the reverse,
+    # `cache` and `learn` are refused on both. That is this policy working
+    # exactly as written, and `learn` never being in it.
+    #
+    # The cost of the gap was not a cache miss. learn's status gate reads Valkey
+    # on EVERY request, Lettuce shares one connection, and a connection that
+    # cannot be established makes each caller wait for it in turn: `reporting`
+    # served about one request per second at 20-60m of CPU, and at 64 concurrent
+    # the liveness probe missed its deadline and the kubelet restarted the
+    # container. learn's own repository owns that half (its #126).
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: learn}
+      ports:
+        - {protocol: TCP, port: 6379}
     # Without this the ServiceMonitor would exist, the target would be listed,
     # and every scrape would time out -- an ABSENT metric rather than a wrong
     # one, which is the harder kind to notice.
