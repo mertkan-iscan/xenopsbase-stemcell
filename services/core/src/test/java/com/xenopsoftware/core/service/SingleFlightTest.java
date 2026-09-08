@@ -4,13 +4,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.LockSupport;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -27,29 +33,40 @@ class SingleFlightTest {
 
     private static final int CALLERS = 24;
 
+    /**
+     * How long a load waits for its fellow callers before the test gives up on its own premise.
+     *
+     * <p>Generous because it is only ever paid on failure: the callers are already running when the
+     * wait begins, and all they have to do is reach a map lookup.
+     */
+    private static final long ARRIVAL_TIMEOUT_NANOS = TimeUnit.SECONDS.toNanos(10);
+
     private final SingleFlight singleFlight = new SingleFlight();
 
-    /** The headline property: many callers, one load, everyone gets the value. */
+    /**
+     * The headline property: many callers, one load, everyone gets the value.
+     *
+     * <p>The load is its own barrier -- it returns only once every other caller is parked inside
+     * {@link SingleFlight#call} -- so the stampede is a fact of the test rather than a hope about
+     * the scheduler. {@link #awaitOtherCallersInsideCall} says why nothing a caller signals on its
+     * own way in can stand in for that.
+     */
     @Test
     void concurrentCallersOnOneKeyProduceOneLoad() throws Exception {
         AtomicInteger loads = new AtomicInteger();
-        CountDownLatch allArrived = new CountDownLatch(CALLERS);
-        CountDownLatch release = new CountDownLatch(1);
+        Set<Thread> callers = ConcurrentHashMap.newKeySet();
+        AtomicBoolean everyCallerArrived = new AtomicBoolean(true);
 
         List<Future<String>> results = new ArrayList<>();
         try (ExecutorService pool = Executors.newFixedThreadPool(CALLERS)) {
             for (int i = 0; i < CALLERS; i++) {
                 results.add(
                     pool.submit(() -> {
-                        allArrived.countDown();
-                        // Every caller is inside call() before any load is allowed to finish, so
-                        // this is a genuine stampede rather than a sequence that happens to overlap.
+                        callers.add(Thread.currentThread());
                         return singleFlight.call("k", () -> {
                             loads.incrementAndGet();
-                            try {
-                                release.await(5, TimeUnit.SECONDS);
-                            } catch (InterruptedException e) {
-                                Thread.currentThread().interrupt();
+                            if (!awaitOtherCallersInsideCall(callers, CALLERS - 1)) {
+                                everyCallerArrived.set(false);
                             }
                             return "value";
                         });
@@ -57,16 +74,74 @@ class SingleFlightTest {
                 );
             }
 
-            assertThat(allArrived.await(5, TimeUnit.SECONDS)).isTrue();
-            release.countDown();
-
             for (Future<String> result : results) {
-                assertThat(result.get(10, TimeUnit.SECONDS)).isEqualTo("value");
+                assertThat(result.get(30, TimeUnit.SECONDS)).isEqualTo("value");
             }
         }
 
+        assertThat(everyCallerArrived).as("all %d callers were inside call() before any load was allowed to finish", CALLERS).isTrue();
         assertThat(loads.get()).as("%d concurrent callers, one load", CALLERS).isEqualTo(1);
         assertThat(singleFlight.inFlightCount()).as("nothing is left behind").isZero();
+    }
+
+    /**
+     * Blocks until {@code expected} caller threads other than this one are parked inside
+     * {@link SingleFlight#call}, so a load running on this thread cannot finish before they have
+     * all been coalesced onto it.
+     *
+     * <p>Parked inside {@code call()} is the strongest claim available from outside, and it is the
+     * one that matters: {@code call()} blocks nowhere before it publishes its future into the map,
+     * so a caller parked in there is already following the load in progress. A latch counted down
+     * on the way in proves strictly less. That countdown happens before the map lookup it is meant
+     * to stand for, and a caller descheduled in between can arrive after this load has finished and
+     * its key has been removed -- at which point it loads for itself and the count is 2. That is a
+     * race in the test rather than in {@link SingleFlight}, and on a runner with fewer cores than
+     * {@link #CALLERS} it is frequent enough to see.
+     *
+     * @return true if they all arrived; false if the timeout expired first, in which case the test
+     *     never had the stampede it set out to measure and its load count proves nothing
+     */
+    private static boolean awaitOtherCallersInsideCall(Set<Thread> callers, int expected) {
+        Thread self = Thread.currentThread();
+        // Arrival is monotonic while this load runs -- a follower cannot leave call() until the
+        // load completes -- so a caller seen inside it never has to be looked at again. Stack
+        // traces are expensive enough for that to be worth saying.
+        Set<Thread> arrived = Collections.newSetFromMap(new IdentityHashMap<>());
+        long deadline = System.nanoTime() + ARRIVAL_TIMEOUT_NANOS;
+        while (true) {
+            for (Thread caller : callers) {
+                if (caller != self && !arrived.contains(caller) && isParkedInsideCall(caller)) {
+                    arrived.add(caller);
+                }
+            }
+            if (arrived.size() >= expected) {
+                return true;
+            }
+            if (System.nanoTime() - deadline >= 0) {
+                return false;
+            }
+            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(1));
+        }
+    }
+
+    /**
+     * True while {@code caller} is parked inside {@link SingleFlight#call}.
+     *
+     * <p>The state is what turns "on the stack" into "has registered": a caller between entering
+     * {@code call()} and its map lookup is on the stack too, but it is runnable rather than parked,
+     * and one queued behind the map's bin lock is blocked rather than parked.
+     */
+    private static boolean isParkedInsideCall(Thread caller) {
+        Thread.State state = caller.getState();
+        if (state != Thread.State.WAITING && state != Thread.State.TIMED_WAITING) {
+            return false;
+        }
+        for (StackTraceElement frame : caller.getStackTrace()) {
+            if (SingleFlight.class.getName().equals(frame.getClassName()) && "call".equals(frame.getMethodName())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Different keys must not wait on each other, or this becomes a global lock. */
