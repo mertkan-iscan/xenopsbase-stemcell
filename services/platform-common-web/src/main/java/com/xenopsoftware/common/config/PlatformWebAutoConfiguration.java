@@ -56,6 +56,21 @@ public class PlatformWebAutoConfiguration {
         return new CorrelationIdObservationFilter();
     }
 
+    /**
+     * The one {@link org.springframework.core.task.TaskDecorator} in this repository.
+     *
+     * <p>Boot applies a single decorator bean to the executors it builds, which is what makes
+     * {@code @Async} carry the correlation id and the tenant. It is contributed here rather than
+     * component-scanned for the reason ADR-0017 gives, and it is servlet-side because both values
+     * it carries are {@code ThreadLocal}s: the gateway is reactive and bridges the same id through
+     * the Reactor context instead.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public ContextPropagatingTaskDecorator contextPropagatingTaskDecorator() {
+        return new ContextPropagatingTaskDecorator();
+    }
+
     @Bean
     @ConditionalOnMissingBean
     public ExceptionTranslator exceptionTranslator(Environment env) {
