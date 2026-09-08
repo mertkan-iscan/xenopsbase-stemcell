@@ -28,14 +28,19 @@ import org.springframework.core.task.TaskDecorator;
  * tenant. Losing the first makes an async log line uncorrelatable, which reads as a gap in the logs.
  * Losing the second is a tenant boundary that stops holding on exactly the code paths nobody watches.
  *
- * <h2>There is no TaskDecorator here yet, and this test is still worth having</h2>
+ * <h2>There is a TaskDecorator now, and this test still supplies its own</h2>
  *
- * The plan for this work said so explicitly and it is right: written now, this is the thing that
- * fails the day somebody adds a decorator to a virtual-threaded application and assumes it works.
- * Written later, it is written after that has already happened.
+ * When this was written in T-9.8 there was none, and the plan said to write it anyway: "written
+ * now, this is the thing that fails the day somebody adds a decorator to a virtual-threaded
+ * application and assumes it works." That day was T-9.10, and it found more than expected — the
+ * production {@code @Async} executor was hand-built and would have dropped any decorator whatever
+ * this test said. {@code ContextPropagatingTaskDecorator} and {@code AsyncConfigurationTest} in
+ * platform-common-web and beside this file are the result.
  *
- * <p>So the test supplies its own decorator rather than asserting on a production one, and asserts
- * the WIRING — that Boot's executor, built the virtual-threads way, still runs it.
+ * <p>This test keeps supplying its OWN decorator rather than the production one, deliberately. What
+ * it asserts is Boot's behaviour — that an executor built the virtual-threads way still runs a
+ * decorator bean — and using the real decorator would couple that to whatever the real one happens
+ * to carry. The production wiring is asserted separately, where it belongs.
  */
 class TaskDecoratorSurvivesVirtualThreadsTest {
 

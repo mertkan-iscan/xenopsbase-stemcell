@@ -21,6 +21,12 @@ package com.xenopsoftware.common.tenancy;
  * <p>Threads are pooled, so failing to clear leaks one request's tenant into the next request that
  * reuses the thread. That failure reads as data from the wrong tenant appearing intermittently
  * under load, which is the worst way to discover it.
+ *
+ * <p><b>Async work is already handled.</b> A {@code ThreadLocal} is not inherited by a thread pool,
+ * so an {@code @Async} method would otherwise run under {@link #DEFAULT_TENANT} no matter what the
+ * request was — the one place a tenant boundary would stop holding without anything reporting it.
+ * {@code ContextPropagatingTaskDecorator} carries the value across and clears it afterwards, so
+ * activating this seam does not also mean auditing every executor (T-9.10).
  */
 public final class TenantContext {
 
