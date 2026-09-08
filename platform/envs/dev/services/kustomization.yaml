@@ -136,7 +136,19 @@ images:
     # the table. Rooted at `platform.>` rather than `>` because xenopsbase-learn
     # already owns identity.>, catalog.>, streaming.> and reporting.> on this
     # same broker, and JetStream refuses overlapping subjects.
-    digest: sha256:e706c5ed7840eed13dc435f36aa6cd091dde8a64ed188270a014373beaf120fe
+    #
+    # Commit 42af41d -- @Async carries the correlation id and the tenant, and the
+    # executor it runs on is Boot's rather than one AsyncConfiguration built
+    # (T-9.10). The second half is the fix: a hand-built ThreadPoolTaskExecutor
+    # is never shown to Boot's builder, so it silently dropped any TaskDecorator
+    # AND ignored the virtual threads T-9.8 turned on. @Async here had been
+    # running on a bounded platform-thread pool that no decorator could reach.
+    #
+    # Nothing in this image uses @Async yet and the tenant seam is still inert,
+    # so the observable change is none. It is deployed rather than held back
+    # because a template whose deployed build trails main is how this repository
+    # spent an evening discovering that two merges had shipped no image at all.
+    digest: sha256:e0e28621707bad4f6b0b673e20cd5ce08d2329d6626e85632a725eb2c17df0d5
   - name: ghcr.io/mertkan-iscan/xenopsbase-stemcell/gateway
     # Commit c805107 -- the gateway can shed load without the circuit breaker
     # counting it as core failing, and the fallback stops telling the caller
@@ -213,4 +225,11 @@ images:
     # Commit e32a2ef -- no gateway change of its own. It moves because
     # platform-common did (T-9.9); the gateway neither publishes nor consumes,
     # so what it gains is the shared module and nothing observable.
-    digest: sha256:f7b4fadeaf75103eaf434a6687f2dd76a8ab9c1c2ef68e3fa71c06fba6fb5783
+    #
+    # Commit 42af41d -- the gateway is reactive and gets no TaskDecorator: both
+    # values it would carry are ThreadLocals, and the id crosses the Reactor
+    # context here instead. What it does get is AsyncConfiguration delegating to
+    # Boot's executor, which is why this digest moves at all -- and why the
+    # gateway's full IT suite was the check that injecting it is safe on the
+    # reactive stack too.
+    digest: sha256:11bd2c15ac75330db0685f7146b404ebc0478f101b5df72c95ff39d2e3825873
