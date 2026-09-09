@@ -1,11 +1,11 @@
 # The xenopsbase-learn services' databases.
 #
-# THREE DATABASES, NOT ONE, AND NOT A SECOND CLUSTER.
+# ONE DATABASE PER SERVICE, NOT ONE FOR ALL, AND NOT A SECOND CLUSTER.
 #
-# Three because learn's own rule says so: no module reads another module's
+# One each because learn's own rule says so: no module reads another module's
 # schema, and the enforcement it names is credentials rather than convention.
-# One database with three schemas would make that rule a review comment; three
-# databases with three roles makes it something Postgres refuses.
+# One database with five schemas would make that rule a review comment; five
+# databases with five roles makes it something Postgres refuses.
 #
 # Inside THIS cluster because the isolation that matters -- one service unable
 # to read or rewrite another's tables -- comes from separate roles and
@@ -51,4 +51,30 @@ spec:
   cluster: {name: postgres}
   name: learn_reporting
   owner: learn_reporting
+  databaseReclaimPolicy: retain
+---
+# Catalog and assessment (xenopsbase-learn#143). Added when the gateway learned
+# to route to them: both had been building, testing and publishing images for
+# weeks against a database that did not exist, and nothing reported it because
+# nothing had ever asked them to start.
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: learn-catalog
+  namespace: database
+spec:
+  cluster: {name: postgres}
+  name: learn_catalog
+  owner: learn_catalog
+  databaseReclaimPolicy: retain
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: learn-assessment
+  namespace: database
+spec:
+  cluster: {name: postgres}
+  name: learn_assessment
+  owner: learn_assessment
   databaseReclaimPolicy: retain

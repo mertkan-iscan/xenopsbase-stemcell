@@ -208,8 +208,13 @@ spec:
       # One role per learn service, owning one database each. That is learn's
       # own rule arriving in the platform: no module reads another module's
       # schema, and the enforcement it names is credentials rather than
-      # convention. Three roles is what makes it something Postgres refuses
-      # rather than something a review has to catch.
+      # convention. A role per service is what makes it something Postgres
+      # refuses rather than something a review has to catch.
+      #
+      # FIVE NOW, not three: catalog and assessment arrived when the gateway
+      # learned to route to them (xenopsbase-learn#143). They were built,
+      # tested and published for weeks with no database to connect to, which
+      # nothing reported because nothing had asked them to start.
       #
       # None of them is superuser or createdb. Each owns its own database,
       # which is all Flyway needs to run its migrations inside it.
@@ -246,6 +251,30 @@ spec:
         passwordSecret:
           name: learn-reporting-db
         comment: "Owner of the learn_reporting database. Managed by CNPG, password from SOPS."
+        inherit: true
+        connectionLimit: -1
+
+      - name: learn_catalog
+        ensure: present
+        login: true
+        superuser: false
+        createdb: false
+        createrole: false
+        passwordSecret:
+          name: learn-catalog-db
+        comment: "Owner of the learn_catalog database. Managed by CNPG, password from SOPS."
+        inherit: true
+        connectionLimit: -1
+
+      - name: learn_assessment
+        ensure: present
+        login: true
+        superuser: false
+        createdb: false
+        createrole: false
+        passwordSecret:
+          name: learn-assessment-db
+        comment: "Owner of the learn_assessment database. Managed by CNPG, password from SOPS."
         inherit: true
         connectionLimit: -1
 
