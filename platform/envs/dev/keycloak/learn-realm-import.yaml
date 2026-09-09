@@ -379,6 +379,66 @@ spec:
             }
           ],
           "protocol": "openid-connect"
+        },
+        {
+          "clientId": "svc-catalog",
+          "name": "catalog service",
+          "description": "Service credentials for catalog (T-9.11). Client credentials only; per-service secret.",
+          "enabled": true,
+          "publicClient": false,
+          "serviceAccountsEnabled": true,
+          "standardFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "secret": "local-development-only-catalog-secret",
+          "attributes": {
+            "access.token.lifespan": "300"
+          },
+          "protocolMappers": [
+            {
+              "name": "service-id-claim",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-hardcoded-claim-mapper",
+              "consentRequired": false,
+              "config": {
+                "claim.name": "svc",
+                "claim.value": "catalog",
+                "jsonType.label": "String",
+                "id.token.claim": "false",
+                "access.token.claim": "true"
+              }
+            }
+          ],
+          "protocol": "openid-connect"
+        },
+        {
+          "clientId": "svc-assessment",
+          "name": "assessment service",
+          "description": "Service credentials for assessment (T-9.11). Client credentials only; per-service secret.",
+          "enabled": true,
+          "publicClient": false,
+          "serviceAccountsEnabled": true,
+          "standardFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "secret": "local-development-only-assessment-secret",
+          "attributes": {
+            "access.token.lifespan": "300"
+          },
+          "protocolMappers": [
+            {
+              "name": "service-id-claim",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-hardcoded-claim-mapper",
+              "consentRequired": false,
+              "config": {
+                "claim.name": "svc",
+                "claim.value": "assessment",
+                "jsonType.label": "String",
+                "id.token.claim": "false",
+                "access.token.claim": "true"
+              }
+            }
+          ],
+          "protocol": "openid-connect"
         }
       ],
       "users": [
@@ -401,6 +461,20 @@ spec:
           "username": "service-account-svc-reporting",
           "enabled": true,
           "serviceAccountClientId": "svc-reporting",
+          "realmRoles": ["svc-caller"]
+        },
+        {
+          "id": "00000000-0000-4000-8000-0000000000a4",
+          "username": "service-account-svc-catalog",
+          "enabled": true,
+          "serviceAccountClientId": "svc-catalog",
+          "realmRoles": ["svc-caller"]
+        },
+        {
+          "id": "00000000-0000-4000-8000-0000000000a5",
+          "username": "service-account-svc-assessment",
+          "enabled": true,
+          "serviceAccountClientId": "svc-assessment",
           "realmRoles": ["svc-caller"]
         },
         {
