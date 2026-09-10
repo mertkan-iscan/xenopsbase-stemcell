@@ -91,6 +91,44 @@ spec:
     - name: db-pool-min-size
       value: "2"
 
+  # THE LOGIN THEME, MOUNTED RATHER THAN BAKED IN (xenopsbase-learn#94).
+  #
+  # A theme is a directory Keycloak reads from /opt/keycloak/themes at startup.
+  # The two honest ways to put one there are a custom image and this; the custom
+  # image is what T-6.1 will do when there is a build pipeline for it, and the
+  # comment on spec.image above already says that is the real fix for
+  # production. Until then a ConfigMap costs nothing and changes no image.
+  #
+  # `unsupported` is the operator's own name for the escape hatch, not a warning
+  # we are ignoring: it means the operator does not validate what goes in here,
+  # so a typo produces a pod that does not start rather than a rejected CR.
+  #
+  # SUBPATHS, NOT KEYS. A ConfigMap key cannot contain a slash, and a theme is
+  # nested -- login/theme.properties and login/resources/css/xenops.css. The
+  # `items` list below is what turns two flat keys into that shape.
+  #
+  # THE MOUNT IS READ-ONLY AND SO IS THE THEME. Keycloak caches themes; with
+  # `spec.instances: 1` a change here needs the pod to restart, which updating
+  # the ConfigMap does not do on its own. `kubectl rollout restart` on the
+  # StatefulSet is the whole procedure.
+  unsupported:
+    podTemplate:
+      spec:
+        containers:
+          - volumeMounts:
+              - name: login-theme
+                mountPath: /opt/keycloak/themes/xenopslearn
+                readOnly: true
+        volumes:
+          - name: login-theme
+            configMap:
+              name: keycloak-login-theme
+              items:
+                - key: theme.properties
+                  path: login/theme.properties
+                - key: xenops.css
+                  path: login/resources/css/xenops.css
+
   db:
     vendor: postgres
     # The -rw service follows the primary across a failover. Pointing at a pod

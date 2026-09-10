@@ -71,6 +71,7 @@ spec:
       "realm": "xenopslearn",
       "enabled": true,
       "displayName": "XenOpsBase Learn (local)",
+      "loginTheme": "xenopslearn",
       "registrationAllowed": false,
       "resetPasswordAllowed": true,
       "verifyEmail": false,
