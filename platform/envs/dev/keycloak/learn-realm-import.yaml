@@ -70,7 +70,7 @@ spec:
     {
       "realm": "xenopslearn",
       "enabled": true,
-      "displayName": "XenOpsBase Learn (local)",
+      "displayName": "XenOpsBase Learn",
       "loginTheme": "xenopslearn",
       "registrationAllowed": false,
       "resetPasswordAllowed": true,

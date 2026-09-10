@@ -109,7 +109,13 @@ input[type='text'],
 input[type='password'],
 input[type='email'],
 .pf-c-form-control,
-#kc-form-login input {
+/*
+ * NOT a bare `#kc-form-login input`. That is specificity (1,0,1) and it matched
+ * the submit button too -- beating `#kc-login` at (1,0,0), so the primary button
+ * rendered with the FIELD's background and read as an outline button. Found by
+ * reading the computed style off the deployed page, not by looking at the CSS.
+ */
+#kc-form-login input:not([type='submit']):not([type='button']) {
   font-family: var(--font) !important;
   font-size: 0.9375rem !important;
   /* 44px is the floor everywhere in this product, and a login field on a phone
@@ -132,6 +138,7 @@ input:focus-visible,
 
 /* --------------------------------------------------------------- the buttons */
 
+#kc-form-login #kc-login,
 #kc-login,
 .pf-c-button.pf-m-primary,
 input[type='submit'],
@@ -149,6 +156,7 @@ input[type='submit'],
   text-transform: none !important;
 }
 
+#kc-form-login #kc-login:hover,
 #kc-login:hover,
 .pf-c-button.pf-m-primary:hover,
 input[type='submit']:hover {
