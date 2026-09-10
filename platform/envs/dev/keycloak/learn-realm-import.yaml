@@ -19,6 +19,29 @@
 # while reading as routine maintenance. learn's T-1.7 is entirely about refusing
 # that, and its runbook (docs/runbooks/keycloak-realm.md there) is the long form.
 #
+# THE HOSTNAMES BELOW INCLUDE THIS CLUSTER'S, AND THAT IS THE POINT
+#
+# `gateway` and `frontend` list https://learn-dev.xenopsoftware.com alongside
+# the localhost entries. They did not until now, and the cluster worked anyway
+# because somebody had added the real URL to the running realm by hand -- an
+# edit that lived nowhere in git.
+#
+# It survived until the first `realm-apply`, which partial-imports clients with
+# ifResourceExists=OVERWRITE and replaced the hand-made list with this file's.
+# Sign-in then failed at Keycloak with "Invalid parameter: redirect_uri", after
+# a successful login, which is the worst place for it: the person has already
+# authenticated and the error names something they cannot act on.
+#
+# The lesson is the one the bus topology taught two hours earlier in this same
+# repository -- configuration somebody made with a CLI exists in exactly one
+# environment, and the first anybody knows is that it is gone.
+#
+# LOCALHOST STAYS in the list because `make dev-realm` renders the local realm
+# from this file. On a real installation it would not: a redirect_uri pointing
+# at a developer's machine is a code delivered to whoever is listening there.
+# Dev is disposable and shares one realm with the local stack; a customer
+# environment gets one host and no others.
+
 # THE USERS IN HERE ARE DEVELOPMENT FIXTURES
 #
 # Five of them, and they carry EXPLICIT ids, which is what makes a re-import
@@ -86,13 +109,15 @@ spec:
           "directAccessGrantsEnabled": false,
           "serviceAccountsEnabled": true,
           "redirectUris": [
+            "https://learn-dev.xenopsoftware.com/login/oauth2/code/oidc",
             "http://localhost:8080/login/oauth2/code/oidc"
           ],
           "webOrigins": [
+            "https://learn-dev.xenopsoftware.com",
             "http://localhost:8080"
           ],
           "attributes": {
-            "post.logout.redirect.uris": "http://localhost:8080"
+            "post.logout.redirect.uris": "https://learn-dev.xenopsoftware.com##http://localhost:8080"
           },
           "defaultClientScopes": [
             "basic",
@@ -160,10 +185,12 @@ spec:
           "implicitFlowEnabled": false,
           "directAccessGrantsEnabled": false,
           "redirectUris": [
+            "https://learn-dev.xenopsoftware.com/*",
             "http://localhost:5173/*",
             "http://localhost:8080/*"
           ],
           "webOrigins": [
+            "https://learn-dev.xenopsoftware.com",
             "http://localhost:5173",
             "http://localhost:8080"
           ],
