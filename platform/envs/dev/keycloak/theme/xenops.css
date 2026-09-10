@@ -1,0 +1,225 @@
+/*
+ * The login page, in the product's design (xenopsbase-learn#94, T-10.3).
+ *
+ * The tokens here are copied from xenopsbase-learn's web/src/shared/design/tokens.css
+ * rather than imported, because this file is served by Keycloak from a different
+ * origin and a different build. THEY ARE A COPY AND WILL DRIFT: if the palette
+ * changes there, it changes here by hand. That is the price of the login page
+ * living on the identity provider, and it is a price worth paying -- the
+ * alternative is a password field on an origin that also renders customer
+ * -uploaded SCORM packages.
+ *
+ * Loaded after the parent's login.css, so everything below is an override of
+ * PatternFly rather than a fresh stylesheet.
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;800&display=swap');
+
+:root {
+  --color-bg: #f3f2f2;
+  --color-surface: #eae9e9;
+  --color-text: #201e1d;
+  --color-accent: #ec3013;
+  --color-accent-700: #ae1800;
+  --color-neutral-300: #d7d3d3;
+  --color-neutral-700: #605d5d;
+  --font: Archivo, 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --rule: 2px;
+}
+
+/*
+ * SINGLE THEME, ON PURPOSE. The app follows the viewer's light/dark setting;
+ * this page does not, because a login page that changes appearance between the
+ * click and the form is a page people hesitate on. One ground, always.
+ */
+
+html,
+body,
+body.login-pf,
+.login-pf body,
+#kc-container,
+#kc-container-wrapper {
+  background: var(--color-bg) !important;
+  color: var(--color-text) !important;
+  font-family: var(--font) !important;
+}
+
+/* PatternFly paints its own backdrop image on this element. */
+.login-pf-page,
+.login-pf-page .login-pf-page-header,
+.login-pf-body {
+  background: var(--color-bg) !important;
+  background-image: none !important;
+}
+
+/* ------------------------------------------------------------------ the card */
+
+.card-pf,
+.login-pf-page .card-pf {
+  background: var(--color-bg) !important;
+  border: var(--rule) solid var(--color-text) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 32px !important;
+  margin-top: 0 !important;
+  max-width: 480px;
+}
+
+.login-pf-page {
+  padding-top: 48px;
+}
+
+/* --------------------------------------------------------------- the heading */
+
+#kc-page-title,
+.login-pf-header h1,
+.pf-c-title {
+  font-family: var(--font) !important;
+  font-weight: 800 !important;
+  font-size: 1.875rem !important;
+  letter-spacing: -0.01em;
+  color: var(--color-text) !important;
+  text-align: left !important;
+  margin: 0 0 20px !important;
+  text-wrap: balance;
+}
+
+/* The stock header carries a Keycloak wordmark image. This is not Keycloak. */
+#kc-header,
+#kc-header-wrapper,
+.login-pf-page .login-pf-brand {
+  display: none !important;
+}
+
+/* ---------------------------------------------------------------- the fields */
+
+label,
+.pf-c-form__label,
+.pf-c-form__label-text,
+#kc-form-login label {
+  font-family: var(--font) !important;
+  font-size: 0.6875rem !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
+  color: var(--color-text) !important;
+}
+
+input[type='text'],
+input[type='password'],
+input[type='email'],
+.pf-c-form-control,
+#kc-form-login input {
+  font-family: var(--font) !important;
+  font-size: 0.9375rem !important;
+  /* 44px is the floor everywhere in this product, and a login field on a phone
+     is the least forgiving place to be under it. */
+  min-height: 44px !important;
+  padding: 8px 12px !important;
+  border: var(--rule) solid var(--color-text) !important;
+  border-radius: 0 !important;
+  background: var(--color-bg) !important;
+  color: var(--color-text) !important;
+  box-shadow: none !important;
+}
+
+input:focus-visible,
+.pf-c-form-control:focus {
+  outline: 3px solid var(--color-text) !important;
+  outline-offset: 2px !important;
+  border-color: var(--color-text) !important;
+}
+
+/* --------------------------------------------------------------- the buttons */
+
+#kc-login,
+.pf-c-button.pf-m-primary,
+input[type='submit'],
+.btn-primary {
+  font-family: var(--font) !important;
+  font-size: 0.9375rem !important;
+  font-weight: 600 !important;
+  min-height: 44px !important;
+  padding: 8px 16px !important;
+  border: var(--rule) solid var(--color-text) !important;
+  border-radius: 0 !important;
+  background: var(--color-text) !important;
+  color: var(--color-bg) !important;
+  box-shadow: none !important;
+  text-transform: none !important;
+}
+
+#kc-login:hover,
+.pf-c-button.pf-m-primary:hover,
+input[type='submit']:hover {
+  background: var(--color-accent-700) !important;
+  border-color: var(--color-accent-700) !important;
+}
+
+.pf-c-button.pf-m-secondary,
+.btn-default {
+  border: var(--rule) solid var(--color-text) !important;
+  border-radius: 0 !important;
+  background: var(--color-bg) !important;
+  color: var(--color-text) !important;
+}
+
+/* ----------------------------------------------------------------- the links */
+
+a,
+#kc-registration a,
+#kc-info-message a,
+.login-pf-page a {
+  color: var(--color-accent-700) !important;
+  text-underline-offset: 3px;
+}
+
+/* ---------------------------------------------------------------- the errors */
+
+/*
+ * A refusal interrupts, so it is drawn as one: the accent as a border rather
+ * than a wash, and never a red field with red text on a red background.
+ */
+.alert-error,
+.pf-c-alert.pf-m-danger,
+.pf-m-error,
+#input-error,
+.kc-feedback-text {
+  font-family: var(--font) !important;
+  border: var(--rule) solid var(--color-accent) !important;
+  border-radius: 0 !important;
+  background: var(--color-bg) !important;
+  color: var(--color-accent-700) !important;
+  box-shadow: none !important;
+}
+
+.pf-c-alert__icon,
+.alert-error .pficon {
+  color: var(--color-accent) !important;
+}
+
+/* -------------------------------------------------------------- the footer */
+
+#kc-info,
+#kc-info-wrapper,
+.login-pf-page .login-pf-signup {
+  font-family: var(--font) !important;
+  font-size: 0.8125rem !important;
+  color: var(--color-neutral-700) !important;
+}
+
+/* The identity-provider buttons a company using its own SSO sees (T-1.8). */
+#kc-social-providers a,
+.pf-c-login__main-footer-links a {
+  border: var(--rule) solid var(--color-text) !important;
+  border-radius: 0 !important;
+  min-height: 44px !important;
+  color: var(--color-text) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

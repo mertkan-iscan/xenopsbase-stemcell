@@ -8,3 +8,19 @@ resources:
   - realm-import.yaml
   - learn-realm-import.yaml
   - ingress.yaml
+
+# The login theme's files, as a ConfigMap (xenopsbase-learn#94).
+#
+# generatorOptions disableNameSuffixHash is set at the top level of this
+# environment for every other generated map; without it kustomize appends a
+# content hash and the Keycloak CR's reference -- which is a plain name inside
+# an `unsupported` block the operator does not rewrite -- would stop resolving
+# the moment the CSS changed.
+configMapGenerator:
+  - name: keycloak-login-theme
+    files:
+      - theme/theme.properties
+      - theme/xenops.css
+
+generatorOptions:
+  disableNameSuffixHash: true
