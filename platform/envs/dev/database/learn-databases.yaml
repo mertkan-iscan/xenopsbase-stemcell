@@ -78,3 +78,18 @@ spec:
   name: learn_assessment
   owner: learn_assessment
   databaseReclaimPolicy: retain
+---
+# Packaging (xenopsbase-learn#163). Uploaded SCORM, cmi5 and HTML5 courses: the
+# archive's metadata, the extracted file inventory, and where each learner got
+# to inside a package. The files themselves are in object storage; this holds
+# the row that says which bucket key is which course.
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: learn-packaging
+  namespace: database
+spec:
+  cluster: {name: postgres}
+  name: learn_packaging
+  owner: learn_packaging
+  databaseReclaimPolicy: retain

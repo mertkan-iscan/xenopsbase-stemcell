@@ -206,7 +206,7 @@ resource "cloudflare_zone_setting" "min_tls_version" {
 // Derived rather than named. A hostname added with `access = false` is added to
 // this rule by the same edit, instead of by somebody remembering.
 locals {
-  rate_limited_hosts = [for e in var.extra_hostnames : e.hostname if !e.access]
+  rate_limited_hosts = [for e in var.extra_hostnames : e.hostname if !e.access && e.rate_limit]
 
   rate_limit_expression = length(local.rate_limited_hosts) == 0 ? null : format(
     "http.host in {%s}",
