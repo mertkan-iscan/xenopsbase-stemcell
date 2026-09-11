@@ -100,12 +100,18 @@ variable "access_keys" {
       app           - The core service. Documents only.
       db            - CloudNativePG. Database backups only.
       observability - Loki and Tempo. Log chunks and trace blocks only.
+      packaging     - xenopsbase-learn's packaging service. Course archives and
+                      unpacked course files only. Its own key rather than app's,
+                      because sharing one would let a leaked learn credential
+                      read core's documents and the reverse -- which is the
+                      whole reason these policies exist.
   EOT
   type = object({
     infra         = optional(string, "")
     app           = optional(string, "")
     db            = optional(string, "")
     observability = optional(string, "")
+    packaging     = optional(string, "")
   })
   default = {}
 
@@ -123,11 +129,13 @@ variable "access_keys" {
       var.access_keys.app,
       var.access_keys.db,
       var.access_keys.observability,
+      var.access_keys.packaging,
       ])) == length(distinct(compact([
         var.access_keys.infra,
         var.access_keys.app,
         var.access_keys.db,
         var.access_keys.observability,
+        var.access_keys.packaging,
     ])))
     error_message = "Two consumers share an access key. That defeats the isolation these policies exist to provide."
   }

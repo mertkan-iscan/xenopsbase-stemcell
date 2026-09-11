@@ -46,6 +46,36 @@ locals {
       # it. See infra/lifecycle/tempo-traces.json.
       purpose = "Tempo trace blocks. Immutable once written, expired after 7 days."
     }
+
+    # xenopsbase-learn's uploaded courses (xenopsbase-learn#163, ADR-0105).
+    #
+    # TWO BUCKETS RATHER THAN ONE, because their lifecycles are opposite ends of
+    # the same process. An upload target is a signed URL a browser PUTs a ZIP to
+    # and is finished with in hours; an extracted package is served to learners
+    # for years. Sharing a bucket would mean one lifecycle rule for both, which
+    # either keeps every discarded upload forever or expires somebody's course.
+    #
+    # It is also the only bucket here a BROWSER is ever handed a URL into. That
+    # is confined to the uploads side deliberately: the packages side is read by
+    # the packaging service and by nothing else, so nothing outside the cluster
+    # ever needs a credential for it.
+    package_uploads = {
+      name  = "${var.prefix}-${var.environment}-package-uploads"
+      owner = var.access_keys.packaging
+      # Nothing here is worth a second copy: the archive is re-uploadable by the
+      # author, and it is discarded once it has been unpacked.
+      versioned = false
+      purpose   = "Course archives as uploaded, pending ingest. Discarded after unpacking."
+    }
+    packages = {
+      name  = "${var.prefix}-${var.environment}-packages"
+      owner = var.access_keys.packaging
+      # Versioned, for documents' reason. A package's files are what a learner
+      # opens and what an auditor is shown; an accidental overwrite is a course
+      # that no longer matches the completion recorded against it.
+      versioned = true
+      purpose   = "Unpacked course files, served to learners. User data: never expired."
+    }
   }
 }
 

@@ -166,6 +166,18 @@ variable "extra_hostnames" {
     hostname = string
     service  = string
     access   = optional(bool, false)
+
+    # Whether this hostname belongs in the rate-limit rule. Defaults to true,
+    # so the protection is opt-OUT and a new hostname cannot miss it by being
+    # forgotten -- the same argument `access` makes in the other direction.
+    #
+    # The one thing that legitimately opts out is an origin serving many small
+    # files per page view. An uploaded SCORM course fetches a few hundred assets
+    # when a learner opens it, which passes 50 requests in 10 seconds before the
+    # first slide is drawn; rate limiting it would block the course rather than
+    # an abuser, and the origin it would be protecting holds no credential and
+    # answers nothing about anybody (xenopsbase-learn ADR-0105).
+    rate_limit = optional(bool, true)
   }))
   default = []
 

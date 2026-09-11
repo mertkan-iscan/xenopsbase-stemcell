@@ -278,6 +278,18 @@ spec:
         inherit: true
         connectionLimit: -1
 
+      - name: learn_packaging
+        ensure: present
+        login: true
+        superuser: false
+        createdb: false
+        createrole: false
+        passwordSecret:
+          name: learn-packaging-db
+        comment: "Owner of the learn_packaging database. Managed by CNPG, password from SOPS."
+        inherit: true
+        connectionLimit: -1
+
   # RECOVERY, not initdb.
   #
   # bootstrap only runs when the Cluster is CREATED, so this is what happens on
