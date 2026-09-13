@@ -68,6 +68,54 @@ extra_hostnames = [
     service  = "http://ingress-nginx-controller.ingress-nginx.svc.cluster.local:80"
     access   = true
   },
+
+  # xenopsbase-learn's own front door.
+  #
+  # IT WAS IN THE TUNNEL AND NOT IN THIS FILE. Somebody added it in the
+  # Cloudflare dashboard when learn first deployed, and the live ingress list
+  # carried a rule Terraform did not know about -- visible only as an
+  # `"originRequest":{}` on that one entry, which the generated rules do not
+  # have. The next apply of this module would have DELETED it, because
+  # `cloudflare_zero_trust_tunnel_cloudflared_config` declares the whole list,
+  # and learn would have gone off the internet during a change about something
+  # else entirely. Found 2026-09-11 while adding the two below.
+  #
+  # NOT behind Access: this is the product, and its people are customers rather
+  # than the team.
+  {
+    hostname = "learn-dev.xenopsoftware.com"
+    service  = "http://ingress-nginx-controller.ingress-nginx.svc.cluster.local:80"
+    access   = false
+  },
+
+  # THE CONTENT ORIGINS, one per tenant (xenopsbase-learn ADR-0105).
+  #
+  # Uploaded SCORM and HTML5 courses are third-party JavaScript, and they are
+  # served from an origin that is not the application's and not each other's.
+  # `acme--usercontent-dev` rather than `acme.usercontent-dev` because Universal
+  # SSL covers ONE label below the apex and nothing deeper -- the dot version is
+  # a $10/month Advanced Certificate for the same isolation.
+  #
+  # ONE ENTRY PER TENANT, because `*.xenopsoftware.com` is not a record this
+  # project may create: this is a company zone with a live site on it. Adding a
+  # company now includes adding a line here.
+  #
+  # access = false, and it must be: the browser fetching these is an iframe
+  # inside a course, which cannot complete an Access login. rate_limit = false
+  # for the reason in the variable's description -- one course launch fetches a
+  # few hundred assets, which trips 50-in-10-seconds before the first slide.
+  {
+    hostname   = "acme--usercontent-dev.xenopsoftware.com"
+    service    = "http://ingress-nginx-controller.ingress-nginx.svc.cluster.local:80"
+    access     = false
+    rate_limit = false
+  },
+  {
+    hostname   = "globex--usercontent-dev.xenopsoftware.com"
+    service    = "http://ingress-nginx-controller.ingress-nginx.svc.cluster.local:80"
+    access     = false
+    rate_limit = false
+  },
 ]
 
 # Cloudflare Access in front of app-dev (T-8.6, #149).

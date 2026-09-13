@@ -70,7 +70,7 @@ spec:
     {
       "realm": "xenopslearn",
       "enabled": true,
-      "displayName": "XenOpsBase Learn (local)",
+      "displayName": "XenOpsBase Learn",
       "loginTheme": "xenopslearn",
       "registrationAllowed": false,
       "resetPasswordAllowed": true,
@@ -409,6 +409,36 @@ spec:
           "protocol": "openid-connect"
         },
         {
+          "clientId": "svc-packaging",
+          "name": "packaging service",
+          "description": "Service credentials for packaging (T-9.11). Client credentials only; per-service secret.",
+          "enabled": true,
+          "publicClient": false,
+          "serviceAccountsEnabled": true,
+          "standardFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "secret": "local-development-only-packaging-secret",
+          "attributes": {
+            "access.token.lifespan": "300"
+          },
+          "protocolMappers": [
+            {
+              "name": "service-id-claim",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-hardcoded-claim-mapper",
+              "consentRequired": false,
+              "config": {
+                "claim.name": "svc",
+                "claim.value": "packaging",
+                "jsonType.label": "String",
+                "id.token.claim": "false",
+                "access.token.claim": "true"
+              }
+            }
+          ],
+          "protocol": "openid-connect"
+        },
+        {
           "clientId": "svc-catalog",
           "name": "catalog service",
           "description": "Service credentials for catalog (T-9.11). Client credentials only; per-service secret.",
@@ -489,6 +519,13 @@ spec:
           "username": "service-account-svc-reporting",
           "enabled": true,
           "serviceAccountClientId": "svc-reporting",
+          "realmRoles": ["svc-caller"]
+        },
+        {
+          "id": "00000000-0000-4000-8000-0000000000a6",
+          "username": "service-account-svc-packaging",
+          "enabled": true,
+          "serviceAccountClientId": "svc-packaging",
           "realmRoles": ["svc-caller"]
         },
         {

@@ -68,6 +68,27 @@ variable "document_cors_origins" {
   }
 }
 
+variable "package_upload_cors_origins" {
+  description = <<-EOT
+    Browser origins allowed to PUT course archives straight to the
+    package-uploads bucket: xenopsbase-learn's application origin, and nothing
+    else. Same rules as document_cors_origins -- empty manages no CORS, and it
+    must match Origin byte for byte.
+  EOT
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for o in var.package_upload_cors_origins : can(regex("^https?://[^/]+$", o))])
+    error_message = "each origin must be scheme://host[:port] with no trailing slash and no path."
+  }
+
+  validation {
+    condition     = !contains(var.package_upload_cors_origins, "*")
+    error_message = "a wildcard origin would expose presigned uploads to any site. Name the application origin explicitly."
+  }
+}
+
 variable "project_id" {
   description = <<-EOT
     Hetzner Cloud project ID, the numeric part of the console URL. Used to build
@@ -97,7 +118,9 @@ variable "access_keys" {
     category as the age key in ADR-0003.
 
       infra         - Terraform and CI. Retains access to every bucket.
-      app           - The core service. Documents only.
+      app           - The core service's documents, and xenopsbase-learn's
+                      course archives and unpacked course files (see the
+                      package buckets in main.tf for why they share it).
       db            - CloudNativePG. Database backups only.
       observability - Loki and Tempo. Log chunks and trace blocks only.
   EOT
