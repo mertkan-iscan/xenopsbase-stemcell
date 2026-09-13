@@ -55,13 +55,19 @@ locals {
     # for years. Sharing a bucket would mean one lifecycle rule for both, which
     # either keeps every discarded upload forever or expires somebody's course.
     #
-    # It is also the only bucket here a BROWSER is ever handed a URL into. That
+    # It is also a bucket a BROWSER is handed a URL into, like documents. That
     # is confined to the uploads side deliberately: the packages side is read by
-    # the packaging service and by nothing else, so nothing outside the cluster
-    # ever needs a credential for it.
+    # the packaging service and by nothing else.
+    #
+    # OWNED BY THE `app` KEY, the one documents already uses, and that is a
+    # trade rather than an oversight. Hetzner has no API for minting S3 keys,
+    # so a key of packaging's own is a console step per environment; sharing
+    # means a leaked learn packaging credential also reaches core's documents,
+    # and the reverse. Accepted for dev on 2026-09-13. A real environment
+    # should mint the separate pair and give these two buckets that owner.
     package_uploads = {
       name  = "${var.prefix}-${var.environment}-package-uploads"
-      owner = var.access_keys.packaging
+      owner = var.access_keys.app
       # Nothing here is worth a second copy: the archive is re-uploadable by the
       # author, and it is discarded once it has been unpacked.
       versioned = false
@@ -69,7 +75,7 @@ locals {
     }
     packages = {
       name  = "${var.prefix}-${var.environment}-packages"
-      owner = var.access_keys.packaging
+      owner = var.access_keys.app
       # Versioned, for documents' reason. A package's files are what a learner
       # opens and what an auditor is shown; an accidental overwrite is a course
       # that no longer matches the completion recorded against it.
@@ -151,6 +157,29 @@ resource "aws_s3_bucket_cors_configuration" "documents" {
     # otherwise succeeds with nothing to check it against.
     expose_headers = ["ETag"]
 
+    max_age_seconds = 3600
+  }
+}
+
+# CORS on the package-uploads bucket, for exactly the documents bucket's reason:
+# learn's console hands the browser a presigned PUT for a course ZIP
+# (xenopsbase-learn T-4.1), and without a rule the preflight fails and the PUT is
+# never sent. A different origin from documents' -- learn is served from
+# learn-*, not app-* -- so it is its own variable rather than a second entry in
+# that one, which would let either application write into the other's bucket.
+#
+# Uploads only. The packages bucket is read by the packaging service over
+# server-side credentials and served to browsers by that service, never
+# directly, so it has no origin to allow.
+resource "aws_s3_bucket_cors_configuration" "package_uploads" {
+  count  = length(var.package_upload_cors_origins) > 0 ? 1 : 0
+  bucket = aws_s3_bucket.this["package_uploads"].id
+
+  cors_rule {
+    allowed_origins = var.package_upload_cors_origins
+    allowed_methods = ["PUT"]
+    allowed_headers = ["*"]
+    expose_headers  = ["ETag"]
     max_age_seconds = 3600
   }
 }

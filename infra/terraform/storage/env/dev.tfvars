@@ -20,3 +20,8 @@ enable_bucket_policies = true
 # (T-3.7, exercised for the first time by T-3.13). Exactly the one origin --
 # see the variable for why this is not a wildcard.
 document_cors_origins = ["https://app-dev.xenopsoftware.com"]
+
+# xenopsbase-learn's application origin, so its console can PUT a course ZIP
+# straight to the package-uploads bucket (learn T-4.1). learn-dev, not app-dev:
+# the two applications may not write into each other's upload buckets.
+package_upload_cors_origins = ["https://learn-dev.xenopsoftware.com"]

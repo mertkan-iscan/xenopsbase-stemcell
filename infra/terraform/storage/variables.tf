@@ -68,6 +68,27 @@ variable "document_cors_origins" {
   }
 }
 
+variable "package_upload_cors_origins" {
+  description = <<-EOT
+    Browser origins allowed to PUT course archives straight to the
+    package-uploads bucket: xenopsbase-learn's application origin, and nothing
+    else. Same rules as document_cors_origins -- empty manages no CORS, and it
+    must match Origin byte for byte.
+  EOT
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for o in var.package_upload_cors_origins : can(regex("^https?://[^/]+$", o))])
+    error_message = "each origin must be scheme://host[:port] with no trailing slash and no path."
+  }
+
+  validation {
+    condition     = !contains(var.package_upload_cors_origins, "*")
+    error_message = "a wildcard origin would expose presigned uploads to any site. Name the application origin explicitly."
+  }
+}
+
 variable "project_id" {
   description = <<-EOT
     Hetzner Cloud project ID, the numeric part of the console URL. Used to build
@@ -97,21 +118,17 @@ variable "access_keys" {
     category as the age key in ADR-0003.
 
       infra         - Terraform and CI. Retains access to every bucket.
-      app           - The core service. Documents only.
+      app           - The core service's documents, and xenopsbase-learn's
+                      course archives and unpacked course files (see the
+                      package buckets in main.tf for why they share it).
       db            - CloudNativePG. Database backups only.
       observability - Loki and Tempo. Log chunks and trace blocks only.
-      packaging     - xenopsbase-learn's packaging service. Course archives and
-                      unpacked course files only. Its own key rather than app's,
-                      because sharing one would let a leaked learn credential
-                      read core's documents and the reverse -- which is the
-                      whole reason these policies exist.
   EOT
   type = object({
     infra         = optional(string, "")
     app           = optional(string, "")
     db            = optional(string, "")
     observability = optional(string, "")
-    packaging     = optional(string, "")
   })
   default = {}
 
@@ -129,13 +146,11 @@ variable "access_keys" {
       var.access_keys.app,
       var.access_keys.db,
       var.access_keys.observability,
-      var.access_keys.packaging,
       ])) == length(distinct(compact([
         var.access_keys.infra,
         var.access_keys.app,
         var.access_keys.db,
         var.access_keys.observability,
-        var.access_keys.packaging,
     ])))
     error_message = "Two consumers share an access key. That defeats the isolation these policies exist to provide."
   }
