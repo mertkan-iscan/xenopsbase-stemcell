@@ -53,12 +53,23 @@ spec:
           # namespace is enrolled without that trade being made on purpose.
           failurePolicy: Fail
 
-          # Explicit, and modest. The chart's defaults are these; they are
-          # restated so a chart bump cannot change what this books without the
-          # diff saying so, and because nothing may run BestEffort (#364).
+          # Explicit, and modest. Restated so a chart bump cannot change what
+          # this books without the diff saying so, and because nothing may run
+          # BestEffort (#364).
+          #
+          # `cpu: null` IS LOAD BEARING. Helm merges these values INTO the
+          # chart's own, so leaving `cpu` out of `limits` did not remove the
+          # chart's 200m limit -- it kept it, silently. The webhook averages
+          # 0.05 cores but every Argo sync lands a burst of admissions at once,
+          # and at 200m it was throttled in a third of its CFS periods. Its
+          # probes have a 1s timeout, so throttling reads as unhealthy: the pod
+          # was restarted, the Service had no endpoints, and with
+          # failurePolicy Fail every sync that hit that window failed -- which is
+          # how `learn` came up after the 2026-09-13 rebuild without identity.
+          # null deletes the inherited key; the request still books 100m.
           resources:
             requests: {cpu: 100m, memory: 128Mi}
-            limits:   {memory: 512Mi}
+            limits:   {cpu: null, memory: 512Mi}
 
         # The webhook image is already digest-pinned by the chart. The
         # `leasescleanup` image is not -- it is `latest-dev` -- but it belongs to
